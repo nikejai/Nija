@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import '../../../core/localization/app_strings.dart';
+import 'widgets/vault_page_heading.dart';
 
 class NoteEditorScreen extends StatefulWidget {
   const NoteEditorScreen({super.key, this.initialNote, this.onAutoSave});
@@ -131,10 +132,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
                 child: TextField(
                   controller: _titleController,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: const Color(0xFF111827),
-                  ),
+                  style: vaultPageHeadingStyle(context),
                   decoration: const InputDecoration(
                     hintText: 'Untitled note',
                     hintStyle: TextStyle(
@@ -261,12 +259,13 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       _quillController.document.toPlainText().trim();
 
   List<String> _normalizedTags() {
-    final tags = _tags
-        .map((entry) => entry.trim().toLowerCase())
-        .where((entry) => entry.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
+    final tags =
+        _tags
+            .map((entry) => entry.trim().toLowerCase())
+            .where((entry) => entry.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
     return tags;
   }
 
@@ -311,7 +310,6 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   void _save() {
     _saveAndPop();
   }
-
 }
 
 class NoteViewScreen extends StatelessWidget {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'widgets/vault_page_heading.dart';
+
 class VaultFieldTemplate {
   const VaultFieldTemplate({
     required this.label,
@@ -229,7 +231,35 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       );
     }).toList();
 
-    return [...AddVaultItemScreen.templates, ...custom];
+    final templates = [...AddVaultItemScreen.templates, ...custom];
+    final initialType = widget.initialItem?['type']?.toString();
+    if (initialType == null ||
+        initialType.isEmpty ||
+        templates.any((template) => template.type == initialType)) {
+      return templates;
+    }
+
+    final fields = (widget.initialItem?['fields'] as List<dynamic>? ?? const [])
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .map(
+          (field) => VaultFieldTemplate(
+            label: field['label']?.toString() ?? 'Field',
+            sensitive: field['sensitive'] == true,
+          ),
+        )
+        .where((field) => field.label.trim().isNotEmpty)
+        .toList();
+
+    return [
+      ...templates,
+      VaultItemTemplate(
+        type: initialType,
+        fields: [
+          const VaultFieldTemplate(label: 'Title'),
+          ...fields.where((field) => field.label != 'Title'),
+        ],
+      ),
+    ];
   }
 
   VaultItemTemplate get _template =>
@@ -276,11 +306,16 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final lockTypeSelector =
-        widget.fixedType != null && widget.initialItem == null;
+    final showTypeSelector =
+        widget.fixedType == null && widget.initialItem == null;
+    final categoryColor = _colorForItemType(
+      _type,
+      widget.customTypeDefinitions,
+    );
+    final categoryIcon = _iconForItemType(_type, widget.customTypeDefinitions);
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.initialItem == null ? 'New ${_type}' : 'Edit item'),
+        title: Text(widget.initialItem == null ? 'New $_type' : 'Edit item'),
         leading: TextButton(
           onPressed: () => Navigator.of(context).maybePop(),
           style: TextButton.styleFrom(
@@ -291,9 +326,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
           child: const Text('Cancel'),
         ),
         leadingWidth: 86,
-        actions: [
-          const SizedBox.shrink(),
-        ],
+        actions: [const SizedBox.shrink()],
       ),
       body: SafeArea(
         child: ListView(
@@ -311,27 +344,28 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                           width: 34,
                           height: 34,
                           decoration: BoxDecoration(
-                            color: const Color(0xFFDCFCE7),
+                            color: categoryColor.withValues(alpha: 0.18),
                             borderRadius: BorderRadius.circular(9),
                           ),
                           child: Icon(
-                            _iconForCategoryType(_type),
-                            color: const Color(0xFF16A34A),
+                            categoryIcon,
+                            color: categoryColor,
                             size: 20,
                           ),
                         ),
                         const SizedBox(width: 10),
-                        Text(
-                          _type,
-                          style: const TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w700,
+                        Expanded(
+                          child: Text(
+                            _type,
+                            style: vaultPageHeadingStyle(context),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 14),
-                    if (!lockTypeSelector) ...[
+                    if (showTypeSelector) ...[
                       DropdownButtonFormField<String>(
                         initialValue: _type,
                         items: _allTemplates
@@ -403,7 +437,9 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         InkWell(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                           onTap: () {
                                             setState(() {
                                               if (isRevealed) {
@@ -428,10 +464,14 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                           ),
                                         ),
                                         InkWell(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                           onTap: () async {
                                             await Clipboard.setData(
-                                              ClipboardData(text: controller.text),
+                                              ClipboardData(
+                                                text: controller.text,
+                                              ),
                                             );
                                           },
                                           child: const Padding(
@@ -450,9 +490,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                     TextField(
                       controller: _tagsController,
                       onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        hintText: 'Add tags',
-                      ),
+                      decoration: const InputDecoration(hintText: 'Add tags'),
                     ),
                     const SizedBox(height: 14),
                     SizedBox(
@@ -515,6 +553,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
         .toList();
 
     Navigator.of(context).pop({
+      ...Map<String, dynamic>.from(widget.initialItem ?? const {}),
       'id':
           widget.initialItem?['id']?.toString() ??
           DateTime.now().millisecondsSinceEpoch.toString(),
@@ -586,7 +625,7 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
             child: ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
               itemCount: filtered.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              separatorBuilder: (context, index) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final option = filtered[index];
                 return Material(
@@ -606,15 +645,15 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                     subtitle: Text(option.subtitle),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () async {
-                      if (option.kind == 'note' && widget.onCreateNote != null) {
+                      if (option.kind == 'note' &&
+                          widget.onCreateNote != null) {
                         final createdNote = await widget.onCreateNote!.call();
                         if (createdNote == null || !context.mounted) return;
                         await _showSavedSuccessSheet(context);
                         if (!context.mounted) return;
-                        Navigator.of(context).pop({
-                          'kind': 'note',
-                          'entry': createdNote,
-                        });
+                        Navigator.of(
+                          context,
+                        ).pop({'kind': 'note', 'entry': createdNote});
                         return;
                       }
                       final createdItem = await Navigator.of(context)
@@ -630,10 +669,9 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                       if (createdItem == null || !context.mounted) return;
                       await _showSavedSuccessSheet(context);
                       if (!context.mounted) return;
-                      Navigator.of(context).pop({
-                        'kind': 'item',
-                        'entry': createdItem,
-                      });
+                      Navigator.of(
+                        context,
+                      ).pop({'kind': 'item', 'entry': createdItem});
                     },
                   ),
                 );
@@ -740,11 +778,13 @@ List<_CategoryOption> _buildCategoryOptions(
           type: definition['name']?.toString() ?? 'Custom',
           subtitle: 'Create your own template',
           icon: _iconForCustomTemplateKey(definition['iconKey']?.toString()),
-          color: _colorForCustomTemplateKey(definition['iconKey']?.toString()),
+          color: _colorForCustomTemplateColorKey(
+            definition['colorKey']?.toString(),
+          ),
         ),
       )
       .toList();
-  return [note, ...builtIn, ...custom];
+  return [note, ...custom, ...builtIn];
 }
 
 String _subtitleForType(String type) {
@@ -785,6 +825,31 @@ IconData _iconForCategoryType(String type) {
   return Icons.shield_outlined;
 }
 
+Map<String, dynamic>? _customTypeDefinitionForType(
+  String type,
+  List<Map<String, dynamic>> definitions,
+) {
+  final normalized = type.trim().toLowerCase();
+  if (normalized.isEmpty) return null;
+  for (final definition in definitions) {
+    final name = definition['name']?.toString().trim().toLowerCase();
+    if (name == normalized) return definition;
+  }
+  return null;
+}
+
+IconData _iconForItemType(
+  String type,
+  List<Map<String, dynamic>> customTypeDefinitions,
+) {
+  final iconKey = _customTypeDefinitionForType(
+    type,
+    customTypeDefinitions,
+  )?['iconKey']?.toString();
+  if (iconKey != null) return _iconForCustomTemplateKey(iconKey);
+  return _iconForCategoryType(type);
+}
+
 Color _colorForCategoryType(String type) {
   final normalized = type.toLowerCase();
   if (normalized.contains('password') || normalized.contains('login')) {
@@ -802,6 +867,18 @@ Color _colorForCategoryType(String type) {
   }
   if (normalized.contains('health')) return const Color(0xFFF472B6);
   return const Color(0xFF93C5FD);
+}
+
+Color _colorForItemType(
+  String type,
+  List<Map<String, dynamic>> customTypeDefinitions,
+) {
+  final colorKey = _customTypeDefinitionForType(
+    type,
+    customTypeDefinitions,
+  )?['colorKey']?.toString();
+  if (colorKey != null) return _colorForCustomTemplateColorKey(colorKey);
+  return _colorForCategoryType(type);
 }
 
 IconData _iconForCustomTemplateKey(String? key) {
@@ -822,29 +899,99 @@ IconData _iconForCustomTemplateKey(String? key) {
       return Icons.star_outline;
     case 'spark':
       return Icons.auto_awesome_outlined;
+    case 'key':
+      return Icons.key_outlined;
+    case 'password':
+      return Icons.password_outlined;
+    case 'credit_card':
+      return Icons.credit_card;
+    case 'bank':
+      return Icons.account_balance_outlined;
+    case 'receipt':
+      return Icons.receipt_long_outlined;
+    case 'car':
+      return Icons.directions_car_outlined;
+    case 'home':
+      return Icons.home_outlined;
+    case 'work':
+      return Icons.work_outline;
+    case 'travel':
+      return Icons.flight_takeoff_outlined;
+    case 'passport':
+      return Icons.airplane_ticket_outlined;
+    case 'calendar':
+      return Icons.event_outlined;
+    case 'phone':
+      return Icons.phone_iphone_outlined;
+    case 'email':
+      return Icons.alternate_email;
+    case 'wifi':
+      return Icons.wifi_outlined;
+    case 'server':
+      return Icons.dns_outlined;
+    case 'code':
+      return Icons.code_outlined;
+    case 'database':
+      return Icons.storage_outlined;
+    case 'cloud':
+      return Icons.cloud_outlined;
+    case 'medical':
+      return Icons.medical_services_outlined;
+    case 'pet':
+      return Icons.pets_outlined;
+    case 'school':
+      return Icons.school_outlined;
+    case 'shopping':
+      return Icons.shopping_bag_outlined;
+    case 'gift':
+      return Icons.card_giftcard_outlined;
+    case 'photo':
+      return Icons.photo_outlined;
+    case 'link':
+      return Icons.link_outlined;
     default:
       return Icons.auto_awesome_outlined;
   }
 }
 
-Color _colorForCustomTemplateKey(String? key) {
+Color _colorForCustomTemplateColorKey(String? key) {
   switch (key) {
-    case 'lock':
-      return const Color(0xFF60A5FA);
-    case 'note':
-      return const Color(0xFFFBBF24);
-    case 'id':
-      return const Color(0xFF34D399);
-    case 'wallet':
-      return const Color(0xFF22C55E);
-    case 'folder':
-      return const Color(0xFFFB923C);
-    case 'heart':
-      return const Color(0xFFF472B6);
-    case 'star':
-      return const Color(0xFFF59E0B);
-    case 'spark':
+    case 'purple':
+      return const Color(0xFF8B5CF6);
+    case 'indigo':
       return const Color(0xFF6366F1);
+    case 'blue':
+      return const Color(0xFF60A5FA);
+    case 'sky':
+      return const Color(0xFF38BDF8);
+    case 'cyan':
+      return const Color(0xFF22D3EE);
+    case 'teal':
+      return const Color(0xFF2DD4BF);
+    case 'green':
+      return const Color(0xFF4ADE80);
+    case 'emerald':
+      return const Color(0xFF10B981);
+    case 'lime':
+      return const Color(0xFFA3E635);
+    case 'amber':
+      return const Color(0xFFFBBF24);
+    case 'yellow':
+      return const Color(0xFFFDE047);
+    case 'orange':
+      return const Color(0xFFFB923C);
+    case 'red':
+      return const Color(0xFFF87171);
+    case 'rose':
+      return const Color(0xFFFB7185);
+    case 'pink':
+      return const Color(0xFFF472B6);
+    case 'fuchsia':
+      return const Color(0xFFE879F9);
+    case 'slate':
+      return const Color(0xFF64748B);
+    case 'gray':
+      return const Color(0xFF9CA3AF);
     default:
       return const Color(0xFF6366F1);
   }
