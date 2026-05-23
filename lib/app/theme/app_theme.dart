@@ -22,10 +22,27 @@ class AppTheme {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         shadowColor: Colors.transparent,
+      ),
+      appBarTheme: const AppBarThemeData(
+        backgroundColor: Colors.white,
+        foregroundColor: AppColors.textPrimary,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        titleTextStyle: TextStyle(
+          color: AppColors.textPrimary,
+          fontFamily: 'Geist',
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
+        toolbarTextStyle: TextStyle(
+          color: AppColors.textPrimary,
+          fontFamily: 'Geist',
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+        ),
       ),
       textTheme: const TextTheme(
         headlineLarge: TextStyle(
@@ -73,7 +90,7 @@ class AppTheme {
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: AppColors.textSecondary,
-          minimumSize: const Size.fromHeight(48),
+          minimumSize: const Size(64, 40),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
         ),
       ),
@@ -110,10 +127,18 @@ class AppTheme {
           ),
         ),
         textStyle: const WidgetStatePropertyAll(
-          TextStyle(fontSize: 14, color: Color(0xFF171717), fontWeight: FontWeight.w500),
+          TextStyle(
+            fontSize: 14,
+            color: Color(0xFF171717),
+            fontWeight: FontWeight.w500,
+          ),
         ),
         hintStyle: const WidgetStatePropertyAll(
-          TextStyle(fontSize: 14, color: Color(0xFF71717A), fontWeight: FontWeight.w400),
+          TextStyle(
+            fontSize: 14,
+            color: Color(0xFF71717A),
+            fontWeight: FontWeight.w400,
+          ),
         ),
         padding: const WidgetStatePropertyAll(
           EdgeInsets.symmetric(horizontal: 10),
@@ -170,7 +195,10 @@ class AppTheme {
           fontSize: 14,
           overflow: TextOverflow.ellipsis,
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
       ),
     );
   }

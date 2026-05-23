@@ -15,6 +15,8 @@ import '../../../infrastructure/adapters/secret_share_portability_base.dart';
 import 'add_vault_item_screen.dart';
 import 'create_custom_type_screen.dart';
 import 'note_editor_screen.dart';
+import 'widgets/vault_entry_list.dart';
+import 'widgets/vault_page_heading.dart';
 
 typedef BiometricChanged = void Function(bool enabled);
 typedef LanguageModeChanged = void Function(String mode);
@@ -135,6 +137,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   late final List<Map<String, dynamic>> _customTypeDefinitions;
   late final List<Map<String, dynamic>> _items;
   late final List<Map<String, dynamic>> _notes;
+  late final List<VaultListEntryAdapter> _vaultListEntryAdapters;
 
   List<_IndexedEntry> _lastDeletedAllItems = <_IndexedEntry>[];
   Map<String, bool> _lastPinnedStateItemById = <String, bool>{};
@@ -153,6 +156,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
     _notes = widget.initialNotes
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList();
+    _vaultListEntryAdapters = [
+      VaultItemListEntryAdapter(
+        iconForType: _iconForDashboardType,
+        colorForType: _colorForDashboardType,
+      ),
+      const VaultNoteListEntryAdapter(),
+    ];
     if (_notes.isEmpty) {
       _notes.add(_buildRecoveryPhraseNote());
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -251,7 +261,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
           data: NavigationBarThemeData(
             backgroundColor: Colors.white,
             indicatorColor: Colors.transparent,
-            labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((states) {
+            labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
+              states,
+            ) {
               if (states.contains(WidgetState.selected)) {
                 return const TextStyle(
                   color: Color(0xFF6366F1),
@@ -308,16 +320,21 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Widget _buildVaultTab(BuildContext context) {
-    final recentAll = <Map<String, dynamic>>[
-      ..._items.map((item) => <String, dynamic>{'kind': 'item', 'entry': item}),
-      ..._notes.map((note) => <String, dynamic>{'kind': 'note', 'entry': note}),
-    ]..sort((a, b) {
-        final av = a['entry'] as Map<String, dynamic>;
-        final bv = b['entry'] as Map<String, dynamic>;
-        return _updatedSortValue(
-          bv['updated']?.toString() ?? '',
-        ).compareTo(_updatedSortValue(av['updated']?.toString() ?? ''));
-      });
+    final recentAll =
+        <Map<String, dynamic>>[
+          ..._items.map(
+            (item) => <String, dynamic>{'kind': 'item', 'entry': item},
+          ),
+          ..._notes.map(
+            (note) => <String, dynamic>{'kind': 'note', 'entry': note},
+          ),
+        ]..sort((a, b) {
+          final av = a['entry'] as Map<String, dynamic>;
+          final bv = b['entry'] as Map<String, dynamic>;
+          return _lastAccessedSortValue(
+            bv,
+          ).compareTo(_lastAccessedSortValue(av));
+        });
     final recentItems = recentAll.take(4).toList();
     final typeCounts = <String, int>{};
     for (final item in _items) {
@@ -332,229 +349,166 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
     return SafeArea(
       child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    'Nija',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: const Color(0xFF111827),
-                      fontWeight: FontWeight.w700,
-                    ),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('Nija', style: vaultPageHeadingStyle(context)),
+                const Spacer(),
+                IconButton(
+                  onPressed: () => _openAddItemScreen(context),
+                  icon: const Icon(Icons.add, color: Color(0xFF6B7280)),
+                  tooltip: 'Create',
+                ),
+                IconButton(
+                  onPressed: widget.onLockNow,
+                  icon: const Icon(
+                    Icons.lock_outline,
+                    color: Color(0xFF6B7280),
                   ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => _openAddItemScreen(context),
-                    icon: const Icon(Icons.add, color: Color(0xFF6B7280)),
-                    tooltip: 'Create',
-                  ),
-                  IconButton(
-                    onPressed: widget.onLockNow,
-                    icon: const Icon(Icons.lock_outline, color: Color(0xFF6B7280)),
-                  ),
-                ],
-              ),
-              Text(
-                'All your important information,\nin one secure place.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF6B7280)),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      style: const TextStyle(color: Color(0xFF111827)),
-                      decoration: InputDecoration(
-                        hintText: 'Search your data...',
-                        hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
-                        prefixIcon: const Icon(
-                          Icons.search,
-                          color: Color(0xFF9CA3AF),
-                        ),
-                        filled: true,
-                        fillColor: const Color(0xFFF3F4F6),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                ),
+              ],
+            ),
+            Text(
+              'All your important information,\nin one secure place.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF6B7280)),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    style: const TextStyle(color: Color(0xFF111827)),
+                    decoration: InputDecoration(
+                      hintText: 'Search your data...',
+                      hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        color: Color(0xFF9CA3AF),
                       ),
-                      onChanged: (value) => setState(() => _query = value),
+                      filled: true,
+                      fillColor: const Color(0xFFF3F4F6),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 0),
                     ),
+                    onChanged: (value) => setState(() => _query = value),
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: IconButton(
-                      onPressed: () =>
-                          _openAllItemsFiltersOverlay(_allTypeFilterOptions()),
-                      icon: const Icon(Icons.tune, color: Color(0xFF6B7280)),
-                    ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView(
-                  children: [
-                    GridView.builder(
+                  child: IconButton(
+                    onPressed: () =>
+                        _openAllItemsFiltersOverlay(_allTypeFilterOptions()),
+                    icon: const Icon(Icons.tune, color: Color(0xFF6B7280)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView(
+                children: [
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
+                          childAspectRatio: 1.45,
+                        ),
+                    itemCount: dashboardTypes.take(6).length,
+                    itemBuilder: (context, index) {
+                      final entry = dashboardTypes[index];
+                      return _HomeTypeCard(
+                        label: entry.key,
+                        count: entry.value,
+                        icon: _iconForDashboardType(entry.key),
+                        accent: _colorForDashboardType(entry.key),
+                        onTap: () {
+                          setState(() {
+                            _allItemsTypeFilter = entry.key;
+                            _tabIndex = 1;
+                          });
+                        },
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Text(
+                        'Recent',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: const Color(0xFF111827),
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const Spacer(),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => setState(() => _tabIndex = 1),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          child: Text(
+                            'View all',
+                            style: TextStyle(color: Color(0xFF4F46E5)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  if (recentItems.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE5E7EB)),
+                      ),
+                      child: const Text(
+                        'No recent items yet.',
+                        style: TextStyle(color: Color(0xFF6B7280)),
+                      ),
+                    )
+                  else
+                    VaultEntryList(
+                      rows: recentItems,
+                      adapters: _vaultListEntryAdapters,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            mainAxisSpacing: 8,
-                            crossAxisSpacing: 8,
-                            childAspectRatio: 1.45,
-                          ),
-                      itemCount: dashboardTypes.take(6).length,
-                      itemBuilder: (context, index) {
-                        final entry = dashboardTypes[index];
-                        return _HomeTypeCard(
-                          label: entry.key,
-                          count: entry.value,
-                          icon: _iconForHomeType(entry.key),
-                          accent: _colorForHomeType(entry.key),
-                          onTap: () {
-                            setState(() {
-                              _allItemsTypeFilter = entry.key;
-                              _tabIndex = 1;
-                            });
-                          },
-                        );
-                      },
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      iconAlpha: 0.2,
+                      rowPadding: const EdgeInsets.all(12),
+                      trailingMode: VaultEntryTrailingMode.chevron,
+                      keyForRow: _vaultListKeyForRow,
+                      onTap: (row) => _openVaultListRow(context, row),
+                      onLongPress: (row) =>
+                          _showVaultListRowQuickActions(context, row),
                     ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Text(
-                          'Recent',
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: const Color(0xFF111827),
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                        const Spacer(),
-                        InkWell(
-                          borderRadius: BorderRadius.circular(8),
-                          onTap: () => setState(() => _tabIndex = 1),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 6,
-                            ),
-                            child: Text(
-                              'View all',
-                              style: TextStyle(color: Color(0xFF4F46E5)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    if (recentItems.isEmpty)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF3F4F6),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: const Text(
-                          'No recent items yet.',
-                          style: TextStyle(color: Color(0xFF6B7280)),
-                        ),
-                      )
-                    else
-                      ...recentItems.map(
-                        (row) {
-                          final kind = row['kind']?.toString() ?? 'item';
-                          final item = row['entry'] as Map<String, dynamic>;
-                          final isNote = kind == 'note';
-                          final type = isNote
-                              ? 'Notes'
-                              : (item['type']?.toString() ?? 'Unknown');
-                          return Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Material(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(14),
-                              onTap: () => isNote
-                                  ? _openNoteDetail(context, item)
-                                  : _openItemDetail(context, item),
-                              onLongPress: () => isNote
-                                  ? _showNoteQuickActions(context, item)
-                                  : _showItemQuickActions(context, item),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 28,
-                                      height: 28,
-                                      decoration: BoxDecoration(
-                                        color: _colorForHomeType(
-                                          type,
-                                        ).withValues(alpha: 0.2),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                        child: Icon(
-                                          _iconForHomeType(type),
-                                          size: 16,
-                                          color: _colorForHomeType(type),
-                                        ),
-                                      ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            item['title']?.toString() ?? '',
-                                            style: const TextStyle(
-                                              color: Color(0xFF111827),
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                          Text(
-                                            '$type · ${item['updated']?.toString() ?? 'Now'}',
-                                            style: const TextStyle(
-                                              color: Color(0xFF6B7280),
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const Icon(
-                                      Icons.chevron_right,
-                                      color: Color(0xFF9CA3AF),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                        },
-                      ),
-                  ],
-                ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -599,7 +553,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       children: [
                         Text(
                           AppStrings.tabNotes,
-                          style: Theme.of(context).textTheme.titleLarge,
+                          style: vaultPageHeadingStyle(context),
                         ),
                         const SizedBox(width: 6),
                         InkWell(
@@ -930,9 +884,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 ? entry['type'].toString().trim()
                 : 'Unknown');
       final title = entry['title']?.toString().toLowerCase() ?? '';
-      final subtitle = (kind == 'note'
-              ? entry['preview']?.toString()
-              : entry['subtitle']?.toString())?.toLowerCase() ??
+      final subtitle =
+          (kind == 'note'
+                  ? entry['preview']?.toString()
+                  : entry['subtitle']?.toString())
+              ?.toLowerCase() ??
           '';
       final matchesQuery =
           query.isEmpty || title.contains(query) || subtitle.contains(query);
@@ -944,7 +900,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
           _allItemsTypeFilter == 'all' || _allItemsTypeFilter == type;
       final matchesOverlayType =
           _allItemsFilterTypes.isEmpty || _allItemsFilterTypes.contains(type);
-      final matchesFavorite = !_allItemsFilterFavoritesOnly || entry['pinned'] == true;
+      final matchesFavorite =
+          !_allItemsFilterFavoritesOnly || entry['pinned'] == true;
       final matchesDate = _matchesAllItemsDateFilter(
         entry['updated']?.toString() ?? '',
       );
@@ -957,320 +914,198 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }).toList();
     return SafeArea(
       child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  if (_allItemsSelectionMode)
-                    InkWell(
-                      borderRadius: BorderRadius.circular(8),
-                      onTap: _clearAllItemsSelection,
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                        child: Text(
-                          'Cancel',
-                          style: TextStyle(
-                            color: Color(0xFF6366F1),
-                            fontWeight: FontWeight.w600,
-                          ),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (_allItemsSelectionMode)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: _clearAllItemsSelection,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: Color(0xFF6366F1),
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    )
-                  else
-                    Text(
-                      'All Items',
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(
-                            color: const Color(0xFF111827),
-                            fontWeight: FontWeight.w700,
-                          ),
                     ),
-                  const Spacer(),
-                  if (_allItemsSelectionMode)
-                    Text(
-                      '${_selectedAllItemsKeys.length} Selected',
-                      style: const TextStyle(
-                        color: Color(0xFF111827),
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  const Spacer(),
-                  if (_allItemsSelectionMode)
-                    const SizedBox.shrink()
-                  else
-                    IconButton(
-                      onPressed: () => _openAddItemScreen(context),
-                      icon: const Icon(Icons.add, color: Color(0xFF6B7280)),
-                    ),
-                ],
-              ),
-              if (!_allItemsSelectionMode)
-                Text(
-                  '${filtered.length} items',
-                  style: const TextStyle(color: Color(0xFF6B7280)),
-                ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      style: const TextStyle(color: Color(0xFF111827)),
-                      decoration: InputDecoration(
-                        hintText: 'Search all items...',
-                        hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
-                        prefixIcon: const Icon(
-                          Icons.search,
-                          color: Color(0xFF9CA3AF),
-                        ),
-                        filled: true,
-                        fillColor: const Color(0xFFF3F4F6),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                      ),
-                      onChanged: (value) => setState(() => _allItemsQuery = value),
+                  )
+                else
+                  Text('All Items', style: vaultPageHeadingStyle(context)),
+                const Spacer(),
+                if (_allItemsSelectionMode)
+                  Text(
+                    '${_selectedAllItemsKeys.length} Selected',
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  if (!_allItemsSelectionMode)
-                    Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF3F4F6),
-                        borderRadius: BorderRadius.circular(14),
+                const Spacer(),
+                if (_allItemsSelectionMode)
+                  const SizedBox.shrink()
+                else
+                  IconButton(
+                    onPressed: () => _openAddItemScreen(context),
+                    icon: const Icon(Icons.add, color: Color(0xFF6B7280)),
+                  ),
+              ],
+            ),
+            if (!_allItemsSelectionMode)
+              Text(
+                '${filtered.length} items',
+                style: const TextStyle(color: Color(0xFF6B7280)),
+              ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    style: const TextStyle(color: Color(0xFF111827)),
+                    decoration: InputDecoration(
+                      hintText: 'Search all items...',
+                      hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        color: Color(0xFF9CA3AF),
                       ),
-                      child: IconButton(
-                        onPressed: () => _openAllItemsFiltersOverlay(
-                          sortedTypeOptions.where((t) => t != 'all').toList(),
+                      filled: true,
+                      fillColor: const Color(0xFFF3F4F6),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _allItemsQuery = value),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (!_allItemsSelectionMode)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: IconButton(
+                      onPressed: () => _openAllItemsFiltersOverlay(
+                        sortedTypeOptions.where((t) => t != 'all').toList(),
+                      ),
+                      icon: const Icon(Icons.tune, color: Color(0xFF6B7280)),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: sortedTypeOptions.map((type) {
+                  final selected = _allItemsTypeFilter == type;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(type == 'all' ? 'All' : type),
+                      selected: selected,
+                      onSelected: (_) =>
+                          setState(() => _allItemsTypeFilter = type),
+                      backgroundColor: const Color(0xFFF3F4F6),
+                      selectedColor: const Color(0xFFE0E7FF),
+                      labelStyle: TextStyle(
+                        color: selected
+                            ? const Color(0xFF3730A3)
+                            : const Color(0xFF6B7280),
+                      ),
+                      side: BorderSide.none,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (_activeAllItemsFilterChips().isNotEmpty) ...[
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ..._activeAllItemsFilterChips().map(
+                    (chip) => _TinyChip(label: chip),
+                  ),
+                  InkWell(
+                    onTap: _clearAllItemsOverlayFilters,
+                    borderRadius: BorderRadius.circular(8),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Text(
+                        'Clear all',
+                        style: TextStyle(
+                          color: Color(0xFF4F46E5),
+                          fontSize: 12,
                         ),
-                        icon: const Icon(Icons.tune, color: Color(0xFF6B7280)),
                       ),
                     ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 10),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: sortedTypeOptions.map((type) {
-                    final selected = _allItemsTypeFilter == type;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(
-                        label: Text(type),
-                        selected: selected,
-                        onSelected: (_) => setState(
-                          () => _allItemsTypeFilter = type,
-                        ),
-                        backgroundColor: const Color(0xFFF3F4F6),
-                        selectedColor: const Color(0xFFE0E7FF),
-                        labelStyle: TextStyle(
-                          color: selected
-                              ? const Color(0xFF3730A3)
-                              : const Color(0xFF6B7280),
-                        ),
-                        side: BorderSide.none,
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
               const SizedBox(height: 8),
-              if (_activeAllItemsFilterChips().isNotEmpty) ...[
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    ..._activeAllItemsFilterChips().map(
-                      (chip) => _TinyChip(label: chip),
-                    ),
-                    InkWell(
-                      onTap: _clearAllItemsOverlayFilters,
-                      borderRadius: BorderRadius.circular(8),
-                      child: const Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        child: Text(
-                          'Clear all',
-                          style: TextStyle(color: Color(0xFF4F46E5), fontSize: 12),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-              ],
-              if (!_allItemsSelectionMode)
-                const Text(
-                  'Sort by: Modified (newest)',
-                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
-                ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: filtered.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No items found.',
-                          style: TextStyle(color: Color(0xFF6B7280)),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: filtered.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 6),
-                        itemBuilder: (context, index) {
-                          final row = filtered[index];
-                          final kind = row['kind']?.toString() ?? 'item';
-                          final entry = row['entry'] as Map<String, dynamic>;
-                          final isNote = kind == 'note';
-                          final type = isNote
-                              ? 'Notes'
-                              : (entry['type']?.toString() ?? 'Unknown');
-                          final subtitle = isNote
-                              ? entry['preview']?.toString() ?? ''
-                              : entry['subtitle']?.toString() ?? '';
-                          final updated = entry['updated']?.toString() ?? 'Now';
-                          final selected = _selectedAllItemsKeys.contains(
-                            _allItemsSelectionKey(row),
-                          );
-                          return Material(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(12),
-                              onTap: () {
-                                if (_allItemsSelectionMode) {
-                                  _toggleAllItemsSelection(row);
-                                  return;
-                                }
-                                if (isNote) {
-                                  _openNoteDetail(context, entry);
-                                } else {
-                                  _openItemDetail(context, entry);
-                                }
-                              },
-                              onLongPress: () {
-                                if (_allItemsSelectionMode) {
-                                  _toggleAllItemsSelection(row);
-                                  return;
-                                }
-                                _enterAllItemsSelectionMode(row);
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
-                                child: Row(
-                                  children: [
-                                    if (_allItemsSelectionMode)
-                                      Icon(
-                                        selected
-                                            ? Icons.check_circle
-                                            : Icons.radio_button_unchecked,
-                                        color: selected
-                                            ? const Color(0xFF6366F1)
-                                            : const Color(0xFF9CA3AF),
-                                      )
-                                    else
-                                      Container(
-                                        width: 28,
-                                        height: 28,
-                                        decoration: BoxDecoration(
-                                          color: _colorForHomeType(type).withValues(
-                                            alpha: 0.28,
-                                          ),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Icon(
-                                          _iconForHomeType(type),
-                                          color: _colorForHomeType(type),
-                                          size: 16,
-                                        ),
-                                      ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            entry['title']?.toString() ?? '',
-                                            style: const TextStyle(
-                                              color: Color(0xFF111827),
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            '$type · $updated',
-                                            style: const TextStyle(
-                                              color: Color(0xFF6B7280),
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                          if (subtitle.isNotEmpty)
-                                            Text(
-                                              subtitle,
-                                              style: const TextStyle(
-                                                color: Color(0xFF6B7280),
-                                                fontSize: 12,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                    if (!_allItemsSelectionMode &&
-                                        entry['pinned'] == true)
-                                      const Padding(
-                                        padding: EdgeInsets.only(right: 4),
-                                        child: Icon(
-                                          Icons.star,
-                                          color: Color(0xFFF59E0B),
-                                          size: 14,
-                                        ),
-                                      ),
-                                    if (_allItemsSelectionMode)
-                                      const Icon(
-                                        Icons.chevron_right,
-                                        color: Color(0xFF9CA3AF),
-                                        size: 18,
-                                      )
-                                    else
-                                      IconButton(
-                                        onPressed: () => isNote
-                                            ? _showNoteQuickActions(context, entry)
-                                            : _showItemQuickActions(context, entry),
-                                        icon: const Icon(
-                                          Icons.more_vert,
-                                          color: Color(0xFF9CA3AF),
-                                          size: 18,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              if (_allItemsSelectionMode)
-                _AllItemsSelectionActionBar(
-                  onShare: _showSelectionActionComingSoon,
-                  onMove: _showSelectionActionComingSoon,
-                  onLock: _showSelectionActionComingSoon,
-                  onDelete: _deleteSelectedAllItems,
-                  onMore: _showAllItemsMoreActions,
-                ),
             ],
-          ),
+            if (!_allItemsSelectionMode)
+              const Text(
+                'Sort by: Modified (newest)',
+                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: filtered.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No items found.',
+                        style: TextStyle(color: Color(0xFF6B7280)),
+                      ),
+                    )
+                  : VaultEntryList(
+                      rows: filtered,
+                      adapters: _vaultListEntryAdapters,
+                      selectionMode: _allItemsSelectionMode,
+                      selectedKeys: _selectedAllItemsKeys,
+                      keyForRow: _allItemsSelectionKey,
+                      trailingMode: _allItemsSelectionMode
+                          ? VaultEntryTrailingMode.chevron
+                          : VaultEntryTrailingMode.more,
+                      onTap: (row) {
+                        if (_allItemsSelectionMode) {
+                          _toggleAllItemsSelection(row);
+                          return;
+                        }
+                        _openVaultListRow(context, row);
+                      },
+                      onLongPress: (row) {
+                        if (_allItemsSelectionMode) {
+                          _toggleAllItemsSelection(row);
+                          return;
+                        }
+                        _enterAllItemsSelectionMode(row);
+                      },
+                      onMoreTap: (row) =>
+                          _showVaultListRowQuickActions(context, row),
+                    ),
+            ),
+            if (_allItemsSelectionMode)
+              _AllItemsSelectionActionBar(
+                onShare: _showSelectionActionComingSoon,
+                onMove: _showSelectionActionComingSoon,
+                onLock: _showSelectionActionComingSoon,
+                onDelete: _deleteSelectedAllItems,
+                onMore: _showAllItemsMoreActions,
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1284,23 +1119,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
         .where((note) => note['pinned'] == true)
         .map((note) => <String, dynamic>{'kind': 'note', 'entry': note})
         .toList();
-    final allFavorites = <Map<String, dynamic>>[
-      ...favoriteItems,
-      ...favoriteNotes,
-    ]..sort((a, b) {
-        final av = a['entry'] as Map<String, dynamic>;
-        final bv = b['entry'] as Map<String, dynamic>;
-        return _updatedSortValue(
-          bv['updated']?.toString() ?? '',
-        ).compareTo(_updatedSortValue(av['updated']?.toString() ?? ''));
-      });
+    final allFavorites =
+        <Map<String, dynamic>>[...favoriteItems, ...favoriteNotes]
+          ..sort((a, b) {
+            final av = a['entry'] as Map<String, dynamic>;
+            final bv = b['entry'] as Map<String, dynamic>;
+            return _updatedSortValue(
+              bv['updated']?.toString() ?? '',
+            ).compareTo(_updatedSortValue(av['updated']?.toString() ?? ''));
+          });
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionHeader(title: AppStrings.tabNotes, subtitle: 'Starred secrets'),
+          _SectionHeader(
+            title: AppStrings.tabNotes,
+            subtitle: 'Starred secrets',
+          ),
           const SizedBox(height: 10),
           Expanded(
             child: allFavorites.isEmpty
@@ -1308,109 +1145,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
                     title: 'No favorites yet',
                     subtitle: 'Star items from quick actions to see them here.',
                   )
-                : ListView.separated(
-                    itemCount: allFavorites.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (context, index) {
-                      final row = allFavorites[index];
-                      final isNote = row['kind'] == 'note';
-                      final entry = row['entry'] as Map<String, dynamic>;
-                      final type = isNote
-                          ? 'Notes'
-                          : (entry['type']?.toString() ?? 'Unknown');
-                      final subtitle = isNote
-                          ? entry['preview']?.toString() ?? ''
-                          : entry['subtitle']?.toString() ?? '';
-                      final updated = entry['updated']?.toString() ?? 'Now';
-                      return Material(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () => isNote
-                              ? _openNoteDetail(context, entry)
-                              : _openItemDetail(context, entry),
-                          onLongPress: () => isNote
-                              ? _showNoteQuickActions(context, entry)
-                              : _showItemQuickActions(context, entry),
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 28,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: _colorForHomeType(type).withValues(
-                                      alpha: 0.28,
-                                    ),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Icon(
-                                    _iconForHomeType(type),
-                                    color: _colorForHomeType(type),
-                                    size: 16,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        entry['title']?.toString() ?? '',
-                                        style: const TextStyle(
-                                          color: Color(0xFF111827),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '$type · $updated',
-                                        style: const TextStyle(
-                                          color: Color(0xFF6B7280),
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      if (subtitle.isNotEmpty)
-                                        Text(
-                                          subtitle,
-                                          style: const TextStyle(
-                                            color: Color(0xFF6B7280),
-                                            fontSize: 12,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                                const Padding(
-                                  padding: EdgeInsets.only(right: 4),
-                                  child: Icon(
-                                    Icons.star,
-                                    color: Color(0xFFF59E0B),
-                                    size: 14,
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: () => isNote
-                                      ? _showNoteQuickActions(context, entry)
-                                      : _showItemQuickActions(context, entry),
-                                  icon: const Icon(
-                                    Icons.more_vert,
-                                    color: Color(0xFF9CA3AF),
-                                    size: 18,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
+                : VaultEntryList(
+                    rows: allFavorites,
+                    adapters: _vaultListEntryAdapters,
+                    keyForRow: _vaultListKeyForRow,
+                    trailingMode: VaultEntryTrailingMode.more,
+                    forceFavoriteIndicator: true,
+                    onTap: (row) => _openVaultListRow(context, row),
+                    onLongPress: (row) =>
+                        _showVaultListRowQuickActions(context, row),
+                    onMoreTap: (row) =>
+                        _showVaultListRowQuickActions(context, row),
                   ),
           ),
         ],
@@ -1418,10 +1163,49 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
+  String _vaultListKeyForRow(Map<String, dynamic> row) {
+    final kind = row['kind']?.toString() ?? 'item';
+    final entry = row['entry'] as Map<String, dynamic>;
+    final id = entry['id']?.toString() ?? '';
+    return '$kind:$id';
+  }
+
+  void _openVaultListRow(BuildContext context, Map<String, dynamic> row) {
+    final kind = row['kind']?.toString() ?? 'item';
+    final entry = row['entry'] as Map<String, dynamic>;
+    if (kind == 'note') {
+      _openNoteDetail(context, entry);
+    } else {
+      _openItemDetail(context, entry);
+    }
+  }
+
+  void _showVaultListRowQuickActions(
+    BuildContext context,
+    Map<String, dynamic> row,
+  ) {
+    final kind = row['kind']?.toString() ?? 'item';
+    final entry = row['entry'] as Map<String, dynamic>;
+    if (kind == 'note') {
+      _showNoteQuickActions(context, entry);
+    } else {
+      _showItemQuickActions(context, entry);
+    }
+  }
+
   int _updatedSortValue(String text) {
     final digits = RegExp(r'\d+').firstMatch(text)?.group(0);
     if (digits == null) return 0;
     return int.tryParse(digits) ?? 0;
+  }
+
+  int _lastAccessedSortValue(Map<String, dynamic> entry) {
+    final lastAccessedAt = entry['lastAccessedAt']?.toString().trim() ?? '';
+    if (lastAccessedAt.isNotEmpty) {
+      final parsed = DateTime.tryParse(lastAccessedAt);
+      if (parsed != null) return parsed.millisecondsSinceEpoch;
+    }
+    return _updatedRank(entry);
   }
 
   int? _updatedAgeDays(String text) {
@@ -1472,6 +1256,30 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _allItemsFilterFavoritesOnly = false;
       _allItemsFilterDateRange = 'any';
     });
+  }
+
+  Map<String, dynamic>? _customTypeDefinitionForType(String type) {
+    final normalized = type.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    for (final definition in _customTypeDefinitions) {
+      final name = definition['name']?.toString().trim().toLowerCase();
+      if (name == normalized) return definition;
+    }
+    return null;
+  }
+
+  IconData _iconForDashboardType(String type) {
+    final definition = _customTypeDefinitionForType(type);
+    final iconKey = definition?['iconKey']?.toString();
+    if (iconKey != null) return _iconForCustomTemplateKey(iconKey);
+    return _iconForHomeType(type);
+  }
+
+  Color _colorForDashboardType(String type) {
+    final definition = _customTypeDefinitionForType(type);
+    final colorKey = definition?['colorKey']?.toString();
+    if (colorKey != null) return _colorForCustomTemplateColorKey(colorKey);
+    return _colorForHomeType(type);
   }
 
   Future<void> _openAllItemsFiltersOverlay(List<String> typeOptions) async {
@@ -1936,10 +1744,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
     BuildContext context,
     Map<String, dynamic> item,
   ) async {
+    final accessedItem = _markItemLastAccessed(item);
     final result = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => _ItemDetailScreen(
-          item: item,
+          item: accessedItem,
           customTypeDefinitions: _customTypeDefinitions,
           showDeleteAction: true,
           onCopy: (value) async {
@@ -1959,7 +1768,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
     if (result == null) return;
     final idx = _items.indexWhere(
-      (entry) => entry['id']?.toString() == item['id']?.toString(),
+      (entry) => entry['id']?.toString() == accessedItem['id']?.toString(),
     );
     if (idx == -1) return;
     if (result['__delete__'] == true) {
@@ -1971,7 +1780,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       ).showSnackBar(SnackBar(content: Text(AppStrings.itemDeleted)));
       return;
     }
-    setState(() => _items[idx] = result);
+    setState(() => _items[idx] = _preserveLastAccessedAt(result, _items[idx]));
     await _persistVaultData();
   }
 
@@ -1979,10 +1788,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
     BuildContext context,
     Map<String, dynamic> note,
   ) async {
+    final accessedNote = _markNoteLastAccessed(note);
     final updated = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => NoteViewScreen(
-          note: note,
+          note: accessedNote,
           showDeleteAction: true,
           onAutoSave: _upsertNoteAndPersist,
         ),
@@ -1991,7 +1801,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (updated == null) return;
 
     final idx = _notes.indexWhere(
-      (entry) => entry['id']?.toString() == note['id']?.toString(),
+      (entry) => entry['id']?.toString() == accessedNote['id']?.toString(),
     );
     if (idx == -1) return;
 
@@ -2005,8 +1815,44 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return;
     }
 
-    setState(() => _notes[idx] = updated);
+    setState(() => _notes[idx] = _preserveLastAccessedAt(updated, _notes[idx]));
     await _persistVaultData();
+  }
+
+  Map<String, dynamic> _markItemLastAccessed(Map<String, dynamic> item) {
+    final id = item['id']?.toString();
+    if (id == null || id.isEmpty) return item;
+    final idx = _items.indexWhere((entry) => entry['id']?.toString() == id);
+    if (idx == -1) return item;
+    final updated = Map<String, dynamic>.from(_items[idx]);
+    updated['lastAccessedAt'] = DateTime.now().toUtc().toIso8601String();
+    setState(() => _items[idx] = updated);
+    unawaited(_persistVaultData());
+    return updated;
+  }
+
+  Map<String, dynamic> _markNoteLastAccessed(Map<String, dynamic> note) {
+    final id = note['id']?.toString();
+    if (id == null || id.isEmpty) return note;
+    final idx = _notes.indexWhere((entry) => entry['id']?.toString() == id);
+    if (idx == -1) return note;
+    final updated = Map<String, dynamic>.from(_notes[idx]);
+    updated['lastAccessedAt'] = DateTime.now().toUtc().toIso8601String();
+    setState(() => _notes[idx] = updated);
+    unawaited(_persistVaultData());
+    return updated;
+  }
+
+  Map<String, dynamic> _preserveLastAccessedAt(
+    Map<String, dynamic> next,
+    Map<String, dynamic> current,
+  ) {
+    if (next['lastAccessedAt'] != null) return next;
+    return {
+      ...next,
+      if (current['lastAccessedAt'] != null)
+        'lastAccessedAt': current['lastAccessedAt'],
+    };
   }
 
   Future<void> _openAddItemScreen(BuildContext context) async {
@@ -2062,242 +1908,71 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _showCustomTemplateManager(BuildContext context) async {
-    final working = _customTypeDefinitions
-        .map((entry) => Map<String, dynamic>.from(entry))
-        .toList();
-
-    final updated = await Navigator.of(
-      context,
-    ).push<List<Map<String, dynamic>>>(
-      MaterialPageRoute(
-        builder: (pageContext) {
-          return StatefulBuilder(
-            builder: (pageContext, setPageState) {
-              return Scaffold(
-                appBar: AppBar(
-                  title: const Text('Custom templates'),
-                  actions: [
-                    TextButton(
-                      onPressed: () async {
-                        final createdType =
-                            await Navigator.of(pageContext).push<Map<String, dynamic>>(
-                              MaterialPageRoute(
-                                builder: (_) => const CreateCustomTypeScreen(),
-                              ),
-                            );
-                        if (createdType == null) return;
-                        final name = createdType['name']?.toString().trim() ?? '';
-                        if (name.isEmpty) return;
-                        final exists = working.any(
-                          (definition) =>
-                              definition['name']?.toString().toLowerCase() ==
-                              name.toLowerCase(),
-                        );
-                        if (exists) {
-                          if (!pageContext.mounted) return;
-                          ScaffoldMessenger.of(pageContext).showSnackBar(
-                            SnackBar(content: Text(AppStrings.customTypeExists)),
-                          );
-                          return;
-                        }
-                        setPageState(() => working.add(createdType));
-                      },
-                      child: const Text('Add'),
-                    ),
-                  ],
-                ),
-                body: Column(
-                  children: [
-                    Expanded(
-                      child: working.isEmpty
-                          ? const Center(
-                              child: Text(
-                                'No custom templates yet.',
-                                style: TextStyle(color: Color(0xFF6B7280)),
-                              ),
-                            )
-                          : ListView.separated(
-                              itemCount: working.length,
-                              separatorBuilder: (_, __) =>
-                                  const Divider(height: 1),
-                              itemBuilder: (itemContext, index) {
-                                final definition = working[index];
-                                final iconKey = definition['iconKey']?.toString();
-                                final name =
-                                    definition['name']?.toString() ?? 'Custom';
-                                final fields =
-                                    (definition['fields'] as List<dynamic>? ??
-                                            const <dynamic>[])
-                                        .length;
-                                return ListTile(
-                                  leading: Icon(
-                                    _iconForCustomTemplateKey(iconKey),
-                                    color: _colorForCustomTemplateKey(iconKey),
-                                  ),
-                                  title: Text(name),
-                                  subtitle: Text('$fields fields'),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.edit_outlined),
-                                        onPressed: () async {
-                                          final edited = await Navigator.of(
-                                            itemContext,
-                                          ).push<Map<String, dynamic>>(
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  CreateCustomTypeScreen(
-                                                    initialTemplate: definition,
-                                                  ),
-                                            ),
-                                          );
-                                          if (edited == null) return;
-                                          final editedName =
-                                              edited['name']?.toString().trim() ??
-                                              '';
-                                          if (editedName.isEmpty) return;
-                                          final existsWithOther = working
-                                              .asMap()
-                                              .entries
-                                              .any(
-                                                (entry) =>
-                                                    entry.key != index &&
-                                                    (entry.value['name']
-                                                                ?.toString()
-                                                                .toLowerCase() ??
-                                                            '') ==
-                                                        editedName.toLowerCase(),
-                                              );
-                                          if (existsWithOther) {
-                                            if (!itemContext.mounted) return;
-                                            ScaffoldMessenger.of(
-                                              itemContext,
-                                            ).showSnackBar(
-                                              SnackBar(
-                                                content: Text(
-                                                  AppStrings.customTypeExists,
-                                                ),
-                                              ),
-                                            );
-                                            return;
-                                          }
-                                          setPageState(() => working[index] = edited);
-                                        },
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete_outline),
-                                        onPressed: () async {
-                                          final confirmed =
-                                              await showModalBottomSheet<bool>(
-                                                context: itemContext,
-                                                backgroundColor: Colors.transparent,
-                                                builder: (sheetContext) {
-                                                  return Container(
-                                                    decoration: const BoxDecoration(
-                                                      color: Colors.white,
-                                                      borderRadius: BorderRadius.vertical(
-                                                        top: Radius.circular(22),
-                                                      ),
-                                                    ),
-                                                    padding:
-                                                        const EdgeInsets.fromLTRB(
-                                                          16,
-                                                          14,
-                                                          16,
-                                                          18,
-                                                        ),
-                                                    child: Column(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        const Icon(
-                                                          Icons.delete_outline,
-                                                          size: 34,
-                                                          color: Color(0xFFEF4444),
-                                                        ),
-                                                        const SizedBox(height: 10),
-                                                        const Text(
-                                                          'Move to Trash?',
-                                                          style: TextStyle(
-                                                            fontWeight: FontWeight.w700,
-                                                            fontSize: 20,
-                                                          ),
-                                                        ),
-                                                        const SizedBox(height: 6),
-                                                        Text(
-                                                          '“$name” will be moved to trash.\nThis action can be undone.',
-                                                          textAlign: TextAlign.center,
-                                                          style: const TextStyle(
-                                                            color: Color(0xFF6B7280),
-                                                            fontSize: 14,
-                                                          ),
-                                                        ),
-                                                        const SizedBox(height: 14),
-                                                        SizedBox(
-                                                          width: double.infinity,
-                                                          child: FilledButton(
-                                                            style: FilledButton.styleFrom(
-                                                              backgroundColor:
-                                                                  const Color(0xFFEF4444),
-                                                              foregroundColor:
-                                                                  Colors.white,
-                                                              padding:
-                                                                  const EdgeInsets.symmetric(
-                                                                    vertical: 14,
-                                                                  ),
-                                                            ),
-                                                            onPressed: () => Navigator.of(
-                                                              sheetContext,
-                                                            ).pop(true),
-                                                            child: const Text(
-                                                              'Move to Trash',
-                                                            ),
-                                                          ),
-                                                        ),
-                                                        TextButton(
-                                                          onPressed: () => Navigator.of(
-                                                            sheetContext,
-                                                          ).pop(false),
-                                                          child: const Text('Cancel'),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                },
-                                              );
-                                          if (confirmed != true) return;
-                                          setPageState(
-                                            () => working.removeAt(index),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-                floatingActionButton: FloatingActionButton.extended(
-                  onPressed: () => Navigator.of(pageContext).pop(working),
-                  icon: const Icon(Icons.check),
-                  label: const Text('Done'),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
+    final updated = await Navigator.of(context)
+        .push<List<Map<String, dynamic>>>(
+          MaterialPageRoute(
+            builder: (_) => _CustomTemplateManagerScreen(
+              initialDefinitions: _customTypeDefinitions,
+              onCommit: (definitions) async {
+                if (!mounted) return;
+                setState(() {
+                  _syncItemsWithRenamedCustomTypes(
+                    previousDefinitions: _customTypeDefinitions,
+                    nextDefinitions: definitions,
+                  );
+                  _customTypeDefinitions
+                    ..clear()
+                    ..addAll(definitions);
+                });
+                await _persistVaultData();
+              },
+            ),
+          ),
+        );
 
     if (updated == null) return;
     setState(() {
+      _syncItemsWithRenamedCustomTypes(
+        previousDefinitions: _customTypeDefinitions,
+        nextDefinitions: updated,
+      );
       _customTypeDefinitions
         ..clear()
         ..addAll(updated);
     });
     await _persistVaultData();
+  }
+
+  void _syncItemsWithRenamedCustomTypes({
+    required List<Map<String, dynamic>> previousDefinitions,
+    required List<Map<String, dynamic>> nextDefinitions,
+  }) {
+    final limit = previousDefinitions.length < nextDefinitions.length
+        ? previousDefinitions.length
+        : nextDefinitions.length;
+    final renamedTypes = <String, String>{};
+    for (var index = 0; index < limit; index++) {
+      final previousName = previousDefinitions[index]['name']
+          ?.toString()
+          .trim();
+      final nextName = nextDefinitions[index]['name']?.toString().trim();
+      if (previousName == null ||
+          previousName.isEmpty ||
+          nextName == null ||
+          nextName.isEmpty ||
+          previousName == nextName) {
+        continue;
+      }
+      renamedTypes[previousName] = nextName;
+    }
+    if (renamedTypes.isEmpty) return;
+    for (final item in _items) {
+      final type = item['type']?.toString();
+      final renamed = renamedTypes[type];
+      if (renamed != null) {
+        item['type'] = renamed;
+      }
+    }
   }
 
   Future<void> _showAddNoteSheet(BuildContext context) async {
@@ -2543,9 +2218,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _refreshCloudBackupAccountLabel() async {
     final label = await widget.onReadCloudBackupAccount();
     if (!mounted) return;
-    setState(() => _cloudBackupAccountLabel = (label == null || label.isEmpty)
-        ? 'Not connected'
-        : label);
+    setState(
+      () => _cloudBackupAccountLabel = (label == null || label.isEmpty)
+          ? 'Not connected'
+          : label,
+    );
   }
 
   Future<void> _handleChangeCloudBackupAccount() async {
@@ -2594,9 +2271,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
       value /= 1024;
       unit += 1;
     }
-    final decimals = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    final decimals = value >= 100
+        ? 0
+        : value >= 10
+        ? 1
+        : 2;
     return '${value.toStringAsFixed(decimals)} ${units[unit]}';
-    }
+  }
 
   Future<void> _setVaultSort(String value) async {
     if (value != 'title' && value != 'last_accessed') return;
@@ -2881,7 +2562,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.delete_outline, size: 34, color: Color(0xFFEF4444)),
+              const Icon(
+                Icons.delete_outline,
+                size: 34,
+                color: Color(0xFFEF4444),
+              ),
               const SizedBox(height: 10),
               const Text(
                 'Move to Trash?',
@@ -2939,8 +2624,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
           ),
     ];
     setState(() {
-      _items.removeWhere((item) => selectedItemIds.contains(item['id']?.toString() ?? ''));
-      _notes.removeWhere((note) => selectedNoteIds.contains(note['id']?.toString() ?? ''));
+      _items.removeWhere(
+        (item) => selectedItemIds.contains(item['id']?.toString() ?? ''),
+      );
+      _notes.removeWhere(
+        (note) => selectedNoteIds.contains(note['id']?.toString() ?? ''),
+      );
       _allItemsSelectionMode = false;
       _selectedAllItemsKeys.clear();
     });
@@ -2950,10 +2639,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('$deletedCount items moved to trash'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: _undoAllItemsDelete,
-        ),
+        action: SnackBarAction(label: 'Undo', onPressed: _undoAllItemsDelete),
       ),
     );
   }
@@ -3028,18 +2714,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _undoAllItemsDelete() async {
     if (_lastDeletedAllItems.isEmpty) return;
     setState(() {
-      final itemSnapshots = _lastDeletedAllItems
-          .where((entry) => entry.kind == 'item')
-          .toList()
-        ..sort((a, b) => a.index.compareTo(b.index));
+      final itemSnapshots =
+          _lastDeletedAllItems.where((entry) => entry.kind == 'item').toList()
+            ..sort((a, b) => a.index.compareTo(b.index));
       for (final snapshot in itemSnapshots) {
         final insertAt = snapshot.index.clamp(0, _items.length) as int;
         _items.insert(insertAt, _deepCopyEntry(snapshot.entry));
       }
-      final noteSnapshots = _lastDeletedAllItems
-          .where((entry) => entry.kind == 'note')
-          .toList()
-        ..sort((a, b) => a.index.compareTo(b.index));
+      final noteSnapshots =
+          _lastDeletedAllItems.where((entry) => entry.kind == 'note').toList()
+            ..sort((a, b) => a.index.compareTo(b.index));
       for (final snapshot in noteSnapshots) {
         final insertAt = snapshot.index.clamp(0, _notes.length) as int;
         _notes.insert(insertAt, _deepCopyEntry(snapshot.entry));
@@ -3896,6 +3580,280 @@ class _SelectorOption {
   final String label;
 }
 
+class _CustomTemplateManagerScreen extends StatefulWidget {
+  const _CustomTemplateManagerScreen({
+    required this.initialDefinitions,
+    required this.onCommit,
+  });
+
+  final List<Map<String, dynamic>> initialDefinitions;
+  final Future<void> Function(List<Map<String, dynamic>> definitions) onCommit;
+
+  @override
+  State<_CustomTemplateManagerScreen> createState() =>
+      _CustomTemplateManagerScreenState();
+}
+
+class _CustomTemplateManagerScreenState
+    extends State<_CustomTemplateManagerScreen> {
+  late final List<Map<String, dynamic>> _workingDefinitions;
+
+  @override
+  void initState() {
+    super.initState();
+    _workingDefinitions = widget.initialDefinitions
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Custom templates'),
+        actions: [
+          IconButton(
+            key: const ValueKey('custom-template-add'),
+            tooltip: 'Add custom template',
+            onPressed: _addTemplate,
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Custom templates', style: vaultPageHeadingStyle(context)),
+                const SizedBox(height: 4),
+                const Text(
+                  'Create reusable item types with your own fields.',
+                  style: TextStyle(color: Color(0xFF6B7280)),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _workingDefinitions.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            'No custom templates yet.',
+                            style: TextStyle(color: Color(0xFF6B7280)),
+                          ),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: _addTemplate,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add template'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+                    itemCount: _workingDefinitions.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final definition = _workingDefinitions[index];
+                      final iconKey = definition['iconKey']?.toString();
+                      final colorKey = definition['colorKey']?.toString();
+                      final accent = _colorForCustomTemplateColorKey(colorKey);
+                      final name = definition['name']?.toString() ?? 'Custom';
+                      final fields =
+                          (definition['fields'] as List<dynamic>? ??
+                                  const <dynamic>[])
+                              .length;
+                      return Material(
+                        color: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: const BorderSide(color: Color(0xFFE5E7EB)),
+                        ),
+                        child: ListTile(
+                          onTap: () => _editTemplate(index),
+                          contentPadding: const EdgeInsets.fromLTRB(
+                            12,
+                            8,
+                            8,
+                            8,
+                          ),
+                          leading: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              _iconForCustomTemplateKey(iconKey),
+                              color: accent,
+                              size: 20,
+                            ),
+                          ),
+                          title: Text(
+                            name,
+                            style: const TextStyle(
+                              color: Color(0xFF111827),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '$fields fields',
+                            style: const TextStyle(color: Color(0xFF6B7280)),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit_outlined),
+                                onPressed: () => _editTemplate(index),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => _confirmDeleteTemplate(index),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addTemplate() async {
+    final createdType = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(builder: (_) => const CreateCustomTypeScreen()),
+    );
+    if (!mounted || createdType == null) return;
+    final name = createdType['name']?.toString().trim() ?? '';
+    if (name.isEmpty) return;
+    if (_hasTemplateNamed(name)) {
+      _showDuplicateTemplateMessage();
+      return;
+    }
+    setState(() => _workingDefinitions.add(createdType));
+    await widget.onCommit(_snapshotDefinitions());
+  }
+
+  Future<void> _editTemplate(int index) async {
+    final edited = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) =>
+            CreateCustomTypeScreen(initialTemplate: _workingDefinitions[index]),
+      ),
+    );
+    if (!mounted || edited == null) return;
+    final editedName = edited['name']?.toString().trim() ?? '';
+    if (editedName.isEmpty) return;
+    if (_hasTemplateNamed(editedName, exceptIndex: index)) {
+      _showDuplicateTemplateMessage();
+      return;
+    }
+    setState(() => _workingDefinitions[index] = edited);
+    await widget.onCommit(_snapshotDefinitions());
+  }
+
+  Future<void> _confirmDeleteTemplate(int index) async {
+    final definition = _workingDefinitions[index];
+    final name = definition['name']?.toString() ?? 'Custom';
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+            ),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.delete_outline,
+                  size: 34,
+                  color: Color(0xFFEF4444),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Move to Trash?',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '"$name" will be moved to trash.\nThis action can be undone.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF4444),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () => Navigator.of(sheetContext).pop(true),
+                    child: const Text('Move to Trash'),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(false),
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (!mounted || confirmed != true) return;
+    setState(() => _workingDefinitions.removeAt(index));
+    await widget.onCommit(_snapshotDefinitions());
+  }
+
+  List<Map<String, dynamic>> _snapshotDefinitions() {
+    return _workingDefinitions
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+  }
+
+  bool _hasTemplateNamed(String name, {int? exceptIndex}) {
+    final normalized = name.toLowerCase();
+    return _workingDefinitions.asMap().entries.any((entry) {
+      if (entry.key == exceptIndex) return false;
+      return (entry.value['name']?.toString().toLowerCase() ?? '') ==
+          normalized;
+    });
+  }
+
+  void _showDuplicateTemplateMessage() {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(AppStrings.customTypeExists)));
+  }
+}
+
 class _ItemCard extends StatelessWidget {
   const _ItemCard({
     required this.item,
@@ -4059,6 +4017,30 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
     _isFavorite = widget.item['pinned'] == true;
   }
 
+  Map<String, dynamic>? _customTypeDefinitionForType(String type) {
+    final normalized = type.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    for (final definition in widget.customTypeDefinitions) {
+      final name = definition['name']?.toString().trim().toLowerCase();
+      if (name == normalized) return definition;
+    }
+    return null;
+  }
+
+  IconData _iconForItemType(String type) {
+    final iconKey = _customTypeDefinitionForType(type)?['iconKey']?.toString();
+    if (iconKey != null) return _iconForCustomTemplateKey(iconKey);
+    return _iconForHomeType(type);
+  }
+
+  Color _colorForItemType(String type) {
+    final colorKey = _customTypeDefinitionForType(
+      type,
+    )?['colorKey']?.toString();
+    if (colorKey != null) return _colorForCustomTemplateColorKey(colorKey);
+    return _colorForHomeType(type);
+  }
+
   @override
   Widget build(BuildContext context) {
     final fields = (widget.item['fields'] as List<dynamic>? ?? const [])
@@ -4068,7 +4050,12 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
     final title = widget.item['title']?.toString() ?? 'Untitled';
     final created = widget.item['created_at']?.toString() ?? 'Unknown';
     final modified = widget.item['updated']?.toString() ?? 'Now';
+    final lastAccessed = _formatLastAccessedAt(
+      widget.item['lastAccessedAt']?.toString(),
+    );
     final primarySecret = _extractPrimarySecret(fields);
+    final typeIcon = _iconForItemType(itemType);
+    final typeColor = _colorForItemType(itemType);
 
     return PopScope(
       canPop: false,
@@ -4083,14 +4070,15 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
             onPressed: _closeWithUpdates,
             icon: const Icon(Icons.arrow_back),
           ),
-          title: Text(itemType),
+          title: Text(itemType, maxLines: 1, overflow: TextOverflow.ellipsis),
+          titleSpacing: 0,
           actions: [
             IconButton(
               onPressed: () => setState(() => _isFavorite = !_isFavorite),
               icon: Icon(_isFavorite ? Icons.star : Icons.star_border),
               tooltip: 'Favorite',
             ),
-            TextButton(
+            IconButton(
               onPressed: () async {
                 final updated = await Navigator.of(context)
                     .push<Map<String, dynamic>>(
@@ -4107,7 +4095,8 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                 }
                 Navigator.of(context).pop(updated);
               },
-              child: Text(AppStrings.edit),
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: AppStrings.edit,
             ),
             if (widget.showDeleteAction)
               IconButton(
@@ -4131,23 +4120,33 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                         width: 64,
                         height: 64,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE0E7FF),
+                          color: typeColor.withValues(alpha: 0.16),
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: const Icon(
-                          Icons.lock_outline,
-                          color: Color(0xFF4F46E5),
-                          size: 30,
-                        ),
+                        child: Icon(typeIcon, color: typeColor, size: 30),
                       ),
                     ),
                     const SizedBox(height: 12),
                     Center(
                       child: Text(
+                        itemType,
+                        textAlign: TextAlign.center,
+                        style: vaultPageHeadingStyle(context),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Center(
+                      child: Text(
                         title,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: const Color(0xFF111827),
+                          fontWeight: FontWeight.w400,
                         ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -4237,6 +4236,8 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                     _metadataRow('Created', created),
                     const SizedBox(height: 8),
                     _metadataRow('Modified', modified),
+                    const SizedBox(height: 8),
+                    _metadataRow('Last accessed', lastAccessed),
                   ],
                 ),
               ),
@@ -4292,7 +4293,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
     return Row(
       children: [
         SizedBox(
-          width: 84,
+          width: 104,
           child: Text(
             label,
             style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
@@ -4309,6 +4310,16 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
         ),
       ],
     );
+  }
+
+  String _formatLastAccessedAt(String? value) {
+    if (value == null || value.trim().isEmpty) return 'Never';
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) return value;
+    final local = parsed.toLocal();
+    String twoDigits(int number) => number.toString().padLeft(2, '0');
+    return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} '
+        '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
   }
 
   void _closeWithUpdates() {
@@ -4382,7 +4393,7 @@ class _SectionHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: Theme.of(context).textTheme.titleLarge),
+        Text(title, style: vaultPageHeadingStyle(context)),
         const SizedBox(height: 2),
         Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
       ],
@@ -4438,29 +4449,99 @@ IconData _iconForCustomTemplateKey(String? key) {
       return Icons.star_outline;
     case 'spark':
       return Icons.auto_awesome_outlined;
+    case 'key':
+      return Icons.key_outlined;
+    case 'password':
+      return Icons.password_outlined;
+    case 'credit_card':
+      return Icons.credit_card;
+    case 'bank':
+      return Icons.account_balance_outlined;
+    case 'receipt':
+      return Icons.receipt_long_outlined;
+    case 'car':
+      return Icons.directions_car_outlined;
+    case 'home':
+      return Icons.home_outlined;
+    case 'work':
+      return Icons.work_outline;
+    case 'travel':
+      return Icons.flight_takeoff_outlined;
+    case 'passport':
+      return Icons.airplane_ticket_outlined;
+    case 'calendar':
+      return Icons.event_outlined;
+    case 'phone':
+      return Icons.phone_iphone_outlined;
+    case 'email':
+      return Icons.alternate_email;
+    case 'wifi':
+      return Icons.wifi_outlined;
+    case 'server':
+      return Icons.dns_outlined;
+    case 'code':
+      return Icons.code_outlined;
+    case 'database':
+      return Icons.storage_outlined;
+    case 'cloud':
+      return Icons.cloud_outlined;
+    case 'medical':
+      return Icons.medical_services_outlined;
+    case 'pet':
+      return Icons.pets_outlined;
+    case 'school':
+      return Icons.school_outlined;
+    case 'shopping':
+      return Icons.shopping_bag_outlined;
+    case 'gift':
+      return Icons.card_giftcard_outlined;
+    case 'photo':
+      return Icons.photo_outlined;
+    case 'link':
+      return Icons.link_outlined;
     default:
       return Icons.auto_awesome_outlined;
   }
 }
 
-Color _colorForCustomTemplateKey(String? key) {
+Color _colorForCustomTemplateColorKey(String? key) {
   switch (key) {
-    case 'lock':
-      return const Color(0xFF60A5FA);
-    case 'note':
-      return const Color(0xFFFBBF24);
-    case 'id':
-      return const Color(0xFF34D399);
-    case 'wallet':
-      return const Color(0xFF22C55E);
-    case 'folder':
-      return const Color(0xFFFB923C);
-    case 'heart':
-      return const Color(0xFFF472B6);
-    case 'star':
-      return const Color(0xFFF59E0B);
-    case 'spark':
+    case 'purple':
+      return const Color(0xFF8B5CF6);
+    case 'indigo':
       return const Color(0xFF6366F1);
+    case 'blue':
+      return const Color(0xFF60A5FA);
+    case 'sky':
+      return const Color(0xFF38BDF8);
+    case 'cyan':
+      return const Color(0xFF22D3EE);
+    case 'teal':
+      return const Color(0xFF2DD4BF);
+    case 'green':
+      return const Color(0xFF4ADE80);
+    case 'emerald':
+      return const Color(0xFF10B981);
+    case 'lime':
+      return const Color(0xFFA3E635);
+    case 'amber':
+      return const Color(0xFFFBBF24);
+    case 'yellow':
+      return const Color(0xFFFDE047);
+    case 'orange':
+      return const Color(0xFFFB923C);
+    case 'red':
+      return const Color(0xFFF87171);
+    case 'rose':
+      return const Color(0xFFFB7185);
+    case 'pink':
+      return const Color(0xFFF472B6);
+    case 'fuchsia':
+      return const Color(0xFFE879F9);
+    case 'slate':
+      return const Color(0xFF64748B);
+    case 'gray':
+      return const Color(0xFF9CA3AF);
     default:
       return const Color(0xFF6366F1);
   }
@@ -4483,11 +4564,15 @@ class _HomeTypeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const borderRadius = 14.0;
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(borderRadius),
+        side: const BorderSide(color: Color(0xFFE5E7EB)),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(borderRadius),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -4836,7 +4921,8 @@ class _AllItemsFiltersOverlay extends StatefulWidget {
   final List<String> typeOptions;
 
   @override
-  State<_AllItemsFiltersOverlay> createState() => _AllItemsFiltersOverlayState();
+  State<_AllItemsFiltersOverlay> createState() =>
+      _AllItemsFiltersOverlayState();
 }
 
 class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
@@ -4869,136 +4955,144 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
         child: SizedBox.expand(
           child: Column(
             children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        onPressed: _reset,
-                        child: const Text('Reset'),
-                      ),
-                    ),
-                  ),
-                  const Text(
-                    'Filters',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                  ),
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: _apply,
-                        child: const Text('Done'),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-                children: [
-                  _sectionTitle('Search'),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: 'Search all items...',
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      isDense: true,
-                      fillColor: const Color(0xFFF7F8FC),
-                      filled: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  _sectionTitle('Type'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: widget.typeOptions.map((type) {
-                      final selected = _selectedTypes.contains(type);
-                      return FilterChip(
-                        label: Text(type),
-                        selected: selected,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: _reset,
+                          child: const Text('Reset'),
                         ),
-                        onSelected: (_) {
-                          setState(() {
-                            if (selected) {
-                              _selectedTypes.remove(type);
-                            } else {
-                              _selectedTypes.add(type);
-                            }
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 18),
-                  _filterRow(
-                    label: 'Favorites',
-                    trailing: Switch(
-                      value: _favoritesOnly,
-                      onChanged: (value) =>
-                          setState(() => _favoritesOnly = value),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  _sectionTitle('Date Modified'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ('any', 'Anytime'),
-                      ('today', 'Today'),
-                      ('last_7_days', 'Last 7 Days'),
-                      ('last_30_days', 'Last 30 Days'),
-                    ].map((row) {
-                      final selected = row.$1 == _dateRange;
-                      return ChoiceChip(
-                        label: Text(row.$2),
-                        selected: selected,
-                        onSelected: (_) => setState(() => _dateRange = row.$1),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 18),
-                  _filterRow(
-                    label: 'Active Filters',
-                    value:
-                        '${(_searchController.text.trim().isNotEmpty ? 1 : 0) + _selectedTypes.length + (_favoritesOnly ? 1 : 0) + (_dateRange == 'any' ? 0 : 1)}',
-                  ),
-                  const SizedBox(height: 8),
-                  if (_activeFilterChips().isEmpty)
                     const Text(
-                      'No active filters',
-                      style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
-                    )
-                  else
+                      'Filters',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: _apply,
+                          child: const Text('Done'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+                  children: [
+                    _sectionTitle('Search'),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search all items...',
+                        prefixIcon: const Icon(Icons.search, size: 20),
+                        isDense: true,
+                        fillColor: const Color(0xFFF7F8FC),
+                        filled: true,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    _sectionTitle('Type'),
+                    const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: _activeFilterChips().map((chip) {
-                        return InputChip(
-                          label: Text(chip.label),
-                          onDeleted: () => _removeActiveFilter(chip),
+                      children: widget.typeOptions.map((type) {
+                        final selected = _selectedTypes.contains(type);
+                        return FilterChip(
+                          label: Text(type),
+                          selected: selected,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          onSelected: (_) {
+                            setState(() {
+                              if (selected) {
+                                _selectedTypes.remove(type);
+                              } else {
+                                _selectedTypes.add(type);
+                              }
+                            });
+                          },
                         );
                       }).toList(),
                     ),
-                ],
+                    const SizedBox(height: 18),
+                    _filterRow(
+                      label: 'Favorites',
+                      trailing: Switch(
+                        value: _favoritesOnly,
+                        onChanged: (value) =>
+                            setState(() => _favoritesOnly = value),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _sectionTitle('Date Modified'),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children:
+                          [
+                            ('any', 'Anytime'),
+                            ('today', 'Today'),
+                            ('last_7_days', 'Last 7 Days'),
+                            ('last_30_days', 'Last 30 Days'),
+                          ].map((row) {
+                            final selected = row.$1 == _dateRange;
+                            return ChoiceChip(
+                              label: Text(row.$2),
+                              selected: selected,
+                              onSelected: (_) =>
+                                  setState(() => _dateRange = row.$1),
+                            );
+                          }).toList(),
+                    ),
+                    const SizedBox(height: 18),
+                    _filterRow(
+                      label: 'Active Filters',
+                      value:
+                          '${(_searchController.text.trim().isNotEmpty ? 1 : 0) + _selectedTypes.length + (_favoritesOnly ? 1 : 0) + (_dateRange == 'any' ? 0 : 1)}',
+                    ),
+                    const SizedBox(height: 8),
+                    if (_activeFilterChips().isEmpty)
+                      const Text(
+                        'No active filters',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF6B7280),
+                        ),
+                      )
+                    else
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _activeFilterChips().map((chip) {
+                          return InputChip(
+                            label: Text(chip.label),
+                            onDeleted: () => _removeActiveFilter(chip),
+                          );
+                        }).toList(),
+                      ),
+                  ],
+                ),
               ),
-            ),
             ],
           ),
         ),
