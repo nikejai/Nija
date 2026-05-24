@@ -56,7 +56,10 @@ class VaultItemListEntryAdapter extends VaultListEntryAdapter {
       type: entry['type']?.toString() ?? 'Unknown',
       title: entry['title']?.toString() ?? '',
       subtitle: entry['subtitle']?.toString() ?? '',
-      updated: entry['updated']?.toString() ?? 'Now',
+      updated:
+          row['updatedLabel']?.toString() ??
+          entry['updated']?.toString() ??
+          'Now',
       pinned: entry['pinned'] == true,
       icon: iconForType?.call(entry['type']?.toString() ?? 'Unknown'),
       color: colorForType?.call(entry['type']?.toString() ?? 'Unknown'),
@@ -79,7 +82,10 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
       type: 'Notes',
       title: entry['title']?.toString() ?? '',
       subtitle: entry['preview']?.toString() ?? '',
-      updated: entry['updated']?.toString() ?? 'Now',
+      updated:
+          row['updatedLabel']?.toString() ??
+          entry['updated']?.toString() ??
+          'Now',
       pinned: entry['pinned'] == true,
       icon: Icons.description_outlined,
       color: const Color(0xFFA78BFA),

@@ -20,6 +20,7 @@ import '../../../core/security/biometric_credential_store.dart';
 import '../../../core/security/biometric_enrollment_store.dart';
 import '../../../domain/models/vault_reference.dart';
 import '../../../domain/models/vault_payload.dart';
+import '../../../domain/models/vault_file.dart';
 import '../../../infrastructure/adapters/file_vault_storage_adapter.dart';
 import '../../../infrastructure/adapters/secret_share_portability.dart';
 import '../../../infrastructure/adapters/secret_share_portability_base.dart';
@@ -235,6 +236,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             _importVaultFromLocal(continueToUnlock: false),
         onReadCloudBackupAccount: _readCloudBackupAccountLabel,
         onChangeCloudBackupAccount: _changeCloudBackupAccount,
+        onRenameVault: _renameActiveVault,
         onLockNow: () {
           _clearSensitiveSessionState();
           setState(() => _step = OnboardingStep.unlock);
@@ -1079,6 +1081,42 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     });
   }
 
+  Future<void> _renameActiveVault(String name) async {
+    final renamed = name.trim();
+    if (renamed.isEmpty) {
+      throw StateError('Vault name cannot be empty.');
+    }
+
+    final raw = await _vaultService.readRawVaultFile(filePath: _vaultFilePath);
+    final file = VaultFile.fromJson(
+      Map<String, dynamic>.from(jsonDecode(raw) as Map),
+    );
+    final updatedFile = VaultFile(
+      format: file.format,
+      formatVersion: file.formatVersion,
+      vaultId: file.vaultId,
+      vaultName: renamed,
+      createdAt: file.createdAt,
+      updatedAt: DateTime.now().toUtc().toIso8601String(),
+      guardian: file.guardian,
+      kdf: file.kdf,
+      recoveryKdf: file.recoveryKdf,
+      cipher: file.cipher,
+      encryptedVaultKey: file.encryptedVaultKey,
+      encryptedVaultKeyByRecovery: file.encryptedVaultKeyByRecovery,
+      encryptedPayload: file.encryptedPayload,
+    );
+
+    await _vaultService.writeRawVaultFile(
+      filePath: _vaultFilePath,
+      rawContent: jsonEncode(updatedFile.toJson()),
+    );
+    await _rememberVaultReference(_vaultFilePath, label: renamed);
+    await _refreshVaultSize();
+    if (!mounted) return;
+    setState(() => _activeVaultName = renamed);
+  }
+
   List<Map<String, dynamic>> _applyEntryMetadata({
     required String kind,
     required List<Map<String, dynamic>> nextEntries,
@@ -1097,18 +1135,21 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       final current = Map<String, dynamic>.from(raw);
       var id = current['id']?.toString().trim() ?? '';
       if (id.isEmpty) {
-        id = '$kind-${DateTime.now().microsecondsSinceEpoch}-${_idRandom.nextInt(100000)}';
+        id =
+            '$kind-${DateTime.now().microsecondsSinceEpoch}-${_idRandom.nextInt(100000)}';
         current['id'] = id;
       }
       final previous = previousById[id];
       final nowIso = DateTime.now().toUtc().toIso8601String();
-      final fileUuid = previous?['fileUuid']?.toString().trim().isNotEmpty == true
+      final fileUuid =
+          previous?['fileUuid']?.toString().trim().isNotEmpty == true
           ? previous!['fileUuid'].toString().trim()
           : (current['fileUuid']?.toString().trim().isNotEmpty == true
                 ? current['fileUuid'].toString().trim()
                 : _newVaultId());
 
-      final createdAt = previous?['createdAt']?.toString().trim().isNotEmpty == true
+      final createdAt =
+          previous?['createdAt']?.toString().trim().isNotEmpty == true
           ? previous!['createdAt'].toString().trim()
           : (current['createdAt']?.toString().trim().isNotEmpty == true
                 ? current['createdAt'].toString().trim()
@@ -1664,19 +1705,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         );
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cloud backup completed.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Cloud backup completed.')));
     } catch (error, stackTrace) {
       _logOperationError('backupCurrentVaultToCloud', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Failed to prepare cloud backup. ${_errorHint(error)}',
-          ),
+          content: Text('Failed to prepare cloud backup. ${_errorHint(error)}'),
         ),
       );
     }
@@ -1692,7 +1729,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _refreshVaultSize() async {
     try {
-      final raw = await _vaultService.readRawVaultFile(filePath: _vaultFilePath);
+      final raw = await _vaultService.readRawVaultFile(
+        filePath: _vaultFilePath,
+      );
       final size = utf8.encode(raw).length;
       if (!mounted) return;
       setState(() => _activeVaultSizeBytes = size);
@@ -2232,8 +2271,7 @@ class _SetupScreenState extends State<SetupScreen> {
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 labelText: AppStrings.vaultName,
-                helperText:
-                    widget.defaultVaultId.isEmpty
+                helperText: widget.defaultVaultId.isEmpty
                     ? null
                     : 'Default: ${widget.defaultVaultId}',
               ),
