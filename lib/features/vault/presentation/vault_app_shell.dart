@@ -118,6 +118,9 @@ class VaultAppShell extends StatefulWidget {
 }
 
 class _VaultAppShellState extends State<VaultAppShell> {
+  static const MethodChannel _documentOpenChannel = MethodChannel(
+    'nija/document_open',
+  );
   static const String _encryptedShareExtension = '.nijas';
   static const String _prefsKeyVaultSort = 'nija_pref_vault_sort_v1';
   static const String _prefsKeyNotesSort = 'nija_pref_notes_sort_v1';
@@ -4797,7 +4800,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                       child: FilledButton.icon(
                         onPressed: bytes == null
                             ? null
-                            : () => _shareDocument(bytes),
+                            : () => _openDocument(bytes),
                         icon: const Icon(Icons.open_in_new_outlined),
                         label: const Text('Open with...'),
                       ),
@@ -4874,15 +4877,41 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     );
   }
 
-  Future<void> _shareDocument(List<int> bytes) async {
+  Future<void> _openDocument(List<int> bytes) async {
     final fileName = _documentFileName(widget.item);
+    final mimeType = _mimeTypeForExtension(_documentExtension(widget.item));
+    try {
+      await _VaultAppShellState._documentOpenChannel.invokeMethod<bool>(
+        'openDocument',
+        <String, Object>{
+          'fileName': fileName,
+          'mimeType': mimeType,
+          'bytes': Uint8List.fromList(bytes),
+        },
+      );
+    } on MissingPluginException {
+      await _shareDocumentFallback(bytes, fileName, mimeType);
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message ?? 'No app can open this file.')),
+      );
+      await _shareDocumentFallback(bytes, fileName, mimeType);
+    }
+  }
+
+  Future<void> _shareDocumentFallback(
+    List<int> bytes,
+    String fileName,
+    String mimeType,
+  ) async {
     await SharePlus.instance.share(
       ShareParams(
         files: [
           XFile.fromData(
             Uint8List.fromList(bytes),
             name: fileName,
-            mimeType: _mimeTypeForExtension(_documentExtension(widget.item)),
+            mimeType: mimeType,
           ),
         ],
       ),
