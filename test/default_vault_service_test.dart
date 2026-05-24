@@ -420,6 +420,81 @@ void main() {
     },
   );
 
+  test('documents are encrypted outside the main items section', () async {
+    final privateStore = InMemoryPrivateVaultStore();
+    final service = DefaultVaultService(
+      storageAdapter: InMemoryVaultStorageAdapter(),
+      cryptoAdapter: SecureCryptoAdapter(),
+      privateVaultStore: privateStore,
+    );
+
+    await service.createVault(
+      filePath: 'document-sections.nija',
+      vaultId: 'document-sections-id',
+      vaultName: 'Document Vault',
+      guardianProfileId: GuardianProfiles.owl.id,
+      password: 'CorrectPass123',
+      recoveryPhrase: basePhrase,
+    );
+
+    final documentSection = await service.persistVaultDocument(
+      filePath: 'document-sections.nija',
+      password: 'CorrectPass123',
+      documentId: 'doc-1',
+      bytes: utf8.encode('plain document bytes'),
+    );
+
+    await service.persistVaultPayload(
+      filePath: 'document-sections.nija',
+      password: 'CorrectPass123',
+      payload: VaultPayload(
+        schemaVersion: 1,
+        items: [
+          {
+            'id': 'doc-1',
+            'type': 'Documents',
+            'title': 'Driver License Scan',
+            'documentSection': documentSection,
+            'documentSizeBytes': 20,
+          },
+        ],
+        notes: const [],
+        tags: const [],
+        settings: const {},
+        audit: const [],
+      ),
+    );
+
+    final itemsBytes = await privateStore.readSection(
+      'document-sections-id',
+      'items.enc',
+    );
+    final documentBytes = await privateStore.readSection(
+      'document-sections-id',
+      documentSection,
+    );
+    final sizeWithDocument = await service.readVaultSizeBytes(
+      filePath: 'document-sections.nija',
+    );
+    final decryptedDocument = await service.readVaultDocument(
+      filePath: 'document-sections.nija',
+      password: 'CorrectPass123',
+      sectionName: documentSection,
+    );
+
+    expect(documentSection, 'document_doc-1.enc');
+    expect(
+      utf8.decode(itemsBytes, allowMalformed: true),
+      isNot(contains('plain document bytes')),
+    );
+    expect(
+      utf8.decode(documentBytes, allowMalformed: true),
+      isNot(contains('plain document bytes')),
+    );
+    expect(sizeWithDocument, greaterThan(documentBytes.length));
+    expect(utf8.decode(decryptedDocument), 'plain document bytes');
+  });
+
   test(
     'same revision with different vaultVersionId creates conflict copy',
     () async {

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/core/config/vault_item_templates.dart';
 import 'package:nija/features/vault/application/vault_list_helpers.dart';
 import 'package:nija/features/vault/application/vault_text_serializers.dart';
+import 'package:nija/features/vault/presentation/widgets/vault_entry_list.dart';
 
 void main() {
   test(
@@ -59,6 +60,27 @@ void main() {
     expect(text, contains('Type: Login'));
     expect(text, contains('Username: me@example.com'));
     expect(text, isNot(contains('Notes:')));
+  });
+
+  test('document list adapter shows extension time and size metadata', () {
+    const adapter = VaultDocumentListEntryAdapter();
+    final row = <String, dynamic>{
+      'kind': 'item',
+      'updatedLabel': '3d ago',
+      'entry': <String, dynamic>{
+        'type': 'Documents',
+        'title': 'Health Insurance Card',
+        'documentExtension': 'pdf',
+        'documentSizeBytes': 1258291,
+      },
+    };
+
+    final entry = adapter.adapt(row);
+
+    expect(adapter.canAdapt(row), isTrue);
+    expect(entry.title, 'Health Insurance Card');
+    expect(entry.type, 'PDF');
+    expect(entry.updated, '3d ago · 1.2 MB');
   });
 
   test('note plain text preserves rich delta markers', () {

@@ -93,6 +93,60 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
   }
 }
 
+class VaultDocumentListEntryAdapter extends VaultListEntryAdapter {
+  const VaultDocumentListEntryAdapter();
+
+  @override
+  bool canAdapt(Map<String, dynamic> row) {
+    final entry = entryFrom(row);
+    return row['kind']?.toString() == 'item' &&
+        (entry['type']?.toString() == 'Documents' ||
+            entry['document'] is Map ||
+            entry['documentFileName'] != null);
+  }
+
+  @override
+  VaultListEntry adapt(Map<String, dynamic> row) {
+    final entry = entryFrom(row);
+    final document = entry['document'] is Map
+        ? Map<String, dynamic>.from(entry['document'] as Map)
+        : const <String, dynamic>{};
+    final extension =
+        entry['documentExtension']?.toString().trim().toUpperCase() ??
+        document['extension']?.toString().trim().toUpperCase() ??
+        'FILE';
+    final sizeBytes = _documentSizeBytes(entry, document);
+    final updated =
+        row['updatedLabel']?.toString() ??
+        entry['updated']?.toString() ??
+        'Now';
+    return VaultListEntry(
+      entry: entry,
+      kind: 'item',
+      type: extension.isEmpty ? 'FILE' : extension,
+      title: entry['title']?.toString().trim().isNotEmpty == true
+          ? entry['title'].toString()
+          : entry['documentFileName']?.toString() ??
+                document['fileName']?.toString() ??
+                'Document',
+      subtitle: entry['subtitle']?.toString() ?? '',
+      updated: '$updated · ${_formatDocumentBytes(sizeBytes)}',
+      pinned: entry['pinned'] == true,
+      icon: Icons.insert_drive_file_outlined,
+      color: const Color(0xFFFB7185),
+    );
+  }
+
+  int _documentSizeBytes(
+    Map<String, dynamic> entry,
+    Map<String, dynamic> document,
+  ) {
+    final raw = entry['documentSizeBytes'] ?? document['sizeBytes'];
+    if (raw is int) return raw;
+    return int.tryParse(raw?.toString() ?? '') ?? 0;
+  }
+}
+
 class VaultEntryList extends StatelessWidget {
   const VaultEntryList({
     super.key,
@@ -325,4 +379,13 @@ Color _colorForVaultEntryType(String type) {
   if (normalized.contains('document')) return const Color(0xFFFB923C);
   if (normalized.contains('health')) return const Color(0xFFF472B6);
   return const Color(0xFF93C5FD);
+}
+
+String _formatDocumentBytes(int bytes) {
+  if (bytes <= 0) return '0 B';
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
+  final mb = kb / 1024;
+  return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
 }
