@@ -77,6 +77,23 @@ abstract class VaultService {
     VaultProgressCallback? onProgress,
   });
 
+  Future<String> persistVaultDocument({
+    required String filePath,
+    required String password,
+    required List<int> bytes,
+    required String documentId,
+    VaultProgressCallback? onProgress,
+  });
+
+  Future<List<int>> readVaultDocument({
+    required String filePath,
+    required String password,
+    required String sectionName,
+    VaultProgressCallback? onProgress,
+  });
+
+  Future<int> readVaultSizeBytes({required String filePath});
+
   Future<void> renameVault({required String filePath, required String label});
 
   Future<void> markVaultConflictResolved({

@@ -32,6 +32,7 @@ class DefaultVaultService implements VaultService {
   static const _notesFile = 'notes.enc';
   static const _settingsFile = 'settings.enc';
   static const _tagsFile = 'tags.enc';
+  static const _headerFile = 'header.json';
 
   final VaultStorageAdapter _storageAdapter;
   final CryptoAdapter _cryptoAdapter;
@@ -486,6 +487,88 @@ class DefaultVaultService implements VaultService {
   }
 
   @override
+  Future<String> persistVaultDocument({
+    required String filePath,
+    required String password,
+    required List<int> bytes,
+    required String documentId,
+    VaultProgressCallback? onProgress,
+  }) async {
+    final file = await _readMigratedVaultFile(filePath: filePath);
+    final passwordKey = await _deriveKey(password, file.kdf);
+    final vaultKey = await _cryptoAdapter.decrypt(
+      cipher: base64Decode(file.encryptedVaultKey),
+      key: passwordKey,
+    );
+    final storeId = _storeIdFor(filePath, file);
+    final sections = await _readExistingWorkingSections(storeId);
+    final sectionName = _documentSectionFile(documentId);
+    sections[sectionName] = Uint8List.fromList(
+      await _cryptoAdapter.encrypt(plain: bytes, key: vaultKey),
+    );
+    final nextHeader = _nextMutationHeader(file);
+    await _privateVaultStore.commitVault(
+      vaultStoreId: storeId,
+      header: nextHeader,
+      sections: sections,
+    );
+    await _rememberRegistry(nextHeader, label: _displayLabel(nextHeader));
+    _handleToVaultStoreId[filePath] = nextHeader.vaultId;
+    await _writeSnapshotToHandle(filePath, nextHeader.vaultId);
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 1.0,
+        message: 'Document encrypted and stored.',
+      ),
+    );
+    return sectionName;
+  }
+
+  @override
+  Future<List<int>> readVaultDocument({
+    required String filePath,
+    required String password,
+    required String sectionName,
+    VaultProgressCallback? onProgress,
+  }) async {
+    final file = await _readMigratedVaultFile(filePath: filePath);
+    final passwordKey = await _deriveKey(password, file.kdf);
+    final vaultKey = await _cryptoAdapter.decrypt(
+      cipher: base64Decode(file.encryptedVaultKey),
+      key: passwordKey,
+    );
+    final storeId = _storeIdFor(filePath, file);
+    final cipher = await _privateVaultStore.readSection(storeId, sectionName);
+    final plain = await _cryptoAdapter.decrypt(cipher: cipher, key: vaultKey);
+    onProgress?.call(
+      const VaultOperationProgress(value: 1.0, message: 'Document decrypted.'),
+    );
+    return plain;
+  }
+
+  @override
+  Future<int> readVaultSizeBytes({required String filePath}) async {
+    final storeId = _handleToVaultStoreId[filePath] ?? filePath;
+    if (await _privateVaultStore.vaultExists(storeId)) {
+      final structure = await _privateVaultStore.describeVault(storeId);
+      final files = Map<String, dynamic>.from(
+        structure['files'] as Map? ?? const <String, dynamic>{},
+      );
+      var total = 0;
+      for (final value in files.values) {
+        if (value is int) {
+          total += value;
+        } else {
+          total += int.tryParse(value.toString()) ?? 0;
+        }
+      }
+      return total;
+    }
+    final snapshot = await _snapshotForHandle(filePath);
+    return utf8.encode(jsonEncode(snapshot.toJson())).length;
+  }
+
+  @override
   Future<void> renameVault({
     required String filePath,
     required String label,
@@ -493,19 +576,7 @@ class DefaultVaultService implements VaultService {
     final file = await _readMigratedVaultFile(filePath: filePath);
     final storeId = _storeIdFor(filePath, file);
     final nextHeader = _nextMutationHeader(file).copyWith(clearVaultName: true);
-    final sections = <String, Uint8List>{
-      _manifestFile: await _privateVaultStore.readSection(
-        storeId,
-        _manifestFile,
-      ),
-      _itemsFile: await _privateVaultStore.readSection(storeId, _itemsFile),
-      _notesFile: await _privateVaultStore.readSection(storeId, _notesFile),
-      _settingsFile: await _privateVaultStore.readSection(
-        storeId,
-        _settingsFile,
-      ),
-      _tagsFile: await _privateVaultStore.readSection(storeId, _tagsFile),
-    };
+    final sections = await _readExistingWorkingSections(storeId);
     await _privateVaultStore.commitVault(
       vaultStoreId: storeId,
       header: nextHeader,
@@ -532,19 +603,7 @@ class DefaultVaultService implements VaultService {
     final nextHeader = _nextMutationHeader(
       file,
     ).copyWith(resolvedFromVersionIds: nextResolved);
-    final sections = <String, Uint8List>{
-      _manifestFile: await _privateVaultStore.readSection(
-        storeId,
-        _manifestFile,
-      ),
-      _itemsFile: await _privateVaultStore.readSection(storeId, _itemsFile),
-      _notesFile: await _privateVaultStore.readSection(storeId, _notesFile),
-      _settingsFile: await _privateVaultStore.readSection(
-        storeId,
-        _settingsFile,
-      ),
-      _tagsFile: await _privateVaultStore.readSection(storeId, _tagsFile),
-    };
+    final sections = await _readExistingWorkingSections(storeId);
     await _privateVaultStore.commitVault(
       vaultStoreId: storeId,
       header: nextHeader,
@@ -577,6 +636,7 @@ class DefaultVaultService implements VaultService {
         payload: payload,
         vaultKey: vaultKey,
       );
+      _addSnapshotExtraSections(incoming, sections);
 
       if (existing == null) {
         await _privateVaultStore.commitVault(
@@ -798,11 +858,16 @@ class DefaultVaultService implements VaultService {
       vaultKey: vaultKey,
     );
     if (!await _privateVaultStore.vaultExists(_storeIdFor(filePath, file))) {
-      await _commitPayload(
-        vaultStoreId: file.vaultId,
+      final sections = await _sectionsForPayload(
         header: file,
         payload: payload,
         vaultKey: vaultKey,
+      );
+      _addSnapshotExtraSections(file, sections);
+      await _privateVaultStore.commitVault(
+        vaultStoreId: file.vaultId,
+        header: file,
+        sections: sections,
       );
     }
     await _rememberRegistry(file, label: _displayLabel(file));
@@ -915,27 +980,18 @@ class DefaultVaultService implements VaultService {
     final storeId = _handleToVaultStoreId[handle] ?? handle;
     if (await _privateVaultStore.vaultExists(storeId)) {
       final header = await _privateVaultStore.readHeader(storeId);
-      final manifest = await _privateVaultStore.readSection(
-        storeId,
-        _manifestFile,
-      );
-      final items = await _privateVaultStore.readSection(storeId, _itemsFile);
-      final notes = await _privateVaultStore.readSection(storeId, _notesFile);
-      final settings = await _privateVaultStore.readSection(
-        storeId,
-        _settingsFile,
-      );
-      final tags = await _privateVaultStore.readSection(storeId, _tagsFile);
+      final sections = await _readExistingWorkingSections(storeId);
+      final manifest = sections.remove(_manifestFile);
+      if (manifest == null) {
+        throw StateError('Working vault missing manifest section.');
+      }
       return header.copyWith(
         formatVersion: VaultMigrator.currentVaultFormatVersion,
         encryptedPayload: null,
         encryptedManifest: base64Encode(manifest),
-        encryptedSections: <String, String>{
-          _itemsFile: base64Encode(items),
-          _notesFile: base64Encode(notes),
-          _settingsFile: base64Encode(settings),
-          _tagsFile: base64Encode(tags),
-        },
+        encryptedSections: sections.map(
+          (name, bytes) => MapEntry<String, String>(name, base64Encode(bytes)),
+        ),
       );
     }
     return _readSnapshotFile(handle);
@@ -1068,11 +1124,33 @@ class DefaultVaultService implements VaultService {
       payload: payload,
       vaultKey: vaultKey,
     );
+    final existing = await _readExistingWorkingSections(vaultStoreId);
+    for (final entry in existing.entries) {
+      sections.putIfAbsent(entry.key, () => entry.value);
+    }
     await _privateVaultStore.commitVault(
       vaultStoreId: vaultStoreId,
       header: header,
       sections: sections,
     );
+  }
+
+  Future<Map<String, Uint8List>> _readExistingWorkingSections(
+    String vaultStoreId,
+  ) async {
+    if (!await _privateVaultStore.vaultExists(vaultStoreId)) {
+      return <String, Uint8List>{};
+    }
+    final structure = await _privateVaultStore.describeVault(vaultStoreId);
+    final files = Map<String, dynamic>.from(
+      structure['files'] as Map? ?? const <String, dynamic>{},
+    );
+    final sections = <String, Uint8List>{};
+    for (final name in files.keys) {
+      if (name == _headerFile) continue;
+      sections[name] = await _privateVaultStore.readSection(vaultStoreId, name);
+    }
+    return sections;
   }
 
   Future<Map<String, Uint8List>> _sectionsForPayload({
@@ -1099,12 +1177,35 @@ class DefaultVaultService implements VaultService {
     };
   }
 
+  void _addSnapshotExtraSections(
+    VaultFile snapshot,
+    Map<String, Uint8List> sections,
+  ) {
+    for (final entry in snapshot.encryptedSections.entries) {
+      if (_isCoreSection(entry.key)) continue;
+      sections.putIfAbsent(entry.key, () => base64Decode(entry.value));
+    }
+  }
+
+  bool _isCoreSection(String name) {
+    return name == _manifestFile ||
+        name == _itemsFile ||
+        name == _notesFile ||
+        name == _settingsFile ||
+        name == _tagsFile;
+  }
+
   Future<Uint8List> _encryptJson(dynamic value, List<int> vaultKey) async {
     final encrypted = await _cryptoAdapter.encrypt(
       plain: utf8.encode(jsonEncode(value)),
       key: vaultKey,
     );
     return Uint8List.fromList(encrypted);
+  }
+
+  String _documentSectionFile(String documentId) {
+    final cleaned = documentId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    return 'document_$cleaned.enc';
   }
 
   Future<List<int>> _unwrapVaultKey(VaultFile file, String password) async {

@@ -87,6 +87,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Timer? _busyWatchdog;
   Timer? _backgroundLockTimer;
   int _busyRunId = 0;
+  bool _lifecycleLockSuppressed = false;
   final _vaultReferenceCache = VaultReferenceCache();
   final VaultPortabilityAdapter _vaultPortability =
       VaultPortabilityAdapterImpl();
@@ -170,9 +171,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return;
     }
     if (state == AppLifecycleState.paused && _step == OnboardingStep.app) {
+      if (_lifecycleLockSuppressed) return;
       _backgroundLockTimer?.cancel();
       _backgroundLockTimer = Timer(_pausedLockDelay, () {
-        if (!mounted || _step != OnboardingStep.app) return;
+        if (!mounted ||
+            _step != OnboardingStep.app ||
+            _lifecycleLockSuppressed) {
+          return;
+        }
         _clearSensitiveSessionState();
         setState(() => _step = OnboardingStep.unlock);
       });
@@ -232,6 +238,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         biometricEnabled: _biometricEnabled,
         onBiometricChanged: _onBiometricPreferenceChanged,
         onPersistVaultData: _persistVaultData,
+        onPersistVaultDocument: _persistVaultDocument,
+        onReadVaultDocument: _readVaultDocument,
+        onLifecycleLockSuppressed: _setLifecycleLockSuppressed,
         onRotateMasterPassword: _rotateMasterPassword,
         onRotateRecoveryPhrase: _rotateRecoveryPhrase,
         onExportVault: () =>
@@ -1090,6 +1099,43 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     });
   }
 
+  Future<String> _persistVaultDocument({
+    required String documentId,
+    required List<int> bytes,
+  }) async {
+    final password = _passwordController.text.trim();
+    if (password.isEmpty) {
+      throw StateError('Master password missing for document persistence.');
+    }
+    final sectionName = await _vaultService.persistVaultDocument(
+      filePath: _vaultFilePath,
+      password: password,
+      documentId: documentId,
+      bytes: bytes,
+    );
+    await _refreshVaultSize();
+    return sectionName;
+  }
+
+  Future<List<int>> _readVaultDocument({required String sectionName}) async {
+    final password = _passwordController.text.trim();
+    if (password.isEmpty) {
+      throw StateError('Master password missing for document preview.');
+    }
+    return _vaultService.readVaultDocument(
+      filePath: _vaultFilePath,
+      password: password,
+      sectionName: sectionName,
+    );
+  }
+
+  void _setLifecycleLockSuppressed(bool suppressed) {
+    _lifecycleLockSuppressed = suppressed;
+    if (suppressed) {
+      _backgroundLockTimer?.cancel();
+    }
+  }
+
   Future<void> _renameActiveVault(String name) async {
     final renamed = name.trim();
     if (renamed.isEmpty) {
@@ -1196,6 +1242,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       copy.remove('version');
       copy.remove('createdAt');
       copy.remove('updatedAt');
+      copy.remove('updatedByDevice');
+      copy.remove('deviceId');
       return copy;
     }
 
@@ -1330,7 +1378,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
   }
 
-  void _startBusy(String message) {
+  void _startBusy(
+    String message, {
+    Duration timeout = _vaultOpTimeout,
+    String timeoutMessage = 'Operation took too long. Please try again.',
+  }) {
     if (!mounted) return;
     _busyWatchdog?.cancel();
     final runId = ++_busyRunId;
@@ -1339,14 +1391,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _busyProgress = 0.0;
       _busyMessage = message;
     });
-    _busyWatchdog = Timer(const Duration(seconds: 25), () {
+    _busyWatchdog = Timer(timeout, () {
       if (!mounted || !_isBusy || runId != _busyRunId) return;
       _stopBusy();
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(
-          content: Text('Operation took too long. Please try again.'),
-        ),
-      );
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(timeoutMessage)));
     });
   }
 
@@ -1357,6 +1407,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _busyProgress = progress.value;
       _busyMessage = progress.message;
     });
+  }
+
+  void _updateBusyStep(String message, double progress) {
+    _updateBusy(VaultOperationProgress(value: progress, message: message));
   }
 
   void _stopBusy() {
@@ -1854,10 +1908,29 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _backupCurrentVaultToCloud() async {
+    var busyActive = false;
+    void startCloudBusy(String message) {
+      _startBusy(
+        message,
+        timeout: const Duration(minutes: 2),
+        timeoutMessage:
+            'Cloud backup is taking longer than expected. Please check your connection and retry.',
+      );
+      busyActive = true;
+    }
+
+    void stopCloudBusy() {
+      if (!busyActive) return;
+      _stopBusy();
+      busyActive = false;
+    }
+
     try {
+      startCloudBusy('Preparing cloud backup...');
       final rawContent = await _vaultService.readRawVaultFile(
         filePath: _vaultFilePath,
       );
+      _updateBusyStep('Reading vault metadata...', 0.15);
       final decoded = Map<String, dynamic>.from(jsonDecode(rawContent) as Map);
       final vaultId = decoded['vaultId']?.toString().trim() ?? '';
       if (vaultId.isEmpty) {
@@ -1870,18 +1943,32 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         _vaultFilePath,
       ).replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
       final suggestedName = 'backup_${stamp}_$baseName';
-      final shouldContinue = await _resolveCloudVersionBeforeBackup(
+      _updateBusyStep('Checking cloud backup status...', 0.30);
+      final existingBackup = await _vaultPortability.readCloudBackup(
         vaultId: vaultId,
       );
+      stopCloudBusy();
+      var shouldContinue = true;
+      if (existingBackup != null) {
+        final result = await _importCloudBackupForMerge(
+          backup: existingBackup,
+          askBackupAfterMerge: true,
+        );
+        shouldContinue = result != _CloudMergeOutcome.cancelled;
+      }
       if (!shouldContinue) return;
+      startCloudBusy('Uploading cloud backup...');
       final finalContent = await _vaultService.readRawVaultFile(
         filePath: _vaultFilePath,
       );
+      _updateBusyStep('Sending vault to cloud storage...', 0.55);
       final backedUp = await _vaultPortability.backupVaultToCloud(
         vaultId: vaultId,
         suggestedName: suggestedName,
         content: finalContent,
       );
+      _updateBusyStep('Finishing cloud backup...', 0.95);
+      stopCloudBusy();
       if (!mounted) return;
       if (!backedUp) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1893,6 +1980,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         context,
       ).showSnackBar(const SnackBar(content: Text('Cloud backup completed.')));
     } catch (error, stackTrace) {
+      stopCloudBusy();
       _logOperationError('backupCurrentVaultToCloud', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1900,20 +1988,44 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           content: Text('Failed to prepare cloud backup. ${_errorHint(error)}'),
         ),
       );
+    } finally {
+      stopCloudBusy();
     }
   }
 
   Future<void> _restoreCurrentVaultFromCloud() async {
+    var busyActive = false;
+    void startCloudBusy(String message) {
+      _startBusy(
+        message,
+        timeout: const Duration(minutes: 2),
+        timeoutMessage:
+            'Cloud restore is taking longer than expected. Please check your connection and retry.',
+      );
+      busyActive = true;
+    }
+
+    void stopCloudBusy() {
+      if (!busyActive) return;
+      _stopBusy();
+      busyActive = false;
+    }
+
     try {
+      startCloudBusy('Preparing cloud restore...');
       final rawContent = await _vaultService.readRawVaultFile(
         filePath: _vaultFilePath,
       );
+      _updateBusyStep('Reading vault metadata...', 0.20);
       final decoded = Map<String, dynamic>.from(jsonDecode(rawContent) as Map);
       final vaultId = decoded['vaultId']?.toString().trim() ?? '';
       if (vaultId.isEmpty) {
         throw StateError('Vault metadata is missing vaultId');
       }
+      _updateBusyStep('Downloading cloud backup...', 0.45);
       final backup = await _vaultPortability.readCloudBackup(vaultId: vaultId);
+      _updateBusyStep('Preparing backup restore...', 0.75);
+      stopCloudBusy();
       if (backup == null) {
         if (!mounted) return;
         ScaffoldMessenger.of(
@@ -1926,6 +2038,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         askBackupAfterMerge: false,
       );
     } catch (error, stackTrace) {
+      stopCloudBusy();
       _logOperationError('restoreCurrentVaultFromCloud', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1933,19 +2046,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           content: Text('Failed to restore cloud backup. ${_errorHint(error)}'),
         ),
       );
+    } finally {
+      stopCloudBusy();
     }
-  }
-
-  Future<bool> _resolveCloudVersionBeforeBackup({
-    required String vaultId,
-  }) async {
-    final backup = await _vaultPortability.readCloudBackup(vaultId: vaultId);
-    if (backup == null) return true;
-    final result = await _importCloudBackupForMerge(
-      backup: backup,
-      askBackupAfterMerge: true,
-    );
-    return result != _CloudMergeOutcome.cancelled;
   }
 
   Future<_CloudMergeOutcome> _importCloudBackupForMerge({
@@ -2079,10 +2182,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _refreshVaultSize() async {
     try {
-      final raw = await _vaultService.readRawVaultFile(
+      final size = await _vaultService.readVaultSizeBytes(
         filePath: _vaultFilePath,
       );
-      final size = utf8.encode(raw).length;
       if (!mounted) return;
       setState(() => _activeVaultSizeBytes = size);
     } catch (_) {

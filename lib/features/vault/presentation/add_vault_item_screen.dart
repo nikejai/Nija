@@ -573,10 +573,12 @@ class NewItemCategoryScreen extends StatefulWidget {
     super.key,
     required this.customTypeDefinitions,
     this.onCreateNote,
+    this.onCreateDocument,
   });
 
   final List<Map<String, dynamic>> customTypeDefinitions;
   final Future<Map<String, dynamic>?> Function()? onCreateNote;
+  final Future<Map<String, dynamic>?> Function()? onCreateDocument;
 
   @override
   State<NewItemCategoryScreen> createState() => _NewItemCategoryScreenState();
@@ -654,6 +656,20 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                         Navigator.of(
                           context,
                         ).pop({'kind': 'note', 'entry': createdNote});
+                        return;
+                      }
+                      if (option.kind == 'document' &&
+                          widget.onCreateDocument != null) {
+                        final createdDocument = await widget.onCreateDocument!
+                            .call();
+                        if (createdDocument == null || !context.mounted) {
+                          return;
+                        }
+                        await _showSavedSuccessSheet(context);
+                        if (!context.mounted) return;
+                        Navigator.of(
+                          context,
+                        ).pop({'kind': 'item', 'entry': createdDocument});
                         return;
                       }
                       final createdItem = await Navigator.of(context)
@@ -762,6 +778,13 @@ List<_CategoryOption> _buildCategoryOptions(
     icon: Icons.note_add_outlined,
     color: const Color(0xFFFBBF24),
   );
+  final documents = _CategoryOption(
+    kind: 'document',
+    type: 'Documents',
+    subtitle: 'Encrypted files up to 5 MB',
+    icon: Icons.folder_outlined,
+    color: const Color(0xFFFB7185),
+  );
   final builtIn = AddVaultItemScreen.templates
       .map(
         (template) => _CategoryOption(
@@ -786,7 +809,7 @@ List<_CategoryOption> _buildCategoryOptions(
         ),
       )
       .toList();
-  return [note, ...custom, ...builtIn];
+  return [note, documents, ...custom, ...builtIn];
 }
 
 String _subtitleForType(String type) {
@@ -795,6 +818,7 @@ String _subtitleForType(String type) {
     return 'Website, app, Wi-Fi and more';
   }
   if (normalized.contains('note')) return 'Secure notes and memos';
+  if (normalized.contains('document')) return 'Encrypted files and records';
   if (normalized.contains('ident') || normalized.contains('passport')) {
     return 'Personal info and IDs';
   }
@@ -814,6 +838,7 @@ IconData _iconForCategoryType(String type) {
     return Icons.lock_outline;
   }
   if (normalized.contains('note')) return Icons.sticky_note_2_outlined;
+  if (normalized.contains('document')) return Icons.folder_outlined;
   if (normalized.contains('ident') || normalized.contains('passport')) {
     return Icons.badge_outlined;
   }
@@ -858,6 +883,7 @@ Color _colorForCategoryType(String type) {
     return const Color(0xFF60A5FA);
   }
   if (normalized.contains('note')) return const Color(0xFFFBBF24);
+  if (normalized.contains('document')) return const Color(0xFFFB7185);
   if (normalized.contains('ident') || normalized.contains('passport')) {
     return const Color(0xFF34D399);
   }

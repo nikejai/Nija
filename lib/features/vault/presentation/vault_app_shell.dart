@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/config/app_features.dart';
@@ -14,6 +15,7 @@ import '../../../infrastructure/adapters/secret_share_portability.dart';
 import '../../../infrastructure/adapters/secret_share_portability_base.dart';
 import 'add_vault_item_screen.dart';
 import 'create_custom_type_screen.dart';
+import 'document_upload_screen.dart';
 import 'note_editor_screen.dart';
 import 'widgets/vault_entry_list.dart';
 import 'widgets/vault_page_heading.dart';
@@ -36,6 +38,14 @@ typedef PersistVaultData =
       required List<Map<String, dynamic>> notes,
       required List<Map<String, dynamic>> customTypeDefinitions,
     });
+typedef PersistVaultDocument =
+    Future<String> Function({
+      required String documentId,
+      required List<int> bytes,
+    });
+typedef ReadVaultDocument =
+    Future<List<int>> Function({required String sectionName});
+typedef LifecycleLockSuppressed = void Function(bool suppressed);
 typedef VaultFileAction = Future<void> Function();
 typedef CloudBackupAction = Future<void> Function();
 typedef CloudBackupAccountRead = Future<String?> Function();
@@ -59,6 +69,9 @@ class VaultAppShell extends StatefulWidget {
     required this.biometricEnabled,
     required this.onBiometricChanged,
     required this.onPersistVaultData,
+    this.onPersistVaultDocument,
+    this.onReadVaultDocument,
+    this.onLifecycleLockSuppressed,
     required this.onRotateMasterPassword,
     required this.onRotateRecoveryPhrase,
     required this.onLockNow,
@@ -85,6 +98,9 @@ class VaultAppShell extends StatefulWidget {
   final bool biometricEnabled;
   final BiometricChanged onBiometricChanged;
   final PersistVaultData onPersistVaultData;
+  final PersistVaultDocument? onPersistVaultDocument;
+  final ReadVaultDocument? onReadVaultDocument;
+  final LifecycleLockSuppressed? onLifecycleLockSuppressed;
   final RotateMasterPassword onRotateMasterPassword;
   final RotateRecoveryPhrase onRotateRecoveryPhrase;
   final VoidCallback onLockNow;
@@ -102,6 +118,9 @@ class VaultAppShell extends StatefulWidget {
 }
 
 class _VaultAppShellState extends State<VaultAppShell> {
+  static const MethodChannel _documentOpenChannel = MethodChannel(
+    'nija/document_open',
+  );
   static const String _encryptedShareExtension = '.nijas';
   static const String _prefsKeyVaultSort = 'nija_pref_vault_sort_v1';
   static const String _prefsKeyNotesSort = 'nija_pref_notes_sort_v1';
@@ -170,6 +189,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList();
     _vaultListEntryAdapters = [
+      const VaultDocumentListEntryAdapter(),
       VaultItemListEntryAdapter(
         iconForType: _iconForDashboardType,
         colorForType: _colorForDashboardType,
@@ -395,17 +415,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
             ]
             .where((row) {
               final entry = row['entry'] as Map<String, dynamic>;
-              return _lastAccessedAt(entry) != null;
+              return _activityAt(entry) != null;
             })
             .map((row) {
               final entry = row['entry'] as Map<String, dynamic>;
-              return {...row, 'updatedLabel': _lastAccessedLabel(entry)};
+              return {...row, 'updatedLabel': _activityLabel(entry)};
             })
             .toList()
           ..sort((a, b) {
             final av = a['entry'] as Map<String, dynamic>;
             final bv = b['entry'] as Map<String, dynamic>;
-            return _lastAccessedAt(bv)!.compareTo(_lastAccessedAt(av)!);
+            return _activityAt(bv)!.compareTo(_activityAt(av)!);
           });
     final recentItems = recentAll.take(4).toList();
     final typeCounts = <String, int>{};
@@ -958,9 +978,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     all.sort((a, b) {
       final av = a['entry'] as Map<String, dynamic>;
       final bv = b['entry'] as Map<String, dynamic>;
-      return _updatedSortValue(
-        bv['updated']?.toString() ?? '',
-      ).compareTo(_updatedSortValue(av['updated']?.toString() ?? ''));
+      return _entryUpdatedSortValue(bv).compareTo(_entryUpdatedSortValue(av));
     });
 
     final typeOptions = <String>{'all', 'Notes'};
@@ -1280,6 +1298,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final entry = row['entry'] as Map<String, dynamic>;
     if (kind == 'note') {
       _openNoteDetail(context, entry);
+    } else if (_isDocumentItem(entry)) {
+      _openDocumentDetail(context, entry);
     } else {
       _openItemDetail(context, entry);
     }
@@ -1298,10 +1318,60 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }
   }
 
+  bool _isDocumentItem(Map<String, dynamic> item) {
+    return item['type']?.toString() == 'Documents' ||
+        item['documentSection'] != null ||
+        item['documentFileName'] != null;
+  }
+
+  Future<void> _openDocumentDetail(
+    BuildContext context,
+    Map<String, dynamic> item,
+  ) async {
+    final accessedItem = _markItemLastAccessed(item);
+    final result = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => _DocumentDetailScreen(
+          item: accessedItem,
+          onReadDocument: widget.onReadVaultDocument,
+          showDeleteAction: true,
+        ),
+      ),
+    );
+    if (result == null) {
+      if (mounted) setState(() {});
+      return;
+    }
+    final idx = _items.indexWhere(
+      (entry) => entry['id']?.toString() == accessedItem['id']?.toString(),
+    );
+    if (idx == -1) return;
+    if (result['__delete__'] == true) {
+      setState(() => _items.removeAt(idx));
+      await _persistVaultData();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.itemDeleted)));
+      return;
+    }
+    setState(() => _items[idx] = _preserveLastAccessedAt(result, _items[idx]));
+    await _persistVaultData();
+  }
+
   int _updatedSortValue(String text) {
     final digits = RegExp(r'\d+').firstMatch(text)?.group(0);
     if (digits == null) return 0;
     return int.tryParse(digits) ?? 0;
+  }
+
+  int _entryUpdatedSortValue(Map<String, dynamic> entry) {
+    final timestamp =
+        _parseEntryTimestamp(entry['updatedAt']) ??
+        _parseEntryTimestamp(entry['documentUploadedAt']) ??
+        _parseEntryTimestamp(entry['createdAt']);
+    if (timestamp != null) return timestamp.millisecondsSinceEpoch;
+    return _updatedRank(entry);
   }
 
   int _lastAccessedSortValue(Map<String, dynamic> entry) {
@@ -1311,15 +1381,30 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   DateTime? _lastAccessedAt(Map<String, dynamic> entry) {
-    final value = entry['lastAccessedAt']?.toString().trim() ?? '';
+    return _parseEntryTimestamp(entry['lastAccessedAt']);
+  }
+
+  DateTime? _activityAt(Map<String, dynamic> entry) {
+    return _lastAccessedAt(entry) ??
+        _parseEntryTimestamp(entry['updatedAt']) ??
+        _parseEntryTimestamp(entry['documentUploadedAt']) ??
+        _parseEntryTimestamp(entry['createdAt']);
+  }
+
+  DateTime? _parseEntryTimestamp(Object? raw) {
+    final value = raw?.toString().trim() ?? '';
     if (value.isEmpty) return null;
     return DateTime.tryParse(value);
   }
 
-  String _lastAccessedLabel(Map<String, dynamic> entry) {
-    final accessedAt = _lastAccessedAt(entry);
-    if (accessedAt == null) return 'Not opened yet';
-    final elapsed = DateTime.now().toUtc().difference(accessedAt.toUtc());
+  String _activityLabel(Map<String, dynamic> entry) {
+    final activityAt = _activityAt(entry);
+    if (activityAt == null) return 'Now';
+    return _relativeTimeLabel(activityAt);
+  }
+
+  String _relativeTimeLabel(DateTime timestamp) {
+    final elapsed = DateTime.now().toUtc().difference(timestamp.toUtc());
     if (elapsed.inMinutes < 1) return 'Just now';
     if (elapsed.inHours < 1) return '${elapsed.inMinutes}m ago';
     if (elapsed.inDays < 1) return '${elapsed.inHours}h ago';
@@ -2214,6 +2299,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
               MaterialPageRoute(builder: (_) => const NoteEditorScreen()),
             );
           },
+          onCreateDocument: () async {
+            return Navigator.of(context).push<Map<String, dynamic>>(
+              MaterialPageRoute(
+                builder: (_) => DocumentUploadScreen(
+                  onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -2227,8 +2321,40 @@ class _VaultAppShellState extends State<VaultAppShell> {
       await _persistVaultData();
       return;
     }
-    setState(() => _items.insert(0, Map<String, dynamic>.from(entry)));
+    final item = Map<String, dynamic>.from(entry);
+    try {
+      if (!await _isPendingDocumentStored(item)) return;
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to store document. Please retry.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _items.insert(0, item));
     await _persistVaultData();
+  }
+
+  Future<bool> _isPendingDocumentStored(Map<String, dynamic> item) async {
+    final rawBytes = item.remove('__documentBytes__');
+    if (rawBytes == null) return true;
+    if (widget.onPersistVaultDocument == null) {
+      item['documentStorage'] = 'inline-unavailable';
+      return true;
+    }
+    final bytes = rawBytes is Uint8List
+        ? rawBytes
+        : Uint8List.fromList(List<int>.from(rawBytes as List));
+    final documentId = item['id']?.toString() ?? '';
+    final sectionName = await widget.onPersistVaultDocument!(
+      documentId: documentId,
+      bytes: bytes,
+    );
+    item['documentStorage'] = 'private-section';
+    item['documentSection'] = sectionName;
+    return true;
   }
 
   Future<void> _openCreateCustomTypeScreen(BuildContext context) async {
@@ -4551,6 +4677,557 @@ class _SettingsActionRow extends StatelessWidget {
   }
 }
 
+class _DocumentDetailScreen extends StatefulWidget {
+  const _DocumentDetailScreen({
+    required this.item,
+    required this.onReadDocument,
+    this.showDeleteAction = false,
+  });
+
+  final Map<String, dynamic> item;
+  final ReadVaultDocument? onReadDocument;
+  final bool showDeleteAction;
+
+  @override
+  State<_DocumentDetailScreen> createState() => _DocumentDetailScreenState();
+}
+
+class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
+  late Future<List<int>> _documentFuture;
+  late bool _isFavorite;
+
+  @override
+  void initState() {
+    super.initState();
+    _isFavorite = widget.item['pinned'] == true;
+    _documentFuture = _loadDocument();
+  }
+
+  Future<List<int>> _loadDocument() async {
+    final sectionName = widget.item['documentSection']?.toString().trim() ?? '';
+    if (sectionName.isEmpty) {
+      throw StateError('Document section is missing.');
+    }
+    final reader = widget.onReadDocument;
+    if (reader == null) {
+      throw StateError(
+        'Document preview is unavailable in this vault session.',
+      );
+    }
+    return reader(sectionName: sectionName);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final title = widget.item['title']?.toString() ?? 'Document';
+    final extension = _documentExtension(widget.item);
+    final fileName = _documentFileName(widget.item);
+    final size = _formatDocumentSize(widget.item);
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _closeWithUpdates();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: IconButton(
+            onPressed: _closeWithUpdates,
+            icon: const Icon(Icons.arrow_back),
+          ),
+          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          actions: [
+            IconButton(
+              onPressed: () => setState(() => _isFavorite = !_isFavorite),
+              icon: Icon(_isFavorite ? Icons.star : Icons.star_border),
+              tooltip: 'Favorite',
+            ),
+            if (widget.showDeleteAction)
+              IconButton(
+                onPressed: () => Navigator.of(
+                  context,
+                ).pop(<String, dynamic>{'__delete__': true}),
+                icon: const Icon(Icons.delete_outline),
+                tooltip: AppStrings.delete,
+              ),
+          ],
+        ),
+        body: SafeArea(
+          child: FutureBuilder<List<int>>(
+            future: _documentFuture,
+            builder: (context, snapshot) {
+              final bytes = snapshot.data;
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                    child: Column(
+                      children: [
+                        _DocumentHeader(
+                          title: title,
+                          fileName: fileName,
+                          extension: extension,
+                          size: size,
+                        ),
+                        const SizedBox(height: 10),
+                        _EntryMetadataPanel(entry: widget.item),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: colorScheme.outlineVariant),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: _buildPreview(context, snapshot, extension),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: bytes == null
+                            ? null
+                            : () => _openDocument(bytes),
+                        icon: const Icon(Icons.open_in_new_outlined),
+                        label: const Text('Open with...'),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreview(
+    BuildContext context,
+    AsyncSnapshot<List<int>> snapshot,
+    String extension,
+  ) {
+    if (snapshot.connectionState == ConnectionState.waiting) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (snapshot.hasError) {
+      return _DocumentPreviewMessage(
+        icon: Icons.error_outline,
+        title: 'Unable to preview document',
+        subtitle: snapshot.error.toString(),
+      );
+    }
+    final bytes = snapshot.data ?? const <int>[];
+    if (bytes.isEmpty) {
+      return const _DocumentPreviewMessage(
+        icon: Icons.insert_drive_file_outlined,
+        title: 'Empty document',
+        subtitle: 'There is no content to preview.',
+      );
+    }
+    if (_isImageExtension(extension)) {
+      return InteractiveViewer(
+        minScale: 0.5,
+        maxScale: 4,
+        child: Center(
+          child: Image.memory(
+            Uint8List.fromList(bytes),
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stackTrace) =>
+                const _DocumentPreviewMessage(
+                  icon: Icons.broken_image_outlined,
+                  title: 'Image preview failed',
+                  subtitle: 'Use Open with... to view this document.',
+                ),
+          ),
+        ),
+      );
+    }
+    if (_isTextExtension(extension)) {
+      final text = utf8.decode(bytes, allowMalformed: true);
+      return Scrollbar(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(14),
+          child: SelectableText(
+            text,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          ),
+        ),
+      );
+    }
+    return _DocumentPreviewMessage(
+      icon: extension == 'PDF'
+          ? Icons.picture_as_pdf_outlined
+          : Icons.insert_drive_file_outlined,
+      title: '$extension preview unavailable',
+      subtitle: 'Use Open with... to view this document in another app.',
+    );
+  }
+
+  Future<void> _openDocument(List<int> bytes) async {
+    final fileName = _documentFileName(widget.item);
+    final mimeType = _mimeTypeForExtension(_documentExtension(widget.item));
+    try {
+      await _VaultAppShellState._documentOpenChannel.invokeMethod<bool>(
+        'openDocument',
+        <String, Object>{
+          'fileName': fileName,
+          'mimeType': mimeType,
+          'bytes': Uint8List.fromList(bytes),
+        },
+      );
+    } on MissingPluginException {
+      await _shareDocumentFallback(bytes, fileName, mimeType);
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message ?? 'No app can open this file.')),
+      );
+      await _shareDocumentFallback(bytes, fileName, mimeType);
+    }
+  }
+
+  Future<void> _shareDocumentFallback(
+    List<int> bytes,
+    String fileName,
+    String mimeType,
+  ) async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [
+          XFile.fromData(
+            Uint8List.fromList(bytes),
+            name: fileName,
+            mimeType: mimeType,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _closeWithUpdates() {
+    final pinnedWas = widget.item['pinned'] == true;
+    if (pinnedWas == _isFavorite) {
+      Navigator.of(context).pop();
+      return;
+    }
+    Navigator.of(
+      context,
+    ).pop(<String, dynamic>{...widget.item, 'pinned': _isFavorite});
+  }
+}
+
+class _DocumentHeader extends StatelessWidget {
+  const _DocumentHeader({
+    required this.title,
+    required this.fileName,
+    required this.extension,
+    required this.size,
+  });
+
+  final String title;
+  final String fileName;
+  final String extension;
+  final String size;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFB7185).withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(
+            Icons.insert_drive_file_outlined,
+            color: Color(0xFFFB7185),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '$extension · $size · $fileName',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DocumentPreviewMessage extends StatelessWidget {
+  const _DocumentPreviewMessage({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: colorScheme.onSurfaceVariant, size: 42),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _documentExtension(Map<String, dynamic> item) {
+  final extension = item['documentExtension']?.toString().trim();
+  if (extension != null && extension.isNotEmpty) {
+    return extension.toUpperCase();
+  }
+  final fileName = _documentFileName(item);
+  final dot = fileName.lastIndexOf('.');
+  if (dot == -1 || dot == fileName.length - 1) return 'FILE';
+  return fileName.substring(dot + 1).toUpperCase();
+}
+
+String _documentFileName(Map<String, dynamic> item) {
+  final fileName = item['documentFileName']?.toString().trim();
+  if (fileName != null && fileName.isNotEmpty) return fileName;
+  final title = item['title']?.toString().trim();
+  if (title != null && title.isNotEmpty) return title;
+  return 'document';
+}
+
+String _formatDocumentSize(Map<String, dynamic> item) {
+  final raw = item['documentSizeBytes'];
+  final bytes = raw is int ? raw : int.tryParse(raw?.toString() ?? '') ?? 0;
+  if (bytes <= 0) return '0 B';
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
+  final mb = kb / 1024;
+  return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
+}
+
+bool _isImageExtension(String extension) {
+  return const <String>{
+    'PNG',
+    'JPG',
+    'JPEG',
+    'GIF',
+    'WEBP',
+    'BMP',
+  }.contains(extension.toUpperCase());
+}
+
+bool _isTextExtension(String extension) {
+  return const <String>{
+    'TXT',
+    'MD',
+    'JSON',
+    'CSV',
+    'LOG',
+    'XML',
+    'YAML',
+    'YML',
+  }.contains(extension.toUpperCase());
+}
+
+String _mimeTypeForExtension(String extension) {
+  switch (extension.toUpperCase()) {
+    case 'PNG':
+      return 'image/png';
+    case 'JPG':
+    case 'JPEG':
+      return 'image/jpeg';
+    case 'GIF':
+      return 'image/gif';
+    case 'WEBP':
+      return 'image/webp';
+    case 'PDF':
+      return 'application/pdf';
+    case 'JSON':
+      return 'application/json';
+    case 'CSV':
+      return 'text/csv';
+    case 'TXT':
+    case 'MD':
+    case 'LOG':
+    case 'YAML':
+    case 'YML':
+      return 'text/plain';
+    case 'XML':
+      return 'application/xml';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+class _EntryMetadataPanel extends StatelessWidget {
+  const _EntryMetadataPanel({required this.entry});
+
+  final Map<String, dynamic> entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        children: [
+          _EntryMetadataLine(
+            label: 'Created',
+            value: _entryCreatedLabel(entry),
+          ),
+          const SizedBox(height: 6),
+          _EntryMetadataLine(
+            label: 'Modified',
+            value: _entryModifiedLabel(entry),
+          ),
+          const SizedBox(height: 6),
+          _EntryMetadataLine(label: 'Device', value: _entryDeviceLabel(entry)),
+        ],
+      ),
+    );
+  }
+}
+
+class _EntryMetadataLine extends StatelessWidget {
+  const _EntryMetadataLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        SizedBox(
+          width: 74,
+          child: Text(
+            label,
+            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: colorScheme.onSurface,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _entryCreatedLabel(Map<String, dynamic> entry) {
+  final value =
+      entry['createdAt'] ?? entry['created_at'] ?? entry['documentUploadedAt'];
+  return _formatEntryTimestamp(value, fallback: 'Unknown');
+}
+
+String _entryModifiedLabel(Map<String, dynamic> entry) {
+  final value = entry['updatedAt'] ?? entry['updated'] ?? entry['createdAt'];
+  return _formatEntryTimestamp(value, fallback: 'Now');
+}
+
+String _entryDeviceLabel(Map<String, dynamic> entry) {
+  final label = entry['updatedByDevice']?.toString().trim() ?? '';
+  final id = entry['deviceId']?.toString().trim() ?? '';
+  if (label.isNotEmpty && id.isNotEmpty) {
+    return '$label · ${_shortDeviceId(id)}';
+  }
+  if (label.isNotEmpty) return label;
+  if (id.isNotEmpty) return _shortDeviceId(id);
+  return 'Unknown';
+}
+
+String _shortDeviceId(String id) {
+  if (id.length <= 8) return id;
+  return id.substring(0, 8);
+}
+
+String _formatEntryTimestamp(Object? raw, {required String fallback}) {
+  final value = raw?.toString().trim() ?? '';
+  if (value.isEmpty) return fallback;
+  if (value.toLowerCase() == 'now') return 'Now';
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) return value;
+  final local = parsed.toLocal();
+  String twoDigits(int number) => number.toString().padLeft(2, '0');
+  return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} '
+      '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
+}
+
 class _ItemDetailScreen extends StatefulWidget {
   const _ItemDetailScreen({
     required this.item,
@@ -4612,8 +5289,9 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
         .toList();
     final itemType = widget.item['type']?.toString() ?? 'Item';
     final title = widget.item['title']?.toString() ?? 'Untitled';
-    final created = widget.item['created_at']?.toString() ?? 'Unknown';
-    final modified = widget.item['updated']?.toString() ?? 'Now';
+    final created = _entryCreatedLabel(widget.item);
+    final modified = _entryModifiedLabel(widget.item);
+    final device = _entryDeviceLabel(widget.item);
     final lastAccessed = _formatLastAccessedAt(
       widget.item['lastAccessedAt']?.toString(),
     );
@@ -4800,6 +5478,8 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                     _metadataRow('Created', created),
                     const SizedBox(height: 8),
                     _metadataRow('Modified', modified),
+                    const SizedBox(height: 8),
+                    _metadataRow('Device', device),
                     const SizedBox(height: 8),
                     _metadataRow('Last accessed', lastAccessed),
                   ],
