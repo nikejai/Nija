@@ -79,6 +79,13 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
   }
 
   @override
+  Future<CloudVaultBackupFile?> readCloudBackup({
+    required String vaultId,
+  }) async {
+    return null;
+  }
+
+  @override
   Future<String?> getCloudBackupAccountLabel() async => 'Browser download';
 
   @override

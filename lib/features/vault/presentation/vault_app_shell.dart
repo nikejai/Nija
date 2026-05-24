@@ -110,6 +110,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   static const String _prefsKeyCloudBackupLastAt =
       'nija_pref_cloud_backup_last_at_v1';
   final _clipboard = SecureClipboard();
+  final _allItemsSearchController = TextEditingController();
   final _encryptedShareCodec = EncryptedShareCodec();
   final SecretSharePortabilityAdapter _secretSharePortability =
       SecretSharePortabilityAdapterImpl();
@@ -188,10 +189,41 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (oldWidget.activeVaultName != widget.activeVaultName) {
       _activeVaultName = widget.activeVaultName;
     }
+    if (!listEquals(oldWidget.initialItems, widget.initialItems)) {
+      _items
+        ..clear()
+        ..addAll(
+          widget.initialItems.map((entry) => Map<String, dynamic>.from(entry)),
+        );
+      _selectedVaultItemIds.clear();
+      _selectedAllItemsKeys.removeWhere((key) => key.startsWith('item:'));
+    }
+    if (!listEquals(oldWidget.initialNotes, widget.initialNotes)) {
+      _notes
+        ..clear()
+        ..addAll(
+          widget.initialNotes.map((entry) => Map<String, dynamic>.from(entry)),
+        );
+      _selectedNoteIds.clear();
+      _selectedAllItemsKeys.removeWhere((key) => key.startsWith('note:'));
+    }
+    if (!listEquals(
+      oldWidget.initialCustomTypeDefinitions,
+      widget.initialCustomTypeDefinitions,
+    )) {
+      _customTypeDefinitions
+        ..clear()
+        ..addAll(
+          widget.initialCustomTypeDefinitions.map(
+            (entry) => Map<String, dynamic>.from(entry),
+          ),
+        );
+    }
   }
 
   @override
   void dispose() {
+    _allItemsSearchController.dispose();
     _clipboard.dispose();
     super.dispose();
   }
@@ -440,7 +472,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       ),
                       contentPadding: const EdgeInsets.symmetric(vertical: 0),
                     ),
+                    textInputAction: TextInputAction.search,
                     onChanged: (value) => setState(() => _query = value),
+                    onSubmitted: _applyDashboardSearchToAllItems,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -450,8 +484,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: IconButton(
-                    onPressed: () =>
-                        _openAllItemsFiltersOverlay(_allTypeFilterOptions()),
+                    onPressed: () => _openAllItemsFiltersOverlay(
+                      _allTypeFilterOptions(),
+                      showAllItemsOnApply: true,
+                    ),
                     icon: const Icon(Icons.tune, color: Color(0xFF6B7280)),
                   ),
                 ),
@@ -1008,6 +1044,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
               children: [
                 Expanded(
                   child: TextField(
+                    controller: _allItemsSearchController,
                     style: const TextStyle(color: Color(0xFF111827)),
                     decoration: InputDecoration(
                       hintText: 'Search all items...',
@@ -1314,6 +1351,20 @@ class _VaultAppShellState extends State<VaultAppShell> {
     });
   }
 
+  void _applyDashboardSearchToAllItems(String value) {
+    final query = value.trim();
+    if (query.isEmpty) return;
+    setState(() {
+      _query = query;
+      _allItemsQuery = query;
+      _allItemsSearchController.text = query;
+      _allItemsSearchController.selection = TextSelection.collapsed(
+        offset: query.length,
+      );
+      _tabIndex = 1;
+    });
+  }
+
   Map<String, dynamic>? _customTypeDefinitionForType(String type) {
     final normalized = type.trim().toLowerCase();
     if (normalized.isEmpty) return null;
@@ -1338,7 +1389,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return _colorForHomeType(type);
   }
 
-  Future<void> _openAllItemsFiltersOverlay(List<String> typeOptions) async {
+  Future<void> _openAllItemsFiltersOverlay(
+    List<String> typeOptions, {
+    bool showAllItemsOnApply = false,
+  }) async {
     final applied = await Navigator.of(context).push<_AllItemsFilterState>(
       PageRouteBuilder(
         opaque: false,
@@ -1359,6 +1413,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _allItemsFilterTypes = applied.selectedTypes;
       _allItemsFilterFavoritesOnly = applied.favoritesOnly;
       _allItemsFilterDateRange = applied.dateRange;
+      if (showAllItemsOnApply) {
+        _tabIndex = 1;
+      }
     });
   }
 

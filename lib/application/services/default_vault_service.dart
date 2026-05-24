@@ -517,6 +517,45 @@ class DefaultVaultService implements VaultService {
   }
 
   @override
+  Future<void> markVaultConflictResolved({
+    required String filePath,
+    required String resolvedVaultVersionId,
+  }) async {
+    final cleaned = resolvedVaultVersionId.trim();
+    if (cleaned.isEmpty) return;
+    final file = await _readMigratedVaultFile(filePath: filePath);
+    final storeId = _storeIdFor(filePath, file);
+    final nextResolved = <String>{
+      ...file.resolvedFromVersionIds,
+      cleaned,
+    }.toList()..sort();
+    final nextHeader = _nextMutationHeader(
+      file,
+    ).copyWith(resolvedFromVersionIds: nextResolved);
+    final sections = <String, Uint8List>{
+      _manifestFile: await _privateVaultStore.readSection(
+        storeId,
+        _manifestFile,
+      ),
+      _itemsFile: await _privateVaultStore.readSection(storeId, _itemsFile),
+      _notesFile: await _privateVaultStore.readSection(storeId, _notesFile),
+      _settingsFile: await _privateVaultStore.readSection(
+        storeId,
+        _settingsFile,
+      ),
+      _tagsFile: await _privateVaultStore.readSection(storeId, _tagsFile),
+    };
+    await _privateVaultStore.commitVault(
+      vaultStoreId: storeId,
+      header: nextHeader,
+      sections: sections,
+    );
+    await _rememberRegistry(nextHeader, label: _displayLabel(nextHeader));
+    _handleToVaultStoreId[filePath] = storeId;
+    await _writeSnapshotToHandle(filePath, storeId);
+  }
+
+  @override
   Future<ImportResult> importNijaFile({
     required String filePath,
     required String unlockCredential,
@@ -568,6 +607,17 @@ class DefaultVaultService implements VaultService {
           userSafeMessage: 'Vault already up to date.',
         );
       }
+      if (local.resolvedFromVersionIds.contains(incoming.vaultVersionId)) {
+        return ImportResult(
+          status: ImportStatus.alreadyUpToDate,
+          vaultId: incoming.vaultId,
+          localRevision: local.revision,
+          incomingRevision: incoming.revision,
+          localUpdatedAt: local.updatedAt,
+          incomingUpdatedAt: incoming.updatedAt,
+          userSafeMessage: 'This vault version was already merged.',
+        );
+      }
       if (_hasRevision(incoming) && _hasRevision(local)) {
         if (incoming.revision > local.revision) {
           if (!confirmReplace) {
@@ -590,14 +640,12 @@ class DefaultVaultService implements VaultService {
           );
         }
         if (incoming.revision < local.revision) {
-          return ImportResult(
-            status: ImportStatus.incomingOlder,
-            vaultId: incoming.vaultId,
-            localRevision: local.revision,
-            incomingRevision: incoming.revision,
-            localUpdatedAt: local.updatedAt,
-            incomingUpdatedAt: incoming.updatedAt,
-            userSafeMessage: 'Imported vault is older.',
+          return _createConflictCopy(
+            incoming: incoming,
+            sections: sections,
+            local: local,
+            message:
+                'Imported vault is older. Review it before merging anything.',
           );
         }
         return _createConflictCopy(
@@ -618,14 +666,12 @@ class DefaultVaultService implements VaultService {
         );
       }
       if (fallback < 0) {
-        return ImportResult(
-          status: ImportStatus.incomingOlder,
-          vaultId: incoming.vaultId,
-          localRevision: local.revision,
-          incomingRevision: incoming.revision,
-          localUpdatedAt: local.updatedAt,
-          incomingUpdatedAt: incoming.updatedAt,
-          userSafeMessage: 'Imported vault is older.',
+        return _createConflictCopy(
+          incoming: incoming,
+          sections: sections,
+          local: local,
+          message:
+              'Imported legacy vault is older. Review it before merging anything.',
         );
       }
       return _createConflictCopy(
@@ -829,6 +875,7 @@ class DefaultVaultService implements VaultService {
     required VaultFile incoming,
     required Map<String, Uint8List> sections,
     required VaultFile local,
+    String message = 'Conflict copy created.',
   }) async {
     final conflictId =
         '${incoming.vaultId}-conflict-${DateTime.now().millisecondsSinceEpoch}';
@@ -851,6 +898,7 @@ class DefaultVaultService implements VaultService {
         isConflict: true,
       ),
     );
+    _handleToVaultStoreId[conflictId] = conflictId;
     return ImportResult(
       status: ImportStatus.conflictCreated,
       vaultId: incoming.vaultId,
@@ -859,7 +907,7 @@ class DefaultVaultService implements VaultService {
       incomingRevision: incoming.revision,
       localUpdatedAt: local.updatedAt,
       incomingUpdatedAt: incoming.updatedAt,
-      userSafeMessage: 'Conflict copy created.',
+      userSafeMessage: message,
     );
   }
 
@@ -1088,6 +1136,7 @@ class DefaultVaultService implements VaultService {
       revision: file.revision + 1,
       vaultVersionId: _newUuidV4(),
       lastModifiedByDeviceId: _deviceId,
+      resolvedFromVersionIds: const <String>[],
       encryptedPayload: null,
     );
   }

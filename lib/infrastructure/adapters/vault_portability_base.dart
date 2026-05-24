@@ -11,6 +11,7 @@ abstract class VaultPortabilityAdapter {
     required String suggestedName,
     required String content,
   });
+  Future<CloudVaultBackupFile?> readCloudBackup({required String vaultId});
   Future<String?> getCloudBackupAccountLabel();
   Future<bool> changeCloudBackupAccount();
 }
