@@ -149,11 +149,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(
-        tester.getTopLeft(find.text('Newer item')).dy,
-        lessThan(tester.getTopLeft(find.text('Older item')).dy),
-      );
+      expect(find.text('No recent items yet.'), findsOneWidget);
 
+      await tester.tap(find.text('All items'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Older item'));
       await tester.pumpAndSettle();
 
@@ -166,10 +165,12 @@ void main() {
         (entry) => entry['id'] == 'item-older',
       );
       expect(older['lastAccessedAt'], isNotNull);
-      expect(
-        tester.getTopLeft(find.text('Older item')).dy,
-        lessThan(tester.getTopLeft(find.text('Newer item')).dy),
-      );
+
+      await tester.tap(find.text('Home'));
+      await tester.pumpAndSettle();
+      expect(find.text('Older item'), findsOneWidget);
+      expect(find.text('Newer item'), findsNothing);
+      expect(find.textContaining('Just now'), findsOneWidget);
     },
   );
 
@@ -1600,5 +1601,74 @@ void main() {
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('family-vault.nija'), findsOneWidget);
+  });
+
+  testWidgets('settings can rename active vault name', (tester) async {
+    String? renamedTo;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'family-vault.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onRenameVault: (name) async => renamedTo = name,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('family-vault.nija'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Vault name'),
+      'Personal vault',
+    );
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+
+    expect(renamedTo, 'Personal vault');
+    expect(find.text('Personal vault'), findsOneWidget);
   });
 }

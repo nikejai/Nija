@@ -20,7 +20,9 @@ import '../../../core/security/biometric_credential_store.dart';
 import '../../../core/security/biometric_enrollment_store.dart';
 import '../../../domain/models/vault_reference.dart';
 import '../../../domain/models/vault_payload.dart';
+import '../../../domain/models/vault_transfer_result.dart';
 import '../../../infrastructure/adapters/file_vault_storage_adapter.dart';
+import '../../../infrastructure/adapters/private_vault_store.dart';
 import '../../../infrastructure/adapters/secret_share_portability.dart';
 import '../../../infrastructure/adapters/secret_share_portability_base.dart';
 import '../../../infrastructure/adapters/secret_share_model.dart';
@@ -130,15 +132,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return;
     }
 
-    _vaultService = DefaultVaultService(
-      storageAdapter: const FileVaultStorageAdapter(),
-      cryptoAdapter: SecureCryptoAdapter(),
-    );
     _vaultFilePath = widget.vaultFilePath ?? '';
     _activeVaultName = _displayNameForVault(_vaultFilePath);
     unawaited(_initializeLocalVaultPath());
-    unawaited(_restoreKnownVaultSession());
-    unawaited(_consumePendingSecretIntent());
   }
 
   @override
@@ -235,6 +231,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             _importVaultFromLocal(continueToUnlock: false),
         onReadCloudBackupAccount: _readCloudBackupAccountLabel,
         onChangeCloudBackupAccount: _changeCloudBackupAccount,
+        onRenameVault: _renameActiveVault,
+        onReadVaultInternals: kDebugMode ? _readVaultInternals : null,
         onLockNow: () {
           _clearSensitiveSessionState();
           setState(() => _step = OnboardingStep.unlock);
@@ -966,7 +964,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<String?> _promptSecretPassword() async {
     final controller = TextEditingController();
     try {
-      return showDialog<String>(
+      final result = await showDialog<String>(
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setLocalState) {
@@ -1079,6 +1077,19 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     });
   }
 
+  Future<void> _renameActiveVault(String name) async {
+    final renamed = name.trim();
+    if (renamed.isEmpty) {
+      throw StateError('Vault name cannot be empty.');
+    }
+
+    await _vaultService.renameVault(filePath: _vaultFilePath, label: renamed);
+    await _rememberVaultReference(_vaultFilePath, label: renamed);
+    await _refreshVaultSize();
+    if (!mounted) return;
+    setState(() => _activeVaultName = renamed);
+  }
+
   List<Map<String, dynamic>> _applyEntryMetadata({
     required String kind,
     required List<Map<String, dynamic>> nextEntries,
@@ -1097,18 +1108,21 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       final current = Map<String, dynamic>.from(raw);
       var id = current['id']?.toString().trim() ?? '';
       if (id.isEmpty) {
-        id = '$kind-${DateTime.now().microsecondsSinceEpoch}-${_idRandom.nextInt(100000)}';
+        id =
+            '$kind-${DateTime.now().microsecondsSinceEpoch}-${_idRandom.nextInt(100000)}';
         current['id'] = id;
       }
       final previous = previousById[id];
       final nowIso = DateTime.now().toUtc().toIso8601String();
-      final fileUuid = previous?['fileUuid']?.toString().trim().isNotEmpty == true
+      final fileUuid =
+          previous?['fileUuid']?.toString().trim().isNotEmpty == true
           ? previous!['fileUuid'].toString().trim()
           : (current['fileUuid']?.toString().trim().isNotEmpty == true
                 ? current['fileUuid'].toString().trim()
                 : _newVaultId());
 
-      final createdAt = previous?['createdAt']?.toString().trim().isNotEmpty == true
+      final createdAt =
+          previous?['createdAt']?.toString().trim().isNotEmpty == true
           ? previous!['createdAt'].toString().trim()
           : (current['createdAt']?.toString().trim().isNotEmpty == true
                 ? current['createdAt'].toString().trim()
@@ -1382,6 +1396,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         ],
       ),
     );
+    await _waitForDialogTeardown();
     return decision == true;
   }
 
@@ -1420,19 +1435,37 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     try {
       final docsDir = await getApplicationDocumentsDirectory();
       final path = '${docsDir.path}/nija_vault.nija';
+      _vaultService = DefaultVaultService(
+        storageAdapter: const FileVaultStorageAdapter(),
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: FilePrivateVaultStore(baseDirectory: docsDir),
+        deviceId: _deviceId,
+      );
       if (!mounted) return;
       setState(() {
         _vaultFilePath = path;
         _activeVaultName = _displayNameForVault(path);
         _storageReady = true;
       });
+      unawaited(_restoreKnownVaultSession());
+      unawaited(_consumePendingSecretIntent());
     } catch (_) {
+      _vaultService = DefaultVaultService(
+        storageAdapter: const FileVaultStorageAdapter(),
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: FilePrivateVaultStore(
+          baseDirectory: Directory.current,
+        ),
+        deviceId: _deviceId,
+      );
       if (!mounted) return;
       setState(() {
         _vaultFilePath = '${Directory.current.path}/nija_vault.nija';
         _activeVaultName = _displayNameForVault(_vaultFilePath);
         _storageReady = true;
       });
+      unawaited(_restoreKnownVaultSession());
+      unawaited(_consumePendingSecretIntent());
     }
   }
 
@@ -1561,11 +1594,42 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         filePath: imported.storageId,
         rawContent: imported.content,
       );
-      final importedLabel = await _resolveVaultLabel(imported.storageId);
-      await _rememberVaultReference(imported.storageId, label: importedLabel);
+      final credential = await _promptImportVaultCredential();
+      if (credential == null || credential.isEmpty) return;
+      var result = await _vaultService.importNijaFile(
+        filePath: imported.storageId,
+        unlockCredential: credential,
+      );
+      if (result.status == ImportStatus.failed &&
+          result.userSafeMessage.contains('Confirm replace')) {
+        final replace = await _confirmReplaceNewerImportedVault(result);
+        if (replace) {
+          result = await _vaultService.importNijaFile(
+            filePath: imported.storageId,
+            unlockCredential: credential,
+            confirmReplace: true,
+          );
+        }
+      }
+      if (result.status == ImportStatus.failed) {
+        throw StateError(result.userSafeMessage);
+      }
+      if (result.status == ImportStatus.alreadyUpToDate ||
+          result.status == ImportStatus.incomingOlder) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
+        return;
+      }
+      final activeId = result.conflictVaultId ?? result.vaultId;
+      final importedLabel = result.status == ImportStatus.conflictCreated
+          ? 'Vault conflict copy'
+          : await _resolveVaultLabel(activeId);
+      await _rememberVaultReference(activeId, label: importedLabel);
       if (!mounted) return;
       setState(() {
-        _vaultFilePath = imported.storageId;
+        _vaultFilePath = activeId;
         _activeVaultName = importedLabel;
         if (continueToUnlock) {
           _step = OnboardingStep.unlock;
@@ -1574,9 +1638,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       await _refreshVaultSize();
       await _refreshBiometricStateForActiveVault();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(AppStrings.vaultImportedSuccess)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.userSafeMessage.trim().isEmpty
+                ? AppStrings.vaultImportedSuccess
+                : result.userSafeMessage,
+          ),
+        ),
+      );
     } catch (error, stackTrace) {
       _logOperationError('importVaultFromLocal', error, stackTrace);
       if (!mounted) return;
@@ -1601,6 +1671,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         initialName: _displayNameForVault(_vaultFilePath),
       );
       if (exportName == null) return;
+      await _waitForDialogTeardown();
+      if (!mounted) return;
       final rawContent = await _vaultService.readRawVaultFile(
         filePath: _vaultFilePath,
       );
@@ -1664,19 +1736,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         );
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cloud backup completed.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Cloud backup completed.')));
     } catch (error, stackTrace) {
       _logOperationError('backupCurrentVaultToCloud', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Failed to prepare cloud backup. ${_errorHint(error)}',
-          ),
+          content: Text('Failed to prepare cloud backup. ${_errorHint(error)}'),
         ),
       );
     }
@@ -1692,7 +1760,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _refreshVaultSize() async {
     try {
-      final raw = await _vaultService.readRawVaultFile(filePath: _vaultFilePath);
+      final raw = await _vaultService.readRawVaultFile(
+        filePath: _vaultFilePath,
+      );
       final size = utf8.encode(raw).length;
       if (!mounted) return;
       setState(() => _activeVaultSizeBytes = size);
@@ -1700,6 +1770,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       if (!mounted) return;
       setState(() => _activeVaultSizeBytes = 0);
     }
+  }
+
+  Future<Map<String, dynamic>> _readVaultInternals() async {
+    return _vaultService.readVaultInternals(filePath: _vaultFilePath);
   }
 
   Future<String?> _promptExportFileName({required String initialName}) async {
@@ -1735,6 +1809,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
                 ElevatedButton(
                   onPressed: canContinue
                       ? () {
+                          FocusManager.instance.primaryFocus?.unfocus();
                           final raw = controller.text.trim();
                           final ensured = raw.toLowerCase().endsWith('.nija')
                               ? raw
@@ -1749,10 +1824,90 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           },
         ),
       );
+      await _waitForDialogTeardown();
       return selected;
     } finally {
       controller.dispose();
     }
+  }
+
+  Future<void> _waitForDialogTeardown() async {
+    await Future<void>.delayed(Duration.zero);
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  Future<String?> _promptImportVaultCredential() async {
+    if (_passwordController.text.trim().isNotEmpty) {
+      return _passwordController.text.trim();
+    }
+    final controller = TextEditingController();
+    try {
+      final result = await showDialog<String>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setLocalState) {
+            final canContinue = controller.text.trim().isNotEmpty;
+            return AlertDialog(
+              title: const Text('Unlock imported vault'),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                obscureText: true,
+                onChanged: (_) => setLocalState(() {}),
+                decoration: InputDecoration(
+                  labelText: AppStrings.masterPassword,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: canContinue
+                      ? () {
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          Navigator.of(context).pop(controller.text.trim());
+                        }
+                      : null,
+                  child: const Text('Import'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+      await _waitForDialogTeardown();
+      return result;
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<bool> _confirmReplaceNewerImportedVault(ImportResult result) async {
+    if (!mounted) return false;
+    final decision = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Replace local vault?'),
+        content: Text(
+          'The imported vault has a newer revision '
+          '(${result.incomingRevision}) than your local copy '
+          '(${result.localRevision}).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Replace'),
+          ),
+        ],
+      ),
+    );
+    return decision == true;
   }
 
   void _clearSensitiveSessionState() {
@@ -2232,8 +2387,7 @@ class _SetupScreenState extends State<SetupScreen> {
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 labelText: AppStrings.vaultName,
-                helperText:
-                    widget.defaultVaultId.isEmpty
+                helperText: widget.defaultVaultId.isEmpty
                     ? null
                     : 'Default: ${widget.defaultVaultId}',
               ),

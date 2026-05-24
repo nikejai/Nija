@@ -40,6 +40,8 @@ typedef VaultFileAction = Future<void> Function();
 typedef CloudBackupAction = Future<void> Function();
 typedef CloudBackupAccountRead = Future<String?> Function();
 typedef CloudBackupAccountChange = Future<bool> Function();
+typedef RenameVault = Future<void> Function(String name);
+typedef ReadVaultInternals = Future<Map<String, dynamic>> Function();
 
 class VaultAppShell extends StatefulWidget {
   const VaultAppShell({
@@ -64,6 +66,8 @@ class VaultAppShell extends StatefulWidget {
     required this.onRestoreFromCloud,
     required this.onReadCloudBackupAccount,
     required this.onChangeCloudBackupAccount,
+    this.onRenameVault,
+    this.onReadVaultInternals,
   });
 
   final List<String> recoveryWords;
@@ -86,6 +90,8 @@ class VaultAppShell extends StatefulWidget {
   final CloudBackupAction onRestoreFromCloud;
   final CloudBackupAccountRead onReadCloudBackupAccount;
   final CloudBackupAccountChange onChangeCloudBackupAccount;
+  final RenameVault? onRenameVault;
+  final ReadVaultInternals? onReadVaultInternals;
 
   @override
   State<VaultAppShell> createState() => _VaultAppShellState();
@@ -138,6 +144,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   late final List<Map<String, dynamic>> _items;
   late final List<Map<String, dynamic>> _notes;
   late final List<VaultListEntryAdapter> _vaultListEntryAdapters;
+  late String _activeVaultName;
 
   List<_IndexedEntry> _lastDeletedAllItems = <_IndexedEntry>[];
   Map<String, bool> _lastPinnedStateItemById = <String, bool>{};
@@ -147,6 +154,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   @override
   void initState() {
     super.initState();
+    _activeVaultName = widget.activeVaultName;
     _customTypeDefinitions = widget.initialCustomTypeDefinitions
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList();
@@ -172,6 +180,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
     unawaited(_restoreSortPreferences());
     unawaited(_restoreCloudBackupPreference());
     unawaited(_refreshCloudBackupAccountLabel());
+  }
+
+  @override
+  void didUpdateWidget(covariant VaultAppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeVaultName != widget.activeVaultName) {
+      _activeVaultName = widget.activeVaultName;
+    }
   }
 
   @override
@@ -216,6 +232,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _buildTypesTab(context),
       _buildFavoritesTab(context),
       _buildSettingsTab(context),
+      if (kDebugMode) _buildDebugInternalsTab(context),
     ];
 
     return WillPopScope(
@@ -304,6 +321,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 icon: const Icon(Icons.settings_outlined),
                 label: AppStrings.tabSettings,
               ),
+              if (kDebugMode)
+                const NavigationDestination(
+                  icon: Icon(Icons.bug_report_outlined),
+                  label: 'Debug',
+                ),
             ],
             onDestinationSelected: (value) => setState(() => _tabIndex = value),
           ),
@@ -322,19 +344,27 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Widget _buildVaultTab(BuildContext context) {
     final recentAll =
         <Map<String, dynamic>>[
-          ..._items.map(
-            (item) => <String, dynamic>{'kind': 'item', 'entry': item},
-          ),
-          ..._notes.map(
-            (note) => <String, dynamic>{'kind': 'note', 'entry': note},
-          ),
-        ]..sort((a, b) {
-          final av = a['entry'] as Map<String, dynamic>;
-          final bv = b['entry'] as Map<String, dynamic>;
-          return _lastAccessedSortValue(
-            bv,
-          ).compareTo(_lastAccessedSortValue(av));
-        });
+              ..._items.map(
+                (item) => <String, dynamic>{'kind': 'item', 'entry': item},
+              ),
+              ..._notes.map(
+                (note) => <String, dynamic>{'kind': 'note', 'entry': note},
+              ),
+            ]
+            .where((row) {
+              final entry = row['entry'] as Map<String, dynamic>;
+              return _lastAccessedAt(entry) != null;
+            })
+            .map((row) {
+              final entry = row['entry'] as Map<String, dynamic>;
+              return {...row, 'updatedLabel': _lastAccessedLabel(entry)};
+            })
+            .toList()
+          ..sort((a, b) {
+            final av = a['entry'] as Map<String, dynamic>;
+            final bv = b['entry'] as Map<String, dynamic>;
+            return _lastAccessedAt(bv)!.compareTo(_lastAccessedAt(av)!);
+          });
     final recentItems = recentAll.take(4).toList();
     final typeCounts = <String, int>{};
     for (final item in _items) {
@@ -355,7 +385,19 @@ class _VaultAppShellState extends State<VaultAppShell> {
           children: [
             Row(
               children: [
-                Text('Nija', style: vaultPageHeadingStyle(context)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Nija', style: vaultPageHeadingStyle(context)),
+                    Text(
+                      _activeVaultName,
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
                 const Spacer(),
                 IconButton(
                   onPressed: () => _openAddItemScreen(context),
@@ -1200,12 +1242,26 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   int _lastAccessedSortValue(Map<String, dynamic> entry) {
-    final lastAccessedAt = entry['lastAccessedAt']?.toString().trim() ?? '';
-    if (lastAccessedAt.isNotEmpty) {
-      final parsed = DateTime.tryParse(lastAccessedAt);
-      if (parsed != null) return parsed.millisecondsSinceEpoch;
-    }
+    final parsed = _lastAccessedAt(entry);
+    if (parsed != null) return parsed.millisecondsSinceEpoch;
     return _updatedRank(entry);
+  }
+
+  DateTime? _lastAccessedAt(Map<String, dynamic> entry) {
+    final value = entry['lastAccessedAt']?.toString().trim() ?? '';
+    if (value.isEmpty) return null;
+    return DateTime.tryParse(value);
+  }
+
+  String _lastAccessedLabel(Map<String, dynamic> entry) {
+    final accessedAt = _lastAccessedAt(entry);
+    if (accessedAt == null) return 'Not opened yet';
+    final elapsed = DateTime.now().toUtc().difference(accessedAt.toUtc());
+    if (elapsed.inMinutes < 1) return 'Just now';
+    if (elapsed.inHours < 1) return '${elapsed.inMinutes}m ago';
+    if (elapsed.inDays < 1) return '${elapsed.inHours}h ago';
+    if (elapsed.inDays == 1) return '1d ago';
+    return '${elapsed.inDays}d ago';
   }
 
   int? _updatedAgeDays(String text) {
@@ -1383,7 +1439,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
             child: ListTile(
               leading: const Icon(Icons.drive_file_rename_outline),
               title: Text(AppStrings.vaultName),
-              subtitle: Text(widget.activeVaultName),
+              subtitle: Text(_activeVaultName),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showRenameVaultDialog(context),
             ),
           ),
           const SizedBox(height: 10),
@@ -1625,6 +1683,153 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
+  Widget _buildDebugInternalsTab(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: FutureBuilder<Map<String, dynamic>>(
+        future: widget.onReadVaultInternals?.call(),
+        builder: (context, snapshot) {
+          final data = snapshot.data;
+          return ListView(
+            children: [
+              const _SectionHeader(
+                title: 'Vault internals',
+                subtitle: 'Debug-only storage metadata and encrypted sections.',
+              ),
+              const SizedBox(height: 14),
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const Center(child: CircularProgressIndicator())
+              else if (snapshot.hasError || data == null)
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.error_outline),
+                    title: const Text('Unable to read internals'),
+                    subtitle: Text(snapshot.error?.toString() ?? 'No data'),
+                  ),
+                )
+              else ...[
+                _DebugInfoCard(
+                  title: 'Snapshot',
+                  rows: _debugRows(data, const [
+                    'format',
+                    'formatVersion',
+                    'schemaVersion',
+                    'storageLayoutVersion',
+                    'manifestVersion',
+                    'snapshotBytes',
+                  ]),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Identity',
+                  rows: _debugRows(data, const [
+                    'vaultId',
+                    'vaultVersionId',
+                    'revision',
+                    'createdAt',
+                    'updatedAt',
+                    'lastModifiedByDeviceId',
+                  ]),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Crypto',
+                  rows: _debugMapRows(data['crypto']),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Encrypted sections',
+                  rows: _debugMapRows(data['encryptedSections']),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Working folder',
+                  rows: _workingFolderRows(data['workingStore']),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Working files',
+                  rows: _workingFileRows(data['workingStore']),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Session',
+                  rows: [
+                    MapEntry<String, String>(
+                      'activeVaultName',
+                      _activeVaultName,
+                    ),
+                    MapEntry<String, String>(
+                      'vaultSizeBytes',
+                      widget.vaultSizeBytes.toString(),
+                    ),
+                    MapEntry<String, String>('items', _items.length.toString()),
+                    MapEntry<String, String>('notes', _notes.length.toString()),
+                    MapEntry<String, String>(
+                      'customTypes',
+                      _customTypeDefinitions.length.toString(),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  List<MapEntry<String, String>> _debugRows(
+    Map<String, dynamic> data,
+    List<String> keys,
+  ) {
+    return keys
+        .where((key) => data.containsKey(key))
+        .map((key) => MapEntry<String, String>(key, data[key].toString()))
+        .toList();
+  }
+
+  List<MapEntry<String, String>> _debugMapRows(dynamic value) {
+    if (value is! Map) return const <MapEntry<String, String>>[];
+    return value.entries
+        .map(
+          (entry) => MapEntry<String, String>(
+            entry.key.toString(),
+            entry.value.toString(),
+          ),
+        )
+        .toList();
+  }
+
+  List<MapEntry<String, String>> _workingFolderRows(dynamic value) {
+    if (value is! Map) return const <MapEntry<String, String>>[];
+    return <MapEntry<String, String>>[
+      MapEntry<String, String>('type', value['type']?.toString() ?? ''),
+      MapEntry<String, String>('root', value['root']?.toString() ?? ''),
+      const MapEntry<String, String>(
+        'layout',
+        'header.json, manifest.enc, items.enc, notes.enc, settings.enc, tags.enc',
+      ),
+    ];
+  }
+
+  List<MapEntry<String, String>> _workingFileRows(dynamic value) {
+    if (value is! Map) return const <MapEntry<String, String>>[];
+    final files = value['files'];
+    if (files is! Map) return const <MapEntry<String, String>>[];
+    final rows =
+        files.entries
+            .map(
+              (entry) => MapEntry<String, String>(
+                entry.key.toString(),
+                '${entry.value} bytes',
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+    return rows;
+  }
+
   Future<void> _showRotateMasterPasswordDialog(BuildContext context) async {
     final currentController = TextEditingController();
     final nextController = TextEditingController();
@@ -1740,6 +1945,28 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
+  Future<void> _showRenameVaultDialog(BuildContext context) async {
+    final renamed = await showDialog<String>(
+      context: context,
+      builder: (_) => _RenameVaultDialog(initialName: _activeVaultName),
+    );
+    if (renamed == null || renamed == _activeVaultName) return;
+
+    try {
+      await widget.onRenameVault?.call(renamed);
+      if (!context.mounted) return;
+      setState(() => _activeVaultName = renamed);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vault renamed')));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to rename vault. Please retry.')),
+      );
+    }
+  }
+
   Future<void> _openItemDetail(
     BuildContext context,
     Map<String, dynamic> item,
@@ -1766,7 +1993,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ),
       ),
     );
-    if (result == null) return;
+    if (result == null) {
+      if (mounted) setState(() {});
+      return;
+    }
     final idx = _items.indexWhere(
       (entry) => entry['id']?.toString() == accessedItem['id']?.toString(),
     );
@@ -1798,7 +2028,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ),
       ),
     );
-    if (updated == null) return;
+    if (updated == null) {
+      if (mounted) setState(() {});
+      return;
+    }
 
     final idx = _notes.indexWhere(
       (entry) => entry['id']?.toString() == accessedNote['id']?.toString(),
@@ -2236,6 +2469,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ),
       ),
     );
+    if (mounted) setState(() {});
   }
 
   String _cloudBackupTitle() {
@@ -4358,6 +4592,66 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+class _RenameVaultDialog extends StatefulWidget {
+  const _RenameVaultDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenameVaultDialog> createState() => _RenameVaultDialogState();
+}
+
+class _RenameVaultDialogState extends State<_RenameVaultDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_formKey.currentState?.validate() != true) return;
+    Navigator.of(context).pop(_controller.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Rename vault'),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          decoration: InputDecoration(labelText: AppStrings.vaultName),
+          validator: (value) {
+            final trimmed = value?.trim() ?? '';
+            if (trimmed.isEmpty) return 'Enter a vault name';
+            return null;
+          },
+          onFieldSubmitted: (_) => _submit(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Rename')),
+      ],
+    );
+  }
+}
+
 class _TinyChip extends StatelessWidget {
   const _TinyChip({required this.label});
 
@@ -4397,6 +4691,70 @@ class _SectionHeader extends StatelessWidget {
         const SizedBox(height: 2),
         Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
       ],
+    );
+  }
+}
+
+class _DebugInfoCard extends StatelessWidget {
+  const _DebugInfoCard({required this.title, required this.rows});
+
+  final String title;
+  final List<MapEntry<String, String>> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            if (rows.isEmpty)
+              const Text(
+                'No data',
+                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              )
+            else
+              ...rows.map(
+                (row) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 132,
+                        child: Text(
+                          row.key,
+                          style: const TextStyle(
+                            color: Color(0xFF6B7280),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: SelectableText(
+                          row.value,
+                          style: const TextStyle(
+                            color: Color(0xFF111827),
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

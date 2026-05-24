@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -41,16 +42,15 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     required String suggestedName,
     required String content,
   }) async {
-    // Android SAF/saveFile may return non-file paths that can't be written via dart:io.
-    // Choose a writable directory and create the target file ourselves.
-    if (Platform.isAndroid) {
-      final directoryPath = await FilePicker.platform.getDirectoryPath(
+    final bytes = Uint8List.fromList(utf8.encode(content));
+    if (Platform.isAndroid || Platform.isIOS) {
+      return FilePicker.platform.saveFile(
         dialogTitle: 'Export vault file',
+        fileName: suggestedName,
+        type: FileType.custom,
+        allowedExtensions: const <String>['nija'],
+        bytes: bytes,
       );
-      if (directoryPath == null || directoryPath.isEmpty) return null;
-      final filePath = _joinPath(directoryPath, suggestedName);
-      await File(filePath).writeAsString(content, flush: true);
-      return filePath;
     }
 
     final outputPath = await FilePicker.platform.saveFile(
@@ -125,21 +125,14 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
         final meta = drive.File()
           ..name = suggestedName
           ..modifiedTime = DateTime.now().toUtc();
-        await driveApi.files.update(
-          meta,
-          existingId,
-          uploadMedia: media,
-        );
+        await driveApi.files.update(meta, existingId, uploadMedia: media);
         return true;
       }
       final meta = drive.File()
         ..name = suggestedName
         ..mimeType = 'application/json'
         ..appProperties = <String, String>{'nijaVaultId': vaultId};
-      await driveApi.files.create(
-        meta,
-        uploadMedia: media,
-      );
+      await driveApi.files.create(meta, uploadMedia: media);
       return true;
     } catch (error) {
       debugPrint('[VaultPortability][GoogleDriveBackup] $error');
@@ -191,11 +184,14 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     required String content,
   }) async {
     try {
-      final ok = await _cloudBackupChannel.invokeMethod<bool>('backupToICloud', {
-        'vaultId': vaultId,
-        'suggestedName': suggestedName,
-        'content': content,
-      });
+      final ok = await _cloudBackupChannel.invokeMethod<bool>(
+        'backupToICloud',
+        {
+          'vaultId': vaultId,
+          'suggestedName': suggestedName,
+          'content': content,
+        },
+      );
       return ok == true;
     } catch (error) {
       debugPrint('[VaultPortability][ICloudBackup] $error');
@@ -213,7 +209,9 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     await file.writeAsString(content, flush: true);
     try {
       final result = await SharePlus.instance.share(
-        ShareParams(files: <XFile>[XFile(file.path, mimeType: 'application/json')]),
+        ShareParams(
+          files: <XFile>[XFile(file.path, mimeType: 'application/json')],
+        ),
       );
       return result.status == ShareResultStatus.success;
     } finally {
@@ -245,8 +243,7 @@ class _GoogleAuthClient extends http.BaseClient {
     _inner.close();
   }
 }
-  GoogleSignIn _googleSignInClient() {
-    return GoogleSignIn(
-      scopes: const <String>[drive.DriveApi.driveFileScope],
-    );
-  }
+
+GoogleSignIn _googleSignInClient() {
+  return GoogleSignIn(scopes: const <String>[drive.DriveApi.driveFileScope]);
+}
