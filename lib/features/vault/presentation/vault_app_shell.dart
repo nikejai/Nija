@@ -54,6 +54,8 @@ class VaultAppShell extends StatefulWidget {
     required this.initialCustomTypeDefinitions,
     required this.languageMode,
     required this.onLanguageModeChanged,
+    this.themeMode = ThemeMode.system,
+    this.onThemeModeChanged,
     required this.biometricEnabled,
     required this.onBiometricChanged,
     required this.onPersistVaultData,
@@ -78,6 +80,8 @@ class VaultAppShell extends StatefulWidget {
   final List<Map<String, dynamic>> initialCustomTypeDefinitions;
   final String languageMode;
   final LanguageModeChanged onLanguageModeChanged;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
   final bool biometricEnabled;
   final BiometricChanged onBiometricChanged;
   final PersistVaultData onPersistVaultData;
@@ -259,6 +263,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final pages = [
       _buildVaultTab(context),
       _buildTypesTab(context),
@@ -308,29 +314,32 @@ class _VaultAppShellState extends State<VaultAppShell> {
         body: SafeArea(child: pages[_tabIndex]),
         bottomNavigationBar: NavigationBarTheme(
           data: NavigationBarThemeData(
-            backgroundColor: Colors.white,
+            backgroundColor: colorScheme.surface,
             indicatorColor: Colors.transparent,
             labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
               states,
             ) {
               if (states.contains(WidgetState.selected)) {
-                return const TextStyle(
-                  color: Color(0xFF6366F1),
+                return TextStyle(
+                  color: colorScheme.primary,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 );
               }
-              return const TextStyle(
-                color: Color(0xFF6B7280),
+              return TextStyle(
+                color: colorScheme.onSurfaceVariant,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
               );
             }),
             iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((states) {
               if (states.contains(WidgetState.selected)) {
-                return const IconThemeData(color: Color(0xFF6366F1), size: 22);
+                return IconThemeData(color: colorScheme.primary, size: 22);
               }
-              return const IconThemeData(color: Color(0xFF6B7280), size: 22);
+              return IconThemeData(
+                color: colorScheme.onSurfaceVariant,
+                size: 22,
+              );
             }),
           ),
           child: NavigationBar(
@@ -374,6 +383,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Widget _buildVaultTab(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final recentAll =
         <Map<String, dynamic>>[
               ..._items.map(
@@ -423,8 +433,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
                     Text('Nija', style: vaultPageHeadingStyle(context)),
                     Text(
                       _activeVaultName,
-                      style: const TextStyle(
-                        color: Color(0xFF6B7280),
+                      style: TextStyle(
+                        color: colorScheme.onSurfaceVariant,
                         fontSize: 12,
                       ),
                     ),
@@ -433,39 +443,39 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 const Spacer(),
                 IconButton(
                   onPressed: () => _openAddItemScreen(context),
-                  icon: const Icon(Icons.add, color: Color(0xFF6B7280)),
+                  icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
                   tooltip: 'Create',
                 ),
                 IconButton(
                   onPressed: widget.onLockNow,
-                  icon: const Icon(
+                  icon: Icon(
                     Icons.lock_outline,
-                    color: Color(0xFF6B7280),
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
             ),
             Text(
               'All your important information,\nin one secure place.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF6B7280)),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: TextField(
-                    style: const TextStyle(color: Color(0xFF111827)),
+                    style: TextStyle(color: colorScheme.onSurface),
                     decoration: InputDecoration(
                       hintText: 'Search your data...',
-                      hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
-                      prefixIcon: const Icon(
+                      hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+                      prefixIcon: Icon(
                         Icons.search,
-                        color: Color(0xFF9CA3AF),
+                        color: colorScheme.onSurfaceVariant,
                       ),
                       filled: true,
-                      fillColor: const Color(0xFFF3F4F6),
+                      fillColor: colorScheme.surfaceContainerHighest,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(16),
                         borderSide: BorderSide.none,
@@ -480,7 +490,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 const SizedBox(width: 8),
                 Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF3F4F6),
+                    color: colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: IconButton(
@@ -488,7 +498,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       _allTypeFilterOptions(),
                       showAllItemsOnApply: true,
                     ),
-                    icon: const Icon(Icons.tune, color: Color(0xFF6B7280)),
+                    icon: Icon(Icons.tune, color: colorScheme.onSurfaceVariant),
                   ),
                 ),
               ],
@@ -530,10 +540,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       Text(
                         'Recent',
                         style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: const Color(0xFF111827),
-                              fontWeight: FontWeight.w700,
-                            ),
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       const Spacer(),
                       InkWell(
@@ -558,13 +565,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFE5E7EB)),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.outlineVariant,
+                        ),
                       ),
-                      child: const Text(
+                      child: Text(
                         'No recent items yet.',
-                        style: TextStyle(color: Color(0xFF6B7280)),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     )
                   else
@@ -638,12 +649,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
                           key: const ValueKey('notes-info-icon'),
                           borderRadius: BorderRadius.circular(16),
                           onTap: () => _showNotesInfoDialog(context),
-                          child: const Padding(
-                            padding: EdgeInsets.all(2),
+                          child: Padding(
+                            padding: const EdgeInsets.all(2),
                             child: Icon(
                               Icons.info_outline,
                               size: 18,
-                              color: Color(0xFF52525B),
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ),
@@ -839,9 +852,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
                               key: ValueKey('note-leading-${note['id']}'),
                               borderRadius: BorderRadius.circular(24),
                               onTap: () => _enterNotesSelectionMode(note),
-                              child: const CircleAvatar(
-                                backgroundColor: Color(0xFFF3F4F6),
-                                child: Icon(
+                              child: CircleAvatar(
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
+                                child: const Icon(
                                   Icons.description_outlined,
                                   size: 18,
                                 ),
@@ -878,7 +893,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
                           Text(
                             '${AppStrings.lastAccessed}: ${note['updated']?.toString() ?? 'Now'}',
                             style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: const Color(0xFF71717A)),
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
                           ),
                           if (tags.isNotEmpty) ...[
                             const SizedBox(height: 8),
@@ -931,6 +950,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Widget _buildTypesTab(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final all = <Map<String, dynamic>>[
       ..._items.map((item) => <String, dynamic>{'kind': 'item', 'entry': item}),
       ..._notes.map((note) => <String, dynamic>{'kind': 'note', 'entry': note}),
@@ -1019,8 +1039,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 if (_allItemsSelectionMode)
                   Text(
                     '${_selectedAllItemsKeys.length} Selected',
-                    style: const TextStyle(
-                      color: Color(0xFF111827),
+                    style: TextStyle(
+                      color: colorScheme.onSurface,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -1030,14 +1050,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 else
                   IconButton(
                     onPressed: () => _openAddItemScreen(context),
-                    icon: const Icon(Icons.add, color: Color(0xFF6B7280)),
+                    icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
                   ),
               ],
             ),
             if (!_allItemsSelectionMode)
               Text(
                 '${filtered.length} items',
-                style: const TextStyle(color: Color(0xFF6B7280)),
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
               ),
             const SizedBox(height: 10),
             Row(
@@ -1045,16 +1065,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 Expanded(
                   child: TextField(
                     controller: _allItemsSearchController,
-                    style: const TextStyle(color: Color(0xFF111827)),
+                    style: TextStyle(color: colorScheme.onSurface),
                     decoration: InputDecoration(
                       hintText: 'Search all items...',
-                      hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
-                      prefixIcon: const Icon(
+                      hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+                      prefixIcon: Icon(
                         Icons.search,
-                        color: Color(0xFF9CA3AF),
+                        color: colorScheme.onSurfaceVariant,
                       ),
                       filled: true,
-                      fillColor: const Color(0xFFF3F4F6),
+                      fillColor: colorScheme.surfaceContainerHighest,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(16),
                         borderSide: BorderSide.none,
@@ -1069,14 +1089,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 if (!_allItemsSelectionMode)
                   Container(
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
+                      color: colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: IconButton(
                       onPressed: () => _openAllItemsFiltersOverlay(
                         sortedTypeOptions.where((t) => t != 'all').toList(),
                       ),
-                      icon: const Icon(Icons.tune, color: Color(0xFF6B7280)),
+                      icon: Icon(
+                        Icons.tune,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
               ],
@@ -1094,12 +1117,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       selected: selected,
                       onSelected: (_) =>
                           setState(() => _allItemsTypeFilter = type),
-                      backgroundColor: const Color(0xFFF3F4F6),
-                      selectedColor: const Color(0xFFE0E7FF),
+                      backgroundColor: colorScheme.surfaceContainerHighest,
+                      selectedColor: colorScheme.primaryContainer,
                       labelStyle: TextStyle(
                         color: selected
-                            ? const Color(0xFF3730A3)
-                            : const Color(0xFF6B7280),
+                            ? colorScheme.onPrimaryContainer
+                            : colorScheme.onSurfaceVariant,
                       ),
                       side: BorderSide.none,
                     ),
@@ -1135,17 +1158,20 @@ class _VaultAppShellState extends State<VaultAppShell> {
               const SizedBox(height: 8),
             ],
             if (!_allItemsSelectionMode)
-              const Text(
+              Text(
                 'Sort by: Modified (newest)',
-                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
               ),
             const SizedBox(height: 8),
             Expanded(
               child: filtered.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text(
                         'No items found.',
-                        style: TextStyle(color: Color(0xFF6B7280)),
+                        style: TextStyle(color: colorScheme.onSurfaceVariant),
                       ),
                     )
                   : VaultEntryList(
@@ -1455,285 +1481,272 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _ => AppStrings.systemDefault,
     };
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+    final defaultViewLabel = _vaultSort == 'title' ? 'Title' : 'All Items';
+    final themeLabel = switch (widget.themeMode) {
+      ThemeMode.light => 'Light',
+      ThemeMode.dark => 'Dark',
+      ThemeMode.system => 'System',
+    };
+    final backupSubtitle = AppFeatures.isPaidBuild
+        ? (_cloudBackupEnabled
+              ? _cloudBackupLastAtEpochMs <= 0
+                    ? 'Last backup: Never'
+                    : 'Last backup: ${DateTime.fromMillisecondsSinceEpoch(_cloudBackupLastAtEpochMs)}'
+              : 'Backup your data locally')
+        : 'Available in paid version';
+
+    final theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(color: theme.scaffoldBackgroundColor),
       child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
         children: [
-          _SectionHeader(
-            title: AppStrings.tabSettings,
-            subtitle: AppStrings.settingsSubtitle,
+          Text('Settings', style: vaultPageHeadingStyle(context)),
+          const SizedBox(height: 18),
+          _SettingsSection(
+            title: 'Account',
+            children: [
+              _SettingsRow(
+                icon: Icons.dashboard_customize_outlined,
+                title: 'Nija User',
+                subtitle: _activeVaultName,
+                onTap: () => _showRenameVaultDialog(context),
+              ),
+            ],
           ),
-          const SizedBox(height: 14),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.language_outlined),
-              title: Text(AppStrings.language),
-              subtitle: Text(languageLabel),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showLanguagePicker(context),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.palette_outlined),
-              title: const Text('Theme'),
-              subtitle: const Text('Light (Dark mode coming later)'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Light theme is active. Dark theme will be added later.',
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.drive_file_rename_outline),
-              title: Text(AppStrings.vaultName),
-              subtitle: Text(_activeVaultName),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showRenameVaultDialog(context),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.view_list_outlined),
-              title: const Text('Custom templates'),
-              subtitle: Text('${_customTypeDefinitions.length} templates'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showCustomTemplateManager(context),
-            ),
-          ),
-          const SizedBox(height: 10),
-          ...[AppStrings.settingsSecurity, AppStrings.settingsAutoLock].map(
-            (section) => Card(
-              child: ListTile(
-                leading: Icon(_iconForSetting(section)),
-                title: Text(section),
-                trailing: const Icon(Icons.chevron_right),
+          _SettingsSection(
+            title: 'Security',
+            children: [
+              _SettingsRow(
+                icon: Icons.lock_outline,
+                title: 'Master Password',
+                subtitle: 'Change your master password',
+                onTap: () => _showRotateMasterPasswordDialog(context),
+              ),
+              _SettingsRow(
+                icon: Icons.key_outlined,
+                title: AppStrings.settingsAutoLock,
+                subtitle: 'Lock Nija automatically',
+                value: '5 minutes',
                 onTap: () {
-                  if (section == AppStrings.settingsSecurity) {
-                    _showRotateMasterPasswordDialog(context);
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(AppStrings.settingComingSoon)),
-                    );
-                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(AppStrings.settingComingSoon)),
+                  );
                 },
               ),
-            ),
-          ),
-          Card(
-            child: SwitchListTile(
-              key: const ValueKey('settings-cloud-backup-switch'),
-              secondary: Icon(_cloudBackupIcon()),
-              title: Text(_cloudBackupTitle()),
-              subtitle: Text(
-                AppFeatures.isPaidBuild
-                    ? (_cloudBackupEnabled
-                          ? 'Enabled for this device.'
-                          : 'Disabled for this device.')
-                    : 'Available in paid version',
+              _SettingsRow(
+                key: const ValueKey('settings-biometrics-switch'),
+                icon: _iconForSetting(AppStrings.settingsBiometricUnlock),
+                title: AppStrings.settingsBiometricUnlock,
+                subtitle: 'Unlock using fingerprint or face',
+                trailing: Switch(
+                  value: widget.biometricEnabled,
+                  onChanged: widget.onBiometricChanged,
+                ),
               ),
-              value: _cloudBackupEnabled,
-              onChanged: AppFeatures.isPaidBuild
-                  ? (value) => _setCloudBackupEnabled(value)
-                  : null,
-            ),
+              _SettingsRow(
+                icon: Icons.shield_outlined,
+                title: 'Security & Encryption',
+                subtitle: 'View encryption details and key info',
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(AppStrings.settingComingSoon)),
+                  );
+                },
+              ),
+            ],
           ),
-          if (AppFeatures.isPaidBuild && _cloudBackupEnabled) ...[
-            const SizedBox(height: 8),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          _SettingsSection(
+            title: 'Cloud Backup',
+            children: [
+              _SettingsRow(
+                key: const ValueKey('settings-cloud-backup-switch'),
+                icon: _cloudBackupIcon(),
+                title: _cloudBackupTitle(),
+                subtitle: backupSubtitle,
+                onTap: AppFeatures.isPaidBuild
+                    ? () => _setCloudBackupEnabled(!_cloudBackupEnabled)
+                    : null,
+              ),
+              if (AppFeatures.isPaidBuild && _cloudBackupEnabled) ...[
+                _SettingsRow(
+                  key: const ValueKey('settings-cloud-backup-auto-switch'),
+                  icon: Icons.schedule_outlined,
+                  title: 'Auto backup',
+                  subtitle: _cloudBackupFrequency == 'weekly'
+                      ? 'Weekly'
+                      : _cloudBackupFrequency == 'monthly'
+                      ? 'Monthly'
+                      : 'Daily',
+                  trailing: Switch(
+                    value: _cloudBackupAutoEnabled,
+                    onChanged: _setCloudBackupAutoEnabled,
+                  ),
+                  onTap: _showCloudBackupFrequencyPicker,
+                ),
+                _SettingsRow(
+                  icon: Icons.account_circle_outlined,
+                  title: 'Backup account',
+                  subtitle: _cloudBackupAccountLabel,
+                  onTap: _handleChangeCloudBackupAccount,
+                ),
+                _SettingsActionRow(
                   children: [
-                    Text(
-                      'Cloud backup status',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    OutlinedButton.icon(
+                      key: const ValueKey('settings-cloud-backup-now'),
+                      onPressed: _handleCloudBackupNow,
+                      icon: Icon(_cloudBackupIcon()),
+                      label: const Text('Backup now'),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _cloudBackupLastAtEpochMs <= 0
-                          ? 'Last backup: Never'
-                          : 'Last backup: ${DateTime.fromMillisecondsSinceEpoch(_cloudBackupLastAtEpochMs)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 4),
-                          child: Icon(Icons.account_circle_outlined),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Backup account',
-                                style: TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _cloudBackupAccountLabel,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: OutlinedButton(
-                                  onPressed: _handleChangeCloudBackupAccount,
-                                  child: Text(
-                                    _cloudBackupAccountLabel == 'Not connected'
-                                        ? 'Select account'
-                                        : 'Change account',
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    SwitchListTile(
-                      key: const ValueKey('settings-cloud-backup-auto-switch'),
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Auto backup'),
-                      subtitle: const Text(
-                        'Runs while app is active. Backup timing is selected automatically based on app usage.',
-                      ),
-                      value: _cloudBackupAutoEnabled,
-                      onChanged: (value) => _setCloudBackupAutoEnabled(value),
-                    ),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.schedule_outlined),
-                      title: const Text('Backup frequency'),
-                      subtitle: Text(
-                        _cloudBackupFrequency == 'weekly'
-                            ? 'Weekly'
-                            : _cloudBackupFrequency == 'monthly'
-                            ? 'Monthly'
-                            : 'Daily',
-                      ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: _showCloudBackupFrequencyPicker,
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            key: const ValueKey('settings-cloud-backup-now'),
-                            onPressed: _handleCloudBackupNow,
-                            icon: Icon(_cloudBackupIcon()),
-                            label: const Text('Backup now'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            key: const ValueKey('settings-cloud-restore-now'),
-                            onPressed: widget.onRestoreFromCloud,
-                            icon: const Icon(Icons.restore_outlined),
-                            label: const Text('Restore backup'),
-                          ),
-                        ),
-                      ],
+                    OutlinedButton.icon(
+                      key: const ValueKey('settings-cloud-restore-now'),
+                      onPressed: widget.onRestoreFromCloud,
+                      icon: const Icon(Icons.restore_outlined),
+                      label: const Text('Restore'),
                     ),
                   ],
                 ),
+              ],
+            ],
+          ),
+          _SettingsSection(
+            title: 'Data',
+            children: [
+              _SettingsRow(
+                key: const ValueKey('settings-import-encrypted-secret'),
+                icon: Icons.file_download_outlined,
+                title: 'Import',
+                subtitle: 'Import data from a file',
+                onTap: _importEncryptedSecret,
               ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.sd_storage_outlined),
-              title: const Text('Vault size'),
-              subtitle: Text(_formatBytes(widget.vaultSizeBytes)),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: SwitchListTile(
-              key: const ValueKey('settings-biometrics-switch'),
-              secondary: Icon(
-                _iconForSetting(AppStrings.settingsBiometricUnlock),
+              _SettingsRow(
+                icon: Icons.file_upload_outlined,
+                title: 'Export',
+                subtitle: 'Export data to a file',
+                onTap: widget.onExportVault,
               ),
-              title: Text(AppStrings.settingsBiometricUnlock),
-              value: widget.biometricEnabled,
-              onChanged: widget.onBiometricChanged,
-            ),
+              _SettingsRow(
+                icon: Icons.sd_storage_outlined,
+                title: 'Vault size',
+                subtitle: _formatBytes(widget.vaultSizeBytes),
+              ),
+              _SettingsRow(
+                icon: Icons.delete_outline,
+                iconColor: const Color(0xFFFF5D5D),
+                title: 'Clear Data',
+                subtitle: 'Permanently delete all your data',
+                danger: true,
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(AppStrings.settingComingSoon)),
+                  );
+                },
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          Card(
-            child: ListTile(
-              key: const ValueKey('settings-import-encrypted-secret'),
-              leading: const Icon(Icons.lock_open_outlined),
-              title: Text(AppStrings.importEncryptedSecret),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: _importEncryptedSecret,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: ListTile(
-              key: const ValueKey('settings-default-vault-filter'),
-              leading: const Icon(Icons.filter_list),
-              title: const Text('Default sort for keys'),
-              subtitle: Text(_vaultSort == 'title' ? 'Title' : 'Last accessed'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showSortDefaultsDialog(context, isNotes: false),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: ListTile(
-              key: const ValueKey('settings-default-notes-filter'),
-              leading: const Icon(Icons.filter_alt_outlined),
-              title: const Text('Default sort for notes'),
-              subtitle: Text(
-                _notesSort == 'title'
+          _SettingsSection(
+            title: 'Preferences',
+            children: [
+              _SettingsRow(
+                icon: Icons.palette_outlined,
+                title: 'Theme',
+                subtitle: 'Choose app appearance',
+                value: themeLabel,
+                onTap: () => _showThemePicker(context),
+              ),
+              _SettingsRow(
+                key: const ValueKey('settings-default-vault-filter'),
+                icon: Icons.grid_view_outlined,
+                title: 'Default View',
+                subtitle: 'Choose your default start view',
+                value: defaultViewLabel,
+                onTap: () => _showSortDefaultsDialog(context, isNotes: false),
+              ),
+              _SettingsRow(
+                key: const ValueKey('settings-default-notes-filter'),
+                icon: Icons.filter_alt_outlined,
+                title: 'Default notes sort',
+                subtitle: _notesSort == 'title'
                     ? 'Title'
                     : _notesSort == 'tags'
                     ? 'Tags'
                     : 'Last accessed',
+                onTap: () => _showSortDefaultsDialog(context, isNotes: true),
               ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _showSortDefaultsDialog(context, isNotes: true),
-            ),
+              _SettingsRow(
+                icon: Icons.folder_outlined,
+                title: 'Categories',
+                subtitle: '${_customTypeDefinitions.length} custom templates',
+                onTap: () => _showCustomTemplateManager(context),
+              ),
+              _SettingsRow(
+                icon: Icons.notifications_none_outlined,
+                title: 'Notifications',
+                subtitle: 'Manage reminders and alerts',
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(AppStrings.settingComingSoon)),
+                  );
+                },
+              ),
+              _SettingsRow(
+                icon: Icons.language_outlined,
+                title: AppStrings.language,
+                subtitle: languageLabel,
+                onTap: () => _showLanguagePicker(context),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: widget.onExportVault,
-              icon: const Icon(Icons.file_upload_outlined),
-              label: Text(AppStrings.settingsExportVault),
-            ),
+          _SettingsSection(
+            title: 'About',
+            children: [
+              _SettingsRow(
+                icon: Icons.info_outline,
+                title: 'About Nija',
+                subtitle: 'Version 1.0.0',
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Nija version 1.0.0')),
+                  );
+                },
+              ),
+              _SettingsRow(
+                icon: Icons.help_outline,
+                title: 'Help & Support',
+                subtitle: 'Get help and contact support',
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(AppStrings.settingComingSoon)),
+                  );
+                },
+              ),
+              _SettingsRow(
+                icon: Icons.verified_user_outlined,
+                title: 'Privacy Policy',
+                subtitle: 'Read our privacy policy',
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(AppStrings.settingComingSoon)),
+                  );
+                },
+              ),
+              _SettingsRow(
+                icon: Icons.description_outlined,
+                title: 'Terms of Use',
+                subtitle: 'Read our terms and conditions',
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(AppStrings.settingComingSoon)),
+                  );
+                },
+              ),
+            ],
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: widget.onLockNow,
-              child: Text(AppStrings.lockVaultNow),
-            ),
+          ElevatedButton(
+            onPressed: widget.onLockNow,
+            child: Text(AppStrings.lockVaultNow),
           ),
         ],
       ),
@@ -1741,6 +1754,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Widget _buildDebugInternalsTab(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: FutureBuilder<Map<String, dynamic>>(
@@ -1759,9 +1773,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
               else if (snapshot.hasError || data == null)
                 Card(
                   child: ListTile(
-                    leading: const Icon(Icons.error_outline),
+                    leading: Icon(
+                      Icons.error_outline,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                     title: const Text('Unable to read internals'),
-                    subtitle: Text(snapshot.error?.toString() ?? 'No data'),
+                    subtitle: Text(
+                      snapshot.error?.toString() ?? 'No data',
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
                   ),
                 )
               else ...[
@@ -1995,6 +2015,45 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Widget _languageOptionTile(BuildContext context, String mode, String label) {
     final selected = widget.languageMode == mode;
+    return ListTile(
+      title: Text(label),
+      trailing: selected ? const Icon(Icons.check) : null,
+      onTap: () => Navigator.of(context).pop(mode),
+    );
+  }
+
+  Future<void> _showThemePicker(BuildContext context) async {
+    final onThemeModeChanged = widget.onThemeModeChanged;
+    if (onThemeModeChanged == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.settingComingSoon)));
+      return;
+    }
+
+    final selected = await showModalBottomSheet<ThemeMode>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(title: Text('Theme')),
+              _themeOptionTile(context, ThemeMode.system, 'System'),
+              _themeOptionTile(context, ThemeMode.light, 'Light'),
+              _themeOptionTile(context, ThemeMode.dark, 'Dark'),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected == null || selected == widget.themeMode) return;
+    onThemeModeChanged(selected);
+  }
+
+  Widget _themeOptionTile(BuildContext context, ThemeMode mode, String label) {
+    final selected = widget.themeMode == mode;
     return ListTile(
       title: Text(label),
       trailing: selected ? const Icon(Icons.check) : null,
@@ -2847,7 +2906,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(18),
           ),
           child: Column(
@@ -2867,7 +2926,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
               Text(
                 '${_selectedAllItemsKeys.length} items will be moved to trash.\nThis action can be undone.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFF6B7280)),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 14),
               SizedBox(
@@ -3838,9 +3899,10 @@ class _SortSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Row(
       children: [
-        Icon(icon, size: 18, color: const Color(0xFF52525B)),
+        Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
         const SizedBox(width: 8),
         Text(label, style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(width: 8),
@@ -3921,9 +3983,11 @@ class _CustomTemplateManagerScreenState
               children: [
                 Text('Custom templates', style: vaultPageHeadingStyle(context)),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   'Create reusable item types with your own fields.',
-                  style: TextStyle(color: Color(0xFF6B7280)),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -3936,9 +4000,13 @@ class _CustomTemplateManagerScreenState
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text(
+                          Text(
                             'No custom templates yet.',
-                            style: TextStyle(color: Color(0xFF6B7280)),
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
                           ),
                           const SizedBox(height: 12),
                           FilledButton.icon(
@@ -3965,11 +4033,12 @@ class _CustomTemplateManagerScreenState
                           (definition['fields'] as List<dynamic>? ??
                                   const <dynamic>[])
                               .length;
+                      final colorScheme = Theme.of(context).colorScheme;
                       return Material(
-                        color: Colors.white,
+                        color: colorScheme.surface,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
-                          side: const BorderSide(color: Color(0xFFE5E7EB)),
+                          side: BorderSide(color: colorScheme.outlineVariant),
                         ),
                         child: ListTile(
                           onTap: () => _editTemplate(index),
@@ -3994,14 +4063,16 @@ class _CustomTemplateManagerScreenState
                           ),
                           title: Text(
                             name,
-                            style: const TextStyle(
-                              color: Color(0xFF111827),
+                            style: TextStyle(
+                              color: colorScheme.onSurface,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                           subtitle: Text(
                             '$fields fields',
-                            style: const TextStyle(color: Color(0xFF6B7280)),
+                            style: TextStyle(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -4068,9 +4139,11 @@ class _CustomTemplateManagerScreenState
       builder: (sheetContext) {
         return SafeArea(
           child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+            decoration: BoxDecoration(
+              color: Theme.of(sheetContext).colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(22),
+              ),
             ),
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
             child: Column(
@@ -4090,8 +4163,8 @@ class _CustomTemplateManagerScreenState
                 Text(
                   '"$name" will be moved to trash.\nThis action can be undone.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
+                  style: TextStyle(
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
                     fontSize: 14,
                   ),
                 ),
@@ -4181,7 +4254,9 @@ class _ItemCard extends StatelessWidget {
                   width: 34,
                   height: 34,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF3F4F6),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(_iconForType(item['type'].toString()), size: 18),
@@ -4203,7 +4278,7 @@ class _ItemCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFFEFF0F2),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
@@ -4211,7 +4286,7 @@ class _ItemCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: const Color(0xFF3F3F46),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -4236,7 +4311,7 @@ class _ItemCard extends StatelessWidget {
               '${AppStrings.lastAccessed}: ${item['updated']?.toString() ?? 'Now'}',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 fontSize: 11,
-                color: const Color(0xFF71717A),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             if (item['pinned'] == true)
@@ -4277,6 +4352,203 @@ IconData _iconForSetting(String section) {
     return Icons.warning_amber_outlined;
   }
   return Icons.settings_outlined;
+}
+
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.cardTheme.color ?? theme.colorScheme.surface,
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(children: children),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.value,
+    this.trailing,
+    this.onTap,
+    this.iconColor,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? value;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final Color? iconColor;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final effectiveIconColor = iconColor ?? theme.colorScheme.primary;
+    final effectiveTitleColor = danger
+        ? theme.colorScheme.error
+        : theme.colorScheme.onSurface;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 78),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: theme.colorScheme.outlineVariant,
+                width: 0.6,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: effectiveIconColor.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: effectiveIconColor, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: effectiveTitleColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (trailing != null)
+                trailing!
+              else ...[
+                if (value != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text(
+                      value!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: theme.colorScheme.primary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                if (onTap != null)
+                  Icon(
+                    Icons.chevron_right,
+                    color: theme.colorScheme.onSurfaceVariant,
+                    size: 24,
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsActionRow extends StatelessWidget {
+  const _SettingsActionRow({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
+      child: Row(
+        children: [
+          for (final child in children) ...[
+            Expanded(
+              child: Theme(
+                data: Theme.of(context).copyWith(
+                  outlinedButtonTheme: OutlinedButtonThemeData(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                      side: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                  ),
+                ),
+                child: child,
+              ),
+            ),
+            if (child != children.last) const SizedBox(width: 10),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _ItemDetailScreen extends StatefulWidget {
@@ -4334,6 +4606,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final fields = (widget.item['fields'] as List<dynamic>? ?? const [])
         .map((entry) => Map<String, dynamic>.from(entry as Map))
         .toList();
@@ -4433,7 +4706,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                         title,
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: const Color(0xFF111827),
+                          color: colorScheme.onSurface,
                           fontWeight: FontWeight.w400,
                         ),
                         maxLines: 2,
@@ -4447,9 +4720,9 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                         vertical: 12,
                       ),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFE5E7EB)),
+                        border: Border.all(color: colorScheme.outlineVariant),
                       ),
                       child: Column(
                         children: List.generate(fields.length, (index) {
@@ -4474,16 +4747,16 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                                       children: [
                                         Text(
                                           field['label']?.toString() ?? 'Field',
-                                          style: const TextStyle(
-                                            color: Color(0xFF6B7280),
+                                          style: TextStyle(
+                                            color: colorScheme.onSurfaceVariant,
                                             fontSize: 12,
                                           ),
                                         ),
                                         const SizedBox(height: 3),
                                         Text(
                                           displayValue,
-                                          style: const TextStyle(
-                                            color: Color(0xFF111827),
+                                          style: TextStyle(
+                                            color: colorScheme.onSurface,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -4581,20 +4854,21 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
   }
 
   Widget _metadataRow(String label, String value) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Row(
       children: [
         SizedBox(
           width: 104,
           child: Text(
             label,
-            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
           ),
         ),
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-              color: Color(0xFF111827),
+            style: TextStyle(
+              color: colorScheme.onSurface,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -4716,17 +4990,18 @@ class _TinyChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: const Color(0xFFF4F4F5),
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
           fontSize: 11,
-          color: const Color(0xFF3F3F46),
+          color: colorScheme.onSurfaceVariant,
         ),
       ),
     );
@@ -4760,6 +5035,7 @@ class _DebugInfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -4774,9 +5050,12 @@ class _DebugInfoCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             if (rows.isEmpty)
-              const Text(
+              Text(
                 'No data',
-                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
               )
             else
               ...rows.map(
@@ -4789,8 +5068,8 @@ class _DebugInfoCard extends StatelessWidget {
                         width: 132,
                         child: Text(
                           row.key,
-                          style: const TextStyle(
-                            color: Color(0xFF6B7280),
+                          style: TextStyle(
+                            color: colorScheme.onSurfaceVariant,
                             fontSize: 12,
                           ),
                         ),
@@ -4798,8 +5077,8 @@ class _DebugInfoCard extends StatelessWidget {
                       Expanded(
                         child: SelectableText(
                           row.value,
-                          style: const TextStyle(
-                            color: Color(0xFF111827),
+                          style: TextStyle(
+                            color: colorScheme.onSurface,
                             fontSize: 12,
                             fontFamily: 'monospace',
                           ),
@@ -4980,11 +5259,12 @@ class _HomeTypeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const borderRadius = 14.0;
+    final colorScheme = Theme.of(context).colorScheme;
     return Material(
-      color: Colors.white,
+      color: colorScheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(borderRadius),
-        side: const BorderSide(color: Color(0xFFE5E7EB)),
+        side: BorderSide(color: colorScheme.outlineVariant),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(borderRadius),
@@ -5008,15 +5288,18 @@ class _HomeTypeCard extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF111827),
+                style: TextStyle(
+                  color: colorScheme.onSurface,
                   fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 2),
               Text(
                 '$count',
-                style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
@@ -5140,16 +5423,17 @@ class _CountPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFEFF0F2),
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: const Color(0xFF3F3F46),
+          color: colorScheme.onSurfaceVariant,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -5220,10 +5504,11 @@ class _AllItemsSelectionActionBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(6, 8, 6, 4),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
       ),
       child: Row(
         children: [
@@ -5277,6 +5562,7 @@ class _SelectionActionNavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Expanded(
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -5286,11 +5572,14 @@ class _SelectionActionNavItem extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 20, color: const Color(0xFF374151)),
+              Icon(icon, size: 20, color: colorScheme.onSurfaceVariant),
               const SizedBox(height: 2),
               Text(
                 label,
-                style: const TextStyle(fontSize: 11, color: Color(0xFF4B5563)),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -5365,7 +5654,7 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).scaffoldBackgroundColor,
       child: SafeArea(
         child: SizedBox.expand(
           child: Column(
@@ -5414,7 +5703,9 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
                         hintText: 'Search all items...',
                         prefixIcon: const Icon(Icons.search, size: 20),
                         isDense: true,
-                        fillColor: const Color(0xFFF7F8FC),
+                        fillColor: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHighest,
                         filled: true,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -5487,11 +5778,11 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
                     ),
                     const SizedBox(height: 8),
                     if (_activeFilterChips().isEmpty)
-                      const Text(
+                      Text(
                         'No active filters',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Color(0xFF6B7280),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       )
                     else
@@ -5538,7 +5829,10 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
           if (value != null)
             Text(
               value,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           if (trailing != null) trailing,
         ],

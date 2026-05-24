@@ -713,9 +713,11 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Your new entry has been saved successfully.',
-                style: TextStyle(color: Color(0xFF6B7280)),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 12),

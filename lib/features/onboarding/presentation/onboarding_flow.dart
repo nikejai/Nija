@@ -47,12 +47,16 @@ class OnboardingFlow extends StatefulWidget {
     super.key,
     required this.languageMode,
     required this.onLanguageModeChanged,
+    this.themeMode = ThemeMode.system,
+    this.onThemeModeChanged,
     this.vaultService,
     this.vaultFilePath,
   });
 
   final String languageMode;
   final ValueChanged<String> onLanguageModeChanged;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
   final VaultService? vaultService;
   final String? vaultFilePath;
 
@@ -223,6 +227,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         initialCustomTypeDefinitions: _customTypeDefinitions,
         languageMode: widget.languageMode,
         onLanguageModeChanged: widget.onLanguageModeChanged,
+        themeMode: widget.themeMode,
+        onThemeModeChanged: widget.onThemeModeChanged,
         biometricEnabled: _biometricEnabled,
         onBiometricChanged: _onBiometricPreferenceChanged,
         onPersistVaultData: _persistVaultData,
@@ -2909,7 +2915,7 @@ class RecoveryScreen extends StatelessWidget {
   }
 }
 
-class UnlockScreen extends StatelessWidget {
+class UnlockScreen extends StatefulWidget {
   const UnlockScreen({
     super.key,
     required this.passwordController,
@@ -2932,89 +2938,166 @@ class UnlockScreen extends StatelessWidget {
   final Future<void> Function() onCreateVault;
 
   @override
+  State<UnlockScreen> createState() => _UnlockScreenState();
+}
+
+class _UnlockScreenState extends State<UnlockScreen> {
+  bool _obscurePassword = true;
+
+  @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final accent = colorScheme.primary;
+
     return OnboardingScaffold(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-        child: ListView(
-          children: [
-            Text(
-              AppStrings.unlockVault,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              AppStrings.unlockHelper,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: passwordController,
-              obscureText: true,
-              decoration: InputDecoration(labelText: AppStrings.masterPassword),
-            ),
-            const SizedBox(height: 24),
-            if (biometricEnabled) ...[
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: onBiometricUnlock,
-                  icon: const Icon(Icons.fingerprint),
-                  label: Text(AppStrings.useBiometricUnlock),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: (constraints.maxHeight - 52).clamp(520.0, 720.0),
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 18),
+                    Image.asset(
+                      'assets/branding/nija_mark.png',
+                      width: 72,
+                      height: 72,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      AppStrings.appName,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'yourself, secure.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 30),
+                    Icon(
+                      Icons.lock_outline,
+                      color: colorScheme.onSurfaceVariant,
+                      size: 28,
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      AppStrings.unlockHelper,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: widget.passwordController,
+                      obscureText: _obscurePassword,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _unlockIfReady(),
+                      decoration: InputDecoration(
+                        labelText: AppStrings.masterPassword,
+                        suffixIcon: IconButton(
+                          onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword,
+                          ),
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                          tooltip: _obscurePassword
+                              ? 'Show password'
+                              : 'Hide password',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _unlockIfReady,
+                        child: Text(AppStrings.unlock),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (widget.biometricEnabled)
+                      TextButton.icon(
+                        onPressed: widget.onBiometricUnlock,
+                        icon: Icon(Icons.fingerprint, color: accent),
+                        label: Text(AppStrings.useBiometricUnlock),
+                      ),
+                    if (!widget.biometricEnabled)
+                      Text(
+                        AppStrings.unlockVault,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    const SizedBox(height: 24),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 6,
+                      runSpacing: 2,
+                      children: [
+                        TextButton(
+                          onPressed: widget.onRecover,
+                          child: const Text('Recover with phrase'),
+                        ),
+                        TextButton(
+                          onPressed: widget.onSelectDifferentVault,
+                          child: Text(AppStrings.selectDifferentVault),
+                        ),
+                        TextButton(
+                          onPressed: widget.onOpenEncryptedSecret,
+                          child: Text(AppStrings.openEncryptedSecret),
+                        ),
+                        TextButton(
+                          onPressed: widget.onCreateVault,
+                          child: Text(AppStrings.createVault),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 34),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 24),
+                      child: Text(
+                        '100% local. 100% yours.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 10),
             ],
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () async {
-                  if (passwordController.text.trim().isNotEmpty) {
-                    await onUnlock();
-                  }
-                },
-                child: Text(AppStrings.unlock),
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: onRecover,
-                child: const Text('Recover with phrase'),
-              ),
-            ),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: onSelectDifferentVault,
-                child: Text(AppStrings.selectDifferentVault),
-              ),
-            ),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: onOpenEncryptedSecret,
-                child: Text(AppStrings.openEncryptedSecret),
-              ),
-            ),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: onCreateVault,
-                child: Text(AppStrings.createVault),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Vault locks automatically when the app goes to background.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
+  }
+
+  Future<void> _unlockIfReady() async {
+    if (widget.passwordController.text.trim().isNotEmpty) {
+      await widget.onUnlock();
+    }
   }
 }
 
