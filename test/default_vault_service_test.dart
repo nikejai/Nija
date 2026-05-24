@@ -498,4 +498,111 @@ void main() {
       expect(confirmed.incomingRevision, 2);
     },
   );
+
+  test(
+    'incoming older revision creates merge candidate instead of overwrite',
+    () async {
+      final storage = InMemoryVaultStorageAdapter();
+      final service = DefaultVaultService(
+        storageAdapter: storage,
+        cryptoAdapter: SecureCryptoAdapter(),
+      );
+
+      await service.createVault(
+        filePath: 'older-merge.nija',
+        vaultId: 'older-merge-id',
+        vaultName: 'Older merge vault',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'CorrectPass123',
+        recoveryPhrase: basePhrase,
+      );
+      final exportedBeforeEdit = await storage.read(
+        filePath: 'older-merge.nija',
+      );
+
+      await service.persistVaultPayload(
+        filePath: 'older-merge.nija',
+        password: 'CorrectPass123',
+        payload: const VaultPayload(
+          schemaVersion: 1,
+          items: [
+            {'id': 'new-item', 'title': 'New item', 'type': 'Login'},
+          ],
+          notes: [],
+          tags: [],
+          settings: {},
+          audit: [],
+        ),
+      );
+      await storage.write(
+        filePath: 'older-import.nija',
+        content: exportedBeforeEdit,
+      );
+
+      final result = await service.importNijaFile(
+        filePath: 'older-import.nija',
+        unlockCredential: 'CorrectPass123',
+      );
+
+      expect(result.status, ImportStatus.conflictCreated);
+      expect(result.conflictVaultId, isNotEmpty);
+
+      final activePayload = await service.readVaultPayload(
+        filePath: 'older-merge.nija',
+        password: 'CorrectPass123',
+      );
+      expect(
+        activePayload.items.map((entry) => entry['id']),
+        contains('new-item'),
+      );
+    },
+  );
+
+  test(
+    'new mutations clear previously resolved incoming version markers',
+    () async {
+      final privateStore = InMemoryPrivateVaultStore();
+      final service = DefaultVaultService(
+        storageAdapter: InMemoryVaultStorageAdapter(),
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: privateStore,
+      );
+
+      await service.createVault(
+        filePath: 'resolved-marker.nija',
+        vaultId: 'resolved-marker-id',
+        vaultName: 'Resolved marker vault',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'CorrectPass123',
+        recoveryPhrase: basePhrase,
+      );
+
+      await service.markVaultConflictResolved(
+        filePath: 'resolved-marker.nija',
+        resolvedVaultVersionId: 'incoming-version-1',
+      );
+      var header = await privateStore.readHeader('resolved-marker-id');
+      expect(header.resolvedFromVersionIds, contains('incoming-version-1'));
+      final resolvedRevision = header.revision;
+
+      await service.persistVaultPayload(
+        filePath: 'resolved-marker.nija',
+        password: 'CorrectPass123',
+        payload: const VaultPayload(
+          schemaVersion: 1,
+          items: [],
+          notes: [
+            {'id': 'note-after-resolve', 'title': 'After resolve'},
+          ],
+          tags: [],
+          settings: {},
+          audit: [],
+        ),
+      );
+
+      header = await privateStore.readHeader('resolved-marker-id');
+      expect(header.resolvedFromVersionIds, isEmpty);
+      expect(header.revision, resolvedRevision + 1);
+    },
+  );
 }

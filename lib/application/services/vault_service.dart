@@ -79,6 +79,11 @@ abstract class VaultService {
 
   Future<void> renameVault({required String filePath, required String label});
 
+  Future<void> markVaultConflictResolved({
+    required String filePath,
+    required String resolvedVaultVersionId,
+  });
+
   Future<ImportResult> importNijaFile({
     required String filePath,
     required String unlockCredential,

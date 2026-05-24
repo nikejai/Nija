@@ -95,6 +95,32 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     return false;
   }
 
+  @override
+  Future<CloudVaultBackupFile?> readCloudBackup({
+    required String vaultId,
+  }) async {
+    if (Platform.isAndroid) {
+      return _readGoogleDriveBackup(vaultId: vaultId);
+    }
+    if (Platform.isIOS) {
+      try {
+        final raw = await _cloudBackupChannel.invokeMethod<String>(
+          'readFromICloud',
+          {'vaultId': vaultId},
+        );
+        if (raw == null || raw.isEmpty) return null;
+        return CloudVaultBackupFile(
+          storageId: 'icloud_$vaultId.nija',
+          label: 'iCloud backup',
+          content: raw,
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
   Future<bool> _backupToGoogleDrive({
     required String vaultId,
     required String suggestedName,
@@ -137,6 +163,52 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     } catch (error) {
       debugPrint('[VaultPortability][GoogleDriveBackup] $error');
       throw StateError('Google Drive backup failed: $error');
+    } finally {
+      authedClient?.close();
+    }
+  }
+
+  Future<CloudVaultBackupFile?> _readGoogleDriveBackup({
+    required String vaultId,
+  }) async {
+    _GoogleAuthClient? authedClient;
+    try {
+      final googleSignIn = _googleSignInClient();
+      final account =
+          googleSignIn.currentUser ?? await googleSignIn.signInSilently();
+      final signedIn = account ?? await googleSignIn.signIn();
+      if (signedIn == null) return null;
+      final authHeaders = await signedIn.authHeaders;
+      authedClient = _GoogleAuthClient(authHeaders);
+      final driveApi = drive.DriveApi(authedClient);
+      final query =
+          "appProperties has { key='nijaVaultId' and value='$vaultId' } and trashed=false";
+      final list = await driveApi.files.list(
+        q: query,
+        $fields: 'files(id,name)',
+        spaces: 'drive',
+        pageSize: 1,
+      );
+      final file = list.files?.isNotEmpty == true ? list.files!.first : null;
+      final id = file?.id;
+      if (id == null || id.isEmpty) return null;
+      final media = await driveApi.files.get(
+        id,
+        downloadOptions: drive.DownloadOptions.fullMedia,
+      );
+      if (media is! drive.Media) return null;
+      final bytes = <int>[];
+      await for (final chunk in media.stream) {
+        bytes.addAll(chunk);
+      }
+      return CloudVaultBackupFile(
+        storageId: 'gdrive_$id.nija',
+        label: file?.name ?? 'Google Drive backup',
+        content: utf8.decode(bytes),
+      );
+    } catch (error) {
+      debugPrint('[VaultPortability][GoogleDriveReadBackup] $error');
+      return null;
     } finally {
       authedClient?.close();
     }

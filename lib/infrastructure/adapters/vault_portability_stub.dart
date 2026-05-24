@@ -27,6 +27,13 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
   }
 
   @override
+  Future<CloudVaultBackupFile?> readCloudBackup({required String vaultId}) {
+    throw UnsupportedError(
+      'Cloud vault restore is not supported on this platform.',
+    );
+  }
+
+  @override
   Future<String?> getCloudBackupAccountLabel() async => null;
 
   @override

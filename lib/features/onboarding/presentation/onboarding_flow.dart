@@ -10,6 +10,7 @@ import 'dart:math';
 
 import '../../../application/services/default_vault_service.dart';
 import '../../../application/services/vault_service.dart';
+import '../../../application/services/vault_merge_helper.dart';
 import '../../../core/config/guardian_profiles.dart';
 import '../../../core/config/recovery_phrase_dictionary.dart';
 import '../../../core/config/recovery_phrase_generator.dart';
@@ -30,6 +31,7 @@ import '../../../infrastructure/adapters/secret_intent_bridge.dart';
 import '../../../infrastructure/adapters/secure_crypto_adapter.dart';
 import '../../../infrastructure/adapters/vault_portability.dart';
 import '../../../infrastructure/adapters/vault_portability_base.dart';
+import '../../../infrastructure/adapters/vault_portability_model.dart';
 import '../../../infrastructure/adapters/vault_reference_cache.dart';
 import '../../../infrastructure/adapters/web_vault_storage_adapter.dart';
 import '../../vault/presentation/vault_app_shell.dart';
@@ -37,6 +39,8 @@ import 'onboarding_scaffold.dart';
 import 'welcome_screen.dart';
 
 enum OnboardingStep { welcome, setup, recovery, created, unlock, app }
+
+enum _CloudMergeOutcome { noMergeNeeded, merged, cancelled }
 
 class OnboardingFlow extends StatefulWidget {
   const OnboardingFlow({
@@ -86,6 +90,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       SecretSharePortabilityAdapterImpl();
   final _secretIntentBridge = SecretIntentBridge();
   final _encryptedShareCodec = EncryptedShareCodec();
+  final _vaultMergeHelper = const VaultMergeHelper();
   final _biometricAuthService = BiometricAuthService();
   final _biometricCredentialStore = BiometricCredentialStore();
   final _biometricEnrollmentStore = BiometricEnrollmentStore();
@@ -227,8 +232,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             _exportCurrentVaultToLocal(setAsActiveLocation: false),
         onImportVault: () => _importVaultFromLocal(continueToUnlock: false),
         onBackupToCloud: _backupCurrentVaultToCloud,
-        onRestoreFromCloud: () =>
-            _importVaultFromLocal(continueToUnlock: false),
+        onRestoreFromCloud: _restoreCurrentVaultFromCloud,
         onReadCloudBackupAccount: _readCloudBackupAccountLabel,
         onChangeCloudBackupAccount: _changeCloudBackupAccount,
         onRenameVault: _renameActiveVault,
@@ -884,6 +888,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       }
       return decision;
     } finally {
+      await _waitForDialogTeardown();
       passwordController.dispose();
     }
   }
@@ -996,6 +1001,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           },
         ),
       );
+      await _waitForDialogTeardown();
+      return result;
     } finally {
       controller.dispose();
     }
@@ -1234,6 +1241,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         );
       },
     );
+    await _waitForDialogTeardown();
     recoveryController.clear();
     recoveryController.dispose();
     if (recovery == null || recovery.isEmpty) return;
@@ -1594,12 +1602,31 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         filePath: imported.storageId,
         rawContent: imported.content,
       );
-      final credential = await _promptImportVaultCredential();
-      if (credential == null || credential.isEmpty) return;
+      var credential = _passwordController.text.trim();
+      if (credential.isEmpty) {
+        final prompted = await _promptImportVaultCredential();
+        if (prompted == null || prompted.isEmpty) return;
+        credential = prompted;
+      }
       var result = await _vaultService.importNijaFile(
         filePath: imported.storageId,
         unlockCredential: credential,
       );
+      if (result.status == ImportStatus.failed) {
+        final prompted = await _promptImportVaultCredential(
+          title: 'Unlock imported vault',
+          message:
+              'The selected file did not unlock with the active vault password. Enter the password that was valid when this file was exported.',
+        );
+        if (prompted == null || prompted.isEmpty || prompted == credential) {
+          throw StateError(result.userSafeMessage);
+        }
+        credential = prompted;
+        result = await _vaultService.importNijaFile(
+          filePath: imported.storageId,
+          unlockCredential: credential,
+        );
+      }
       if (result.status == ImportStatus.failed &&
           result.userSafeMessage.contains('Confirm replace')) {
         final replace = await _confirmReplaceNewerImportedVault(result);
@@ -1622,10 +1649,22 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
         return;
       }
+      if (result.status == ImportStatus.conflictCreated) {
+        final conflictVaultId = result.conflictVaultId;
+        if (conflictVaultId == null || conflictVaultId.isEmpty) {
+          throw StateError('Conflict import did not return conflict vault id.');
+        }
+        await _reviewAndMergeVaultConflict(
+          conflictVaultId: conflictVaultId,
+          importedPassword: credential,
+        );
+        return;
+      }
       final activeId = result.conflictVaultId ?? result.vaultId;
       final importedLabel = result.status == ImportStatus.conflictCreated
           ? 'Vault conflict copy'
           : await _resolveVaultLabel(activeId);
+      await _resetBiometricForVault(activeId);
       await _rememberVaultReference(activeId, label: importedLabel);
       if (!mounted) return;
       setState(() {
@@ -1654,6 +1693,107 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         context,
       ).showSnackBar(SnackBar(content: Text(AppStrings.vaultImportFailed)));
     }
+  }
+
+  Future<void> _reviewAndMergeVaultConflict({
+    required String conflictVaultId,
+    required String importedPassword,
+    String? resolvedVaultVersionId,
+    bool askBackupAfterMerge = false,
+    String importedSourceLabel = 'Imported vault',
+  }) async {
+    final currentPassword = await _activeVaultPasswordForMerge();
+    if (currentPassword == null || currentPassword.isEmpty) return;
+    final currentPayload = await _vaultService.readVaultPayload(
+      filePath: _vaultFilePath,
+      password: currentPassword,
+    );
+    final importedPayload = await _vaultService.readVaultPayload(
+      filePath: conflictVaultId,
+      password: importedPassword,
+    );
+    final plan = _vaultMergeHelper.buildPlan(
+      current: currentPayload,
+      imported: importedPayload,
+    );
+    if (plan.conflictCount == 0) {
+      final mergedPayload = _vaultMergeHelper.merge(
+        current: currentPayload,
+        imported: importedPayload,
+        selections: const <String, VaultMergeSource>{},
+      );
+      await _vaultService.persistVaultPayload(
+        filePath: _vaultFilePath,
+        password: currentPassword,
+        payload: mergedPayload,
+      );
+      if (resolvedVaultVersionId != null && resolvedVaultVersionId.isNotEmpty) {
+        await _vaultService.markVaultConflictResolved(
+          filePath: _vaultFilePath,
+          resolvedVaultVersionId: resolvedVaultVersionId,
+        );
+      }
+      await _loadVaultData(currentPassword);
+      await _refreshVaultSize();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Same vault detected. Non-conflicting changes were merged automatically. Please review if needed.',
+          ),
+        ),
+      );
+      if (askBackupAfterMerge) {
+        await _confirmBackupAfterCloudMerge();
+      }
+      return;
+    }
+    if (!mounted) return;
+    final mergedPayload = await Navigator.of(context).push<VaultPayload>(
+      MaterialPageRoute<VaultPayload>(
+        builder: (context) => _VaultMergeScreen(
+          plan: plan,
+          currentPayload: currentPayload,
+          importedPayload: importedPayload,
+          mergeHelper: _vaultMergeHelper,
+          importedSourceLabel: importedSourceLabel,
+        ),
+      ),
+    );
+    if (mergedPayload == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vault merge cancelled.')));
+      return;
+    }
+
+    await _vaultService.persistVaultPayload(
+      filePath: _vaultFilePath,
+      password: currentPassword,
+      payload: mergedPayload,
+    );
+    if (resolvedVaultVersionId != null && resolvedVaultVersionId.isNotEmpty) {
+      await _vaultService.markVaultConflictResolved(
+        filePath: _vaultFilePath,
+        resolvedVaultVersionId: resolvedVaultVersionId,
+      );
+    }
+    await _loadVaultData(currentPassword);
+    await _refreshVaultSize();
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Vault merged successfully.')));
+    if (askBackupAfterMerge) {
+      await _confirmBackupAfterCloudMerge();
+    }
+  }
+
+  Future<String?> _activeVaultPasswordForMerge() async {
+    final activePassword = _passwordController.text.trim();
+    if (activePassword.isNotEmpty) return activePassword;
+    return _promptVaultCredentialForAction(actionLabel: 'Merge vault');
   }
 
   Future<void> _exportCurrentVaultToLocal({
@@ -1724,10 +1864,17 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         _vaultFilePath,
       ).replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
       final suggestedName = 'backup_${stamp}_$baseName';
+      final shouldContinue = await _resolveCloudVersionBeforeBackup(
+        vaultId: vaultId,
+      );
+      if (!shouldContinue) return;
+      final finalContent = await _vaultService.readRawVaultFile(
+        filePath: _vaultFilePath,
+      );
       final backedUp = await _vaultPortability.backupVaultToCloud(
         vaultId: vaultId,
         suggestedName: suggestedName,
-        content: rawContent,
+        content: finalContent,
       );
       if (!mounted) return;
       if (!backedUp) {
@@ -1747,6 +1894,172 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           content: Text('Failed to prepare cloud backup. ${_errorHint(error)}'),
         ),
       );
+    }
+  }
+
+  Future<void> _restoreCurrentVaultFromCloud() async {
+    try {
+      final rawContent = await _vaultService.readRawVaultFile(
+        filePath: _vaultFilePath,
+      );
+      final decoded = Map<String, dynamic>.from(jsonDecode(rawContent) as Map);
+      final vaultId = decoded['vaultId']?.toString().trim() ?? '';
+      if (vaultId.isEmpty) {
+        throw StateError('Vault metadata is missing vaultId');
+      }
+      final backup = await _vaultPortability.readCloudBackup(vaultId: vaultId);
+      if (backup == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No cloud backup found.')));
+        return;
+      }
+      await _importCloudBackupForMerge(
+        backup: backup,
+        askBackupAfterMerge: false,
+      );
+    } catch (error, stackTrace) {
+      _logOperationError('restoreCurrentVaultFromCloud', error, stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to restore cloud backup. ${_errorHint(error)}'),
+        ),
+      );
+    }
+  }
+
+  Future<bool> _resolveCloudVersionBeforeBackup({
+    required String vaultId,
+  }) async {
+    final backup = await _vaultPortability.readCloudBackup(vaultId: vaultId);
+    if (backup == null) return true;
+    final result = await _importCloudBackupForMerge(
+      backup: backup,
+      askBackupAfterMerge: true,
+    );
+    return result != _CloudMergeOutcome.cancelled;
+  }
+
+  Future<_CloudMergeOutcome> _importCloudBackupForMerge({
+    required CloudVaultBackupFile backup,
+    required bool askBackupAfterMerge,
+  }) async {
+    final backupFilePath = await _localPathForCloudBackup(backup.storageId);
+    await _vaultService.writeRawVaultFile(
+      filePath: backupFilePath,
+      rawContent: backup.content,
+    );
+    var credential = _passwordController.text.trim();
+    if (credential.isEmpty) {
+      final prompted = await _promptImportVaultCredential(
+        title: 'Unlock cloud backup',
+      );
+      if (prompted == null || prompted.isEmpty) {
+        return _CloudMergeOutcome.cancelled;
+      }
+      credential = prompted;
+    }
+    var result = await _vaultService.importNijaFile(
+      filePath: backupFilePath,
+      unlockCredential: credential,
+    );
+    if (result.status == ImportStatus.failed) {
+      final prompted = await _promptImportVaultCredential(
+        title: 'Unlock cloud backup',
+        message:
+            'The cloud backup did not unlock with the active vault password. Enter the password that was valid when it was backed up.',
+      );
+      if (prompted == null || prompted.isEmpty || prompted == credential) {
+        return _CloudMergeOutcome.cancelled;
+      }
+      credential = prompted;
+      result = await _vaultService.importNijaFile(
+        filePath: backupFilePath,
+        unlockCredential: credential,
+      );
+    }
+    if (result.status == ImportStatus.alreadyUpToDate) {
+      if (!mounted) return _CloudMergeOutcome.cancelled;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
+      return _CloudMergeOutcome.noMergeNeeded;
+    }
+    if (result.status == ImportStatus.imported) {
+      await _resetBiometricForVault(_vaultFilePath);
+      _passwordController.text = credential;
+      await _loadVaultData(credential);
+      await _refreshVaultSize();
+      if (!mounted) return _CloudMergeOutcome.cancelled;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Cloud backup restored.')));
+      return _CloudMergeOutcome.noMergeNeeded;
+    }
+    if (result.status == ImportStatus.conflictCreated) {
+      final conflictVaultId = result.conflictVaultId;
+      if (conflictVaultId == null || conflictVaultId.isEmpty) {
+        return _CloudMergeOutcome.cancelled;
+      }
+      await _reviewAndMergeVaultConflict(
+        conflictVaultId: conflictVaultId,
+        importedPassword: credential,
+        resolvedVaultVersionId: await _vaultVersionIdFromRaw(backup.content),
+        askBackupAfterMerge: askBackupAfterMerge,
+        importedSourceLabel: 'Cloud backup',
+      );
+      return _CloudMergeOutcome.merged;
+    }
+    if (!mounted) return _CloudMergeOutcome.cancelled;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
+    return _CloudMergeOutcome.cancelled;
+  }
+
+  Future<String> _localPathForCloudBackup(String storageId) async {
+    final safeName = storageId
+        .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
+    if (kIsWeb) return safeName;
+    final tempDir = await getTemporaryDirectory();
+    return '${tempDir.path}/$safeName';
+  }
+
+  Future<String?> _vaultVersionIdFromRaw(String raw) async {
+    try {
+      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      return decoded['vaultVersionId']?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _confirmBackupAfterCloudMerge() async {
+    if (!mounted) return;
+    final backupNow = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Backup merged vault?'),
+        content: const Text(
+          'The cloud version was merged into this vault. Back up now so the same conflict is not shown again later.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Backup now'),
+          ),
+        ],
+      ),
+    );
+    if (backupNow == true) {
+      await _backupCurrentVaultToCloud();
     }
   }
 
@@ -1836,10 +2149,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     await WidgetsBinding.instance.endOfFrame;
   }
 
-  Future<String?> _promptImportVaultCredential() async {
-    if (_passwordController.text.trim().isNotEmpty) {
-      return _passwordController.text.trim();
-    }
+  Future<String?> _promptImportVaultCredential({
+    String title = 'Unlock imported vault',
+    String? message,
+  }) async {
     final controller = TextEditingController();
     try {
       final result = await showDialog<String>(
@@ -1848,15 +2161,25 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           builder: (context, setLocalState) {
             final canContinue = controller.text.trim().isNotEmpty;
             return AlertDialog(
-              title: const Text('Unlock imported vault'),
-              content: TextField(
-                controller: controller,
-                autofocus: true,
-                obscureText: true,
-                onChanged: (_) => setLocalState(() {}),
-                decoration: InputDecoration(
-                  labelText: AppStrings.masterPassword,
-                ),
+              title: Text(title),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (message != null && message.trim().isNotEmpty) ...[
+                    Text(message),
+                    const SizedBox(height: 10),
+                  ],
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    obscureText: true,
+                    onChanged: (_) => setLocalState(() {}),
+                    decoration: InputDecoration(
+                      labelText: AppStrings.masterPassword,
+                    ),
+                  ),
+                ],
               ),
               actions: [
                 TextButton(
@@ -1912,6 +2235,16 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   void _clearSensitiveSessionState() {
     _passwordController.clear();
+  }
+
+  Future<void> _resetBiometricForVault(String vaultId) async {
+    await _biometricCredentialStore.removeMasterPassword(vaultId: vaultId);
+    await _biometricEnrollmentStore.setEnrolledForVault(
+      vaultId: vaultId,
+      enrolled: false,
+    );
+    if (!mounted || vaultId != _vaultFilePath) return;
+    setState(() => _biometricEnabled = false);
   }
 
   Future<void> _enableBiometricForCurrentVault() async {
@@ -2147,6 +2480,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         _stopBusy();
       }
     } finally {
+      await _waitForDialogTeardown();
       newPasswordController.dispose();
       confirmPasswordController.dispose();
     }
@@ -2811,6 +3145,1070 @@ class _EncryptedSecretViewerScreenState
       ),
     );
   }
+}
+
+class _VaultMergeScreen extends StatefulWidget {
+  const _VaultMergeScreen({
+    required this.plan,
+    required this.currentPayload,
+    required this.importedPayload,
+    required this.mergeHelper,
+    this.importedSourceLabel = 'Imported vault',
+  });
+
+  final VaultMergePlan plan;
+  final VaultPayload currentPayload;
+  final VaultPayload importedPayload;
+  final VaultMergeHelper mergeHelper;
+  final String importedSourceLabel;
+
+  @override
+  State<_VaultMergeScreen> createState() => _VaultMergeScreenState();
+}
+
+class _VaultMergeScreenState extends State<_VaultMergeScreen> {
+  late final Map<String, VaultMergeSource> _selections;
+  late final Set<String> _expandedEntryKeys;
+  String _filter = 'all';
+
+  @override
+  void initState() {
+    super.initState();
+    _selections = <String, VaultMergeSource>{
+      for (final entry in widget.plan.entries)
+        entry.key: entry.status == VaultMergeEntryStatus.importedOnly
+            ? VaultMergeSource.imported
+            : VaultMergeSource.current,
+    };
+    _expandedEntryKeys = widget.plan.entries
+        .where((entry) => entry.needsResolution)
+        .take(2)
+        .map((entry) => entry.key)
+        .toSet();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = widget.plan.entries.where(_matchesFilter).toList();
+    final unresolved = widget.plan.entries.where((entry) {
+      final selected = _selections[entry.key];
+      return entry.needsResolution && selected == null;
+    }).length;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8FAFC),
+        foregroundColor: const Color(0xFF111827),
+        elevation: 0,
+        centerTitle: true,
+        title: const Text(
+          'Review Conflicts',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        actions: [
+          IconButton(
+            onPressed: _showMergeHelp,
+            icon: const Icon(Icons.help_outline),
+          ),
+        ],
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _filterChip('all', 'All (${widget.plan.totalCount})'),
+                      _filterChip(
+                        'conflicts',
+                        'Conflicts (${_trueConflictCount()})',
+                      ),
+                      _filterChip(
+                        'deletions',
+                        'Deletions (${_deletionReviewCount()})',
+                      ),
+                      _filterChip(
+                        'passwords',
+                        'Passwords (${_passwordCount()})',
+                      ),
+                      _filterChip('notes', 'Notes (${_kindCount('note')})'),
+                      _filterChip('others', 'Others (${_otherCount()})'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  _filter == 'conflicts'
+                      ? 'Items changed in both vaults and need a version choice.'
+                      : _filter == 'deletions'
+                      ? 'Items missing from ${widget.importedSourceLabel.toLowerCase()}. Choose whether to keep or remove them.'
+                      : 'Review all compared entries. Conflicts and deletions need a decision.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF4B5563),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (widget.plan.conflictCount > 0) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_trueConflictCount()} conflicts, ${_deletionReviewCount()} deletions, ${widget.plan.identicalCount} identical, ${_autoMergeCount()} automatic.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF6B7280),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              itemCount: filtered.length,
+              separatorBuilder: (context, index) => const SizedBox(height: 8),
+              itemBuilder: (context, index) => _MergeEntryCard(
+                entry: filtered[index],
+                selected: _selections[filtered[index].key],
+                expanded: _expandedEntryKeys.contains(filtered[index].key),
+                onToggleExpanded: () => _toggleExpanded(filtered[index].key),
+                onSelected: (source) =>
+                    setState(() => _selections[filtered[index].key] = source),
+                onViewDifferences: () => _showEntryDifferences(filtered[index]),
+                importedSourceLabel: widget.importedSourceLabel,
+              ),
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF4F46E5),
+                            side: const BorderSide(color: Color(0xFF4F46E5)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: () => _selectAll(VaultMergeSource.current),
+                          child: const Text('Accept all from current'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: const Color(0xFF4F46E5),
+                            side: const BorderSide(color: Color(0xFF4F46E5)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: () =>
+                              _selectAll(VaultMergeSource.imported),
+                          child: Text(
+                            'Accept all from ${_sourceActionLabel(widget.importedSourceLabel)}',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4F46E5),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      onPressed: unresolved == 0 ? _completeMerge : null,
+                      child: Text(
+                        unresolved == 0
+                            ? 'Apply Merge'
+                            : 'Resolve $unresolved items',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filterChip(String value, String label) {
+    final selected = _filter == value;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        showCheckmark: false,
+        labelStyle: TextStyle(
+          color: selected ? Colors.white : const Color(0xFF374151),
+          fontWeight: FontWeight.w700,
+        ),
+        selectedColor: const Color(0xFF4F46E5),
+        backgroundColor: Colors.white,
+        side: BorderSide(
+          color: selected ? const Color(0xFF4F46E5) : const Color(0xFFE5E7EB),
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        onSelected: (_) => setState(() => _filter = value),
+      ),
+    );
+  }
+
+  bool _matchesFilter(VaultMergeEntry entry) {
+    return switch (_filter) {
+      'conflicts' => entry.status == VaultMergeEntryStatus.conflict,
+      'deletions' => entry.status == VaultMergeEntryStatus.currentOnly,
+      'passwords' => entry.kind == 'item' && _isPasswordEntry(entry),
+      'notes' => entry.kind == 'note',
+      'others' => entry.kind != 'note' && !_isPasswordEntry(entry),
+      _ => true,
+    };
+  }
+
+  int _trueConflictCount() {
+    return widget.plan.entries
+        .where((entry) => entry.status == VaultMergeEntryStatus.conflict)
+        .length;
+  }
+
+  int _deletionReviewCount() {
+    return widget.plan.entries
+        .where((entry) => entry.status == VaultMergeEntryStatus.currentOnly)
+        .length;
+  }
+
+  int _kindCount(String kind) {
+    return widget.plan.entries.where((entry) => entry.kind == kind).length;
+  }
+
+  int _passwordCount() {
+    return widget.plan.entries.where(_isPasswordEntry).length;
+  }
+
+  int _otherCount() {
+    return widget.plan.entries
+        .where((entry) => entry.kind != 'note' && !_isPasswordEntry(entry))
+        .length;
+  }
+
+  int _autoMergeCount() {
+    return widget.plan.entries
+        .where(
+          (entry) =>
+              !entry.needsResolution &&
+              entry.status != VaultMergeEntryStatus.identical,
+        )
+        .length;
+  }
+
+  bool _isPasswordEntry(VaultMergeEntry entry) {
+    final normalized = '${entry.title} ${entry.type}'.toLowerCase();
+    return normalized.contains('password') ||
+        normalized.contains('login') ||
+        normalized.contains('account') ||
+        normalized.contains('wifi') ||
+        normalized.contains('wi-fi');
+  }
+
+  void _toggleExpanded(String key) {
+    setState(() {
+      if (_expandedEntryKeys.contains(key)) {
+        _expandedEntryKeys.remove(key);
+      } else {
+        _expandedEntryKeys.add(key);
+      }
+    });
+  }
+
+  void _selectAll(VaultMergeSource source) {
+    setState(() {
+      for (final entry in widget.plan.entries) {
+        if (source == VaultMergeSource.current && entry.current == null) {
+          _selections[entry.key] = VaultMergeSource.imported;
+        } else if (source == VaultMergeSource.imported &&
+            entry.imported == null) {
+          _selections[entry.key] = VaultMergeSource.current;
+        } else {
+          _selections[entry.key] = source;
+        }
+      }
+    });
+  }
+
+  void _completeMerge() {
+    final merged = widget.mergeHelper.merge(
+      current: widget.currentPayload,
+      imported: widget.importedPayload,
+      selections: _selections,
+    );
+    Navigator.of(context).pop(merged);
+  }
+
+  Future<void> _showMergeHelp() {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Vault merge'),
+        content: const Text(
+          'Nothing is changed until you tap Apply Merge. Imported-only entries '
+          'are added automatically. Conflicts and possible deletions need a '
+          'version choice.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showEntryDifferences(VaultMergeEntry entry) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.84,
+        minChildSize: 0.45,
+        maxChildSize: 0.94,
+        builder: (context, controller) => ListView(
+          controller: controller,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          children: [
+            Center(
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE5E7EB),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              entry.title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Compare the current vault version with ${widget.importedSourceLabel.toLowerCase()}.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF6B7280)),
+            ),
+            const SizedBox(height: 12),
+            _MergeVersionPreview(
+              title: 'Current vault',
+              entry: entry.current,
+              kind: entry.kind,
+            ),
+            const SizedBox(height: 12),
+            _MergeVersionPreview(
+              title: widget.importedSourceLabel,
+              entry: entry.imported,
+              kind: entry.kind,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _sourceActionLabel(String label) {
+    final normalized = label.trim().toLowerCase();
+    if (normalized == 'cloud backup') return 'cloud';
+    if (normalized == 'imported vault') return 'imported';
+    return normalized.isEmpty ? 'imported' : normalized;
+  }
+}
+
+class _MergeEntryCard extends StatelessWidget {
+  const _MergeEntryCard({
+    required this.entry,
+    required this.selected,
+    required this.expanded,
+    required this.onToggleExpanded,
+    required this.onSelected,
+    required this.onViewDifferences,
+    required this.importedSourceLabel,
+  });
+
+  final VaultMergeEntry entry;
+  final VaultMergeSource? selected;
+  final bool expanded;
+  final VoidCallback onToggleExpanded;
+  final ValueChanged<VaultMergeSource> onSelected;
+  final VoidCallback onViewDifferences;
+  final String importedSourceLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(10, 8, 10, expanded ? 8 : 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: onToggleExpanded,
+              child: Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: _accentForMergeEntry(entry),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Icon(
+                      _iconForMergeEntry(entry),
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF111827),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${entry.type} • ${_statusLabel(entry.status)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF6B7280),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: const Color(0xFF4B5563),
+                  ),
+                ],
+              ),
+            ),
+            if (expanded) ...[
+              const SizedBox(height: 10),
+              if (entry.current != null)
+                _MergeChoiceRow(
+                  title: 'Current Vault',
+                  subtitle: _metadataLine(entry.current!),
+                  selected: selected == VaultMergeSource.current,
+                  onTap: () => onSelected(VaultMergeSource.current),
+                ),
+              if (entry.imported != null)
+                _MergeChoiceRow(
+                  title: importedSourceLabel,
+                  subtitle: _metadataLine(entry.imported!),
+                  selected: selected == VaultMergeSource.imported,
+                  onTap: () => onSelected(VaultMergeSource.imported),
+                ),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: onViewDifferences,
+                child: const Padding(
+                  padding: EdgeInsets.fromLTRB(4, 10, 2, 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'View differences',
+                          style: TextStyle(
+                            color: Color(0xFF374151),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right,
+                        color: Color(0xFF4B5563),
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _iconForMergeEntry(VaultMergeEntry entry) {
+    if (entry.kind == 'note') return Icons.description_outlined;
+    final normalized = entry.type.toLowerCase();
+    if (normalized.contains('password') || normalized.contains('login')) {
+      return Icons.lock_outline;
+    }
+    if (normalized.contains('bank') || normalized.contains('finance')) {
+      return Icons.account_balance_outlined;
+    }
+    return Icons.shield_outlined;
+  }
+
+  Color _accentForMergeEntry(VaultMergeEntry entry) {
+    if (entry.kind == 'note') return const Color(0xFFEAB308);
+    final normalized = entry.type.toLowerCase();
+    if (normalized.contains('bank') || normalized.contains('finance')) {
+      return const Color(0xFF22C55E);
+    }
+    if (normalized.contains('password') || normalized.contains('login')) {
+      return const Color(0xFF3B82F6);
+    }
+    return const Color(0xFFEF4444);
+  }
+
+  String _statusLabel(VaultMergeEntryStatus status) {
+    return switch (status) {
+      VaultMergeEntryStatus.identical => 'Identical',
+      VaultMergeEntryStatus.currentOnly => 'Only in current',
+      VaultMergeEntryStatus.importedOnly => 'Only in imported',
+      VaultMergeEntryStatus.conflict => 'Updated in both',
+    };
+  }
+
+  String _metadataLine(Map<String, dynamic> entry) {
+    final version = entry['version']?.toString();
+    final updatedAt = entry['updatedAt']?.toString();
+    final device = entry['updatedByDevice']?.toString();
+    final parts = <String>[
+      if (version != null && version.isNotEmpty) 'v$version',
+      if (updatedAt != null && updatedAt.isNotEmpty) updatedAt,
+      if (device != null && device.isNotEmpty) device,
+    ];
+    return parts.isEmpty ? 'No metadata' : parts.join(' • ');
+  }
+}
+
+class _MergeChoiceRow extends StatelessWidget {
+  const _MergeChoiceRow({
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: selected ? const Color(0xFF4F46E5) : Colors.transparent,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected
+                      ? const Color(0xFF4F46E5)
+                      : const Color(0xFF9CA3AF),
+                  width: 2,
+                ),
+              ),
+              child: selected
+                  ? const Icon(Icons.check, color: Colors.white, size: 15)
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MergeVersionPreview extends StatelessWidget {
+  const _MergeVersionPreview({
+    required this.title,
+    required this.entry,
+    required this.kind,
+  });
+
+  final String title;
+  final Map<String, dynamic>? entry;
+  final String kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = entry;
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        child: data == null
+            ? _MissingVersionCard(title: title)
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Color(0xFF4F46E5),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (kind == 'note')
+                    _MergeNotePreview(note: data)
+                  else
+                    _MergeItemPreview(item: data),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _MissingVersionCard extends StatelessWidget {
+  const _MissingVersionCard({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF4F46E5),
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Row(
+          children: [
+            Icon(Icons.remove_circle_outline, color: Color(0xFF9CA3AF)),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Not present in this vault version.',
+                style: TextStyle(
+                  color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _MergeItemPreview extends StatelessWidget {
+  const _MergeItemPreview({required this.item});
+
+  final Map<String, dynamic> item;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = item['type']?.toString().trim().isNotEmpty == true
+        ? item['type'].toString().trim()
+        : 'Item';
+    final title = item['title']?.toString().trim().isNotEmpty == true
+        ? item['title'].toString().trim()
+        : 'Untitled';
+    final fields = (item['fields'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((field) => Map<String, dynamic>.from(field))
+        .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE0E7FF),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.lock_outline, color: Color(0xFF4F46E5)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    type,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF4B5563),
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (fields.isEmpty)
+          const Text('No fields', style: TextStyle(color: Color(0xFF6B7280)))
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: Column(
+              children: List.generate(fields.length, (index) {
+                final field = fields[index];
+                final label =
+                    field['label']?.toString().trim().isNotEmpty == true
+                    ? field['label'].toString().trim()
+                    : 'Field';
+                final value = field['value']?.toString() ?? '';
+                final sensitive = field['sensitive'] == true;
+                return Column(
+                  children: [
+                    if (index > 0) const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: Color(0xFF6B7280),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    if (sensitive) ...[
+                                      const SizedBox(width: 6),
+                                      const Icon(
+                                        Icons.visibility_outlined,
+                                        size: 13,
+                                        color: Color(0xFF9CA3AF),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                SelectableText(
+                                  value.isEmpty ? 'Empty' : value,
+                                  style: TextStyle(
+                                    color: value.isEmpty
+                                        ? const Color(0xFF9CA3AF)
+                                        : const Color(0xFF111827),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              }),
+            ),
+          ),
+        const SizedBox(height: 12),
+        _MergeMetadataLine(label: 'Category', value: type),
+        _MergeMetadataLine(
+          label: 'Updated',
+          value: _mergePreviewValue(item, 'updatedAt', 'updated'),
+        ),
+        _MergeMetadataLine(
+          label: 'Device',
+          value: _mergePreviewValue(item, 'updatedByDevice', 'deviceId'),
+        ),
+      ],
+    );
+  }
+}
+
+class _MergeNotePreview extends StatelessWidget {
+  const _MergeNotePreview({required this.note});
+
+  final Map<String, dynamic> note;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = note['title']?.toString().trim().isNotEmpty == true
+        ? note['title'].toString().trim()
+        : 'Untitled note';
+    final body = _notePlainText(note).trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.description_outlined,
+                color: Color(0xFFD97706),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF111827),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(minHeight: 96),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: SelectableText(
+            body.isEmpty ? 'Empty note' : body,
+            style: TextStyle(
+              color: body.isEmpty
+                  ? const Color(0xFF9CA3AF)
+                  : const Color(0xFF111827),
+              fontSize: 15,
+              height: 1.45,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _MergeMetadataLine(
+          label: 'Updated',
+          value: _mergePreviewValue(note, 'updatedAt', 'updated'),
+        ),
+        _MergeMetadataLine(
+          label: 'Device',
+          value: _mergePreviewValue(note, 'updatedByDevice', 'deviceId'),
+        ),
+      ],
+    );
+  }
+}
+
+class _MergeMetadataLine extends StatelessWidget {
+  const _MergeMetadataLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    if (value.trim().isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 76,
+            child: Text(
+              label,
+              style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: Color(0xFF111827),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _mergePreviewValue(
+  Map<String, dynamic> entry,
+  String primaryKey,
+  String fallbackKey,
+) {
+  final primary = entry[primaryKey]?.toString().trim() ?? '';
+  if (primary.isNotEmpty) return primary;
+  return entry[fallbackKey]?.toString().trim() ?? '';
+}
+
+String _notePlainText(Map<String, dynamic> note) {
+  final delta = note['delta'];
+  if (delta is List) {
+    final buffer = StringBuffer();
+    for (final op in delta) {
+      if (op is Map) {
+        final insert = op['insert'];
+        if (insert is String) buffer.write(insert);
+      }
+    }
+    final value = buffer.toString();
+    if (value.trim().isNotEmpty) return value;
+  }
+  return note['preview']?.toString() ?? '';
 }
 
 class _SecretField {

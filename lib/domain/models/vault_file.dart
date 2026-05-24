@@ -12,6 +12,7 @@ class VaultFile {
     this.revision = 0,
     this.vaultName,
     this.lastModifiedByDeviceId,
+    this.resolvedFromVersionIds = const <String>[],
     required this.guardian,
     required this.kdf,
     required this.recoveryKdf,
@@ -35,6 +36,7 @@ class VaultFile {
   final String vaultVersionId;
   final int revision;
   final String? lastModifiedByDeviceId;
+  final List<String> resolvedFromVersionIds;
   final GuardianMetadata guardian;
   final KdfMetadata kdf;
   final KdfMetadata recoveryKdf;
@@ -61,6 +63,8 @@ class VaultFile {
     if (lastModifiedByDeviceId != null &&
         lastModifiedByDeviceId!.trim().isNotEmpty)
       'lastModifiedByDeviceId': lastModifiedByDeviceId,
+    if (resolvedFromVersionIds.isNotEmpty)
+      'resolvedFromVersionIds': resolvedFromVersionIds,
     'guardian': guardian.toJson(),
     'kdf': kdf.toJson(),
     'recoveryKdf': recoveryKdf.toJson(),
@@ -91,6 +95,12 @@ class VaultFile {
           json['vaultVersionId'] as String? ?? 'legacy-${json['updatedAt']}',
       revision: json['revision'] as int? ?? 0,
       lastModifiedByDeviceId: json['lastModifiedByDeviceId'] as String?,
+      resolvedFromVersionIds:
+          (json['resolvedFromVersionIds'] as List<dynamic>? ??
+                  const <dynamic>[])
+              .map((entry) => entry.toString())
+              .where((entry) => entry.trim().isNotEmpty)
+              .toList(),
       guardian: GuardianMetadata.fromJson(
         Map<String, dynamic>.from(json['guardian'] as Map),
       ),
@@ -126,6 +136,7 @@ class VaultFile {
     int? revision,
     String? updatedAt,
     String? lastModifiedByDeviceId,
+    List<String>? resolvedFromVersionIds,
     String? vaultName,
     GuardianMetadata? guardian,
     KdfMetadata? kdf,
@@ -152,6 +163,8 @@ class VaultFile {
       revision: revision ?? this.revision,
       lastModifiedByDeviceId:
           lastModifiedByDeviceId ?? this.lastModifiedByDeviceId,
+      resolvedFromVersionIds:
+          resolvedFromVersionIds ?? this.resolvedFromVersionIds,
       guardian: guardian ?? this.guardian,
       kdf: kdf ?? this.kdf,
       recoveryKdf: recoveryKdf ?? this.recoveryKdf,
