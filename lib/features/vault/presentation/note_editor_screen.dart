@@ -4,7 +4,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import '../../../core/localization/app_strings.dart';
-import 'widgets/vault_page_heading.dart';
 
 class NoteEditorScreen extends StatefulWidget {
   const NoteEditorScreen({super.key, this.initialNote, this.onAutoSave});
@@ -132,12 +131,17 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
                 child: TextField(
                   controller: _titleController,
-                  style: vaultPageHeadingStyle(context),
+                  style: const TextStyle(
+                    color: Color(0xFF111827),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
                   decoration: const InputDecoration(
                     hintText: 'Untitled note',
                     hintStyle: TextStyle(
                       color: Color(0xFF111827),
-                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
                     ),
                     border: InputBorder.none,
                     isDense: true,

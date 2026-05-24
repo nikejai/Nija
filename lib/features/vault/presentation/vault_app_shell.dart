@@ -40,6 +40,7 @@ typedef VaultFileAction = Future<void> Function();
 typedef CloudBackupAction = Future<void> Function();
 typedef CloudBackupAccountRead = Future<String?> Function();
 typedef CloudBackupAccountChange = Future<bool> Function();
+typedef RenameVault = Future<void> Function(String name);
 
 class VaultAppShell extends StatefulWidget {
   const VaultAppShell({
@@ -64,6 +65,7 @@ class VaultAppShell extends StatefulWidget {
     required this.onRestoreFromCloud,
     required this.onReadCloudBackupAccount,
     required this.onChangeCloudBackupAccount,
+    this.onRenameVault,
   });
 
   final List<String> recoveryWords;
@@ -86,6 +88,7 @@ class VaultAppShell extends StatefulWidget {
   final CloudBackupAction onRestoreFromCloud;
   final CloudBackupAccountRead onReadCloudBackupAccount;
   final CloudBackupAccountChange onChangeCloudBackupAccount;
+  final RenameVault? onRenameVault;
 
   @override
   State<VaultAppShell> createState() => _VaultAppShellState();
@@ -138,6 +141,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   late final List<Map<String, dynamic>> _items;
   late final List<Map<String, dynamic>> _notes;
   late final List<VaultListEntryAdapter> _vaultListEntryAdapters;
+  late String _activeVaultName;
 
   List<_IndexedEntry> _lastDeletedAllItems = <_IndexedEntry>[];
   Map<String, bool> _lastPinnedStateItemById = <String, bool>{};
@@ -147,6 +151,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   @override
   void initState() {
     super.initState();
+    _activeVaultName = widget.activeVaultName;
     _customTypeDefinitions = widget.initialCustomTypeDefinitions
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList();
@@ -172,6 +177,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
     unawaited(_restoreSortPreferences());
     unawaited(_restoreCloudBackupPreference());
     unawaited(_refreshCloudBackupAccountLabel());
+  }
+
+  @override
+  void didUpdateWidget(covariant VaultAppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeVaultName != widget.activeVaultName) {
+      _activeVaultName = widget.activeVaultName;
+    }
   }
 
   @override
@@ -322,19 +335,27 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Widget _buildVaultTab(BuildContext context) {
     final recentAll =
         <Map<String, dynamic>>[
-          ..._items.map(
-            (item) => <String, dynamic>{'kind': 'item', 'entry': item},
-          ),
-          ..._notes.map(
-            (note) => <String, dynamic>{'kind': 'note', 'entry': note},
-          ),
-        ]..sort((a, b) {
-          final av = a['entry'] as Map<String, dynamic>;
-          final bv = b['entry'] as Map<String, dynamic>;
-          return _lastAccessedSortValue(
-            bv,
-          ).compareTo(_lastAccessedSortValue(av));
-        });
+              ..._items.map(
+                (item) => <String, dynamic>{'kind': 'item', 'entry': item},
+              ),
+              ..._notes.map(
+                (note) => <String, dynamic>{'kind': 'note', 'entry': note},
+              ),
+            ]
+            .where((row) {
+              final entry = row['entry'] as Map<String, dynamic>;
+              return _lastAccessedAt(entry) != null;
+            })
+            .map((row) {
+              final entry = row['entry'] as Map<String, dynamic>;
+              return {...row, 'updatedLabel': _lastAccessedLabel(entry)};
+            })
+            .toList()
+          ..sort((a, b) {
+            final av = a['entry'] as Map<String, dynamic>;
+            final bv = b['entry'] as Map<String, dynamic>;
+            return _lastAccessedAt(bv)!.compareTo(_lastAccessedAt(av)!);
+          });
     final recentItems = recentAll.take(4).toList();
     final typeCounts = <String, int>{};
     for (final item in _items) {
@@ -355,7 +376,19 @@ class _VaultAppShellState extends State<VaultAppShell> {
           children: [
             Row(
               children: [
-                Text('Nija', style: vaultPageHeadingStyle(context)),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Nija', style: vaultPageHeadingStyle(context)),
+                    Text(
+                      _activeVaultName,
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
                 const Spacer(),
                 IconButton(
                   onPressed: () => _openAddItemScreen(context),
@@ -1200,12 +1233,26 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   int _lastAccessedSortValue(Map<String, dynamic> entry) {
-    final lastAccessedAt = entry['lastAccessedAt']?.toString().trim() ?? '';
-    if (lastAccessedAt.isNotEmpty) {
-      final parsed = DateTime.tryParse(lastAccessedAt);
-      if (parsed != null) return parsed.millisecondsSinceEpoch;
-    }
+    final parsed = _lastAccessedAt(entry);
+    if (parsed != null) return parsed.millisecondsSinceEpoch;
     return _updatedRank(entry);
+  }
+
+  DateTime? _lastAccessedAt(Map<String, dynamic> entry) {
+    final value = entry['lastAccessedAt']?.toString().trim() ?? '';
+    if (value.isEmpty) return null;
+    return DateTime.tryParse(value);
+  }
+
+  String _lastAccessedLabel(Map<String, dynamic> entry) {
+    final accessedAt = _lastAccessedAt(entry);
+    if (accessedAt == null) return 'Not opened yet';
+    final elapsed = DateTime.now().toUtc().difference(accessedAt.toUtc());
+    if (elapsed.inMinutes < 1) return 'Just now';
+    if (elapsed.inHours < 1) return '${elapsed.inMinutes}m ago';
+    if (elapsed.inDays < 1) return '${elapsed.inHours}h ago';
+    if (elapsed.inDays == 1) return '1d ago';
+    return '${elapsed.inDays}d ago';
   }
 
   int? _updatedAgeDays(String text) {
@@ -1383,7 +1430,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
             child: ListTile(
               leading: const Icon(Icons.drive_file_rename_outline),
               title: Text(AppStrings.vaultName),
-              subtitle: Text(widget.activeVaultName),
+              subtitle: Text(_activeVaultName),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showRenameVaultDialog(context),
             ),
           ),
           const SizedBox(height: 10),
@@ -1740,6 +1789,28 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
+  Future<void> _showRenameVaultDialog(BuildContext context) async {
+    final renamed = await showDialog<String>(
+      context: context,
+      builder: (_) => _RenameVaultDialog(initialName: _activeVaultName),
+    );
+    if (renamed == null || renamed == _activeVaultName) return;
+
+    try {
+      await widget.onRenameVault?.call(renamed);
+      if (!context.mounted) return;
+      setState(() => _activeVaultName = renamed);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vault renamed')));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to rename vault. Please retry.')),
+      );
+    }
+  }
+
   Future<void> _openItemDetail(
     BuildContext context,
     Map<String, dynamic> item,
@@ -1766,7 +1837,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ),
       ),
     );
-    if (result == null) return;
+    if (result == null) {
+      if (mounted) setState(() {});
+      return;
+    }
     final idx = _items.indexWhere(
       (entry) => entry['id']?.toString() == accessedItem['id']?.toString(),
     );
@@ -1798,7 +1872,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ),
       ),
     );
-    if (updated == null) return;
+    if (updated == null) {
+      if (mounted) setState(() {});
+      return;
+    }
 
     final idx = _notes.indexWhere(
       (entry) => entry['id']?.toString() == accessedNote['id']?.toString(),
@@ -2236,6 +2313,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ),
       ),
     );
+    if (mounted) setState(() {});
   }
 
   String _cloudBackupTitle() {
@@ -4354,6 +4432,66 @@ class _EmptyState extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _RenameVaultDialog extends StatefulWidget {
+  const _RenameVaultDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenameVaultDialog> createState() => _RenameVaultDialogState();
+}
+
+class _RenameVaultDialogState extends State<_RenameVaultDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_formKey.currentState?.validate() != true) return;
+    Navigator.of(context).pop(_controller.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Rename vault'),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          decoration: InputDecoration(labelText: AppStrings.vaultName),
+          validator: (value) {
+            final trimmed = value?.trim() ?? '';
+            if (trimmed.isEmpty) return 'Enter a vault name';
+            return null;
+          },
+          onFieldSubmitted: (_) => _submit(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Rename')),
+      ],
     );
   }
 }
