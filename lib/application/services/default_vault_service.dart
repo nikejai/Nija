@@ -1,11 +1,15 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import '../../core/config/guardian_profiles.dart';
 import '../../domain/models/vault.dart';
 import '../../domain/models/vault_file.dart';
 import '../../domain/models/vault_payload.dart';
+import '../../domain/models/vault_registry_entry.dart';
+import '../../domain/models/vault_transfer_result.dart';
 import '../../infrastructure/adapters/crypto_adapter.dart';
+import '../../infrastructure/adapters/private_vault_store.dart';
 import '../../infrastructure/adapters/vault_storage_adapter.dart';
 import 'vault_migrator.dart';
 import 'vault_service.dart';
@@ -14,32 +18,54 @@ class DefaultVaultService implements VaultService {
   DefaultVaultService({
     required VaultStorageAdapter storageAdapter,
     required CryptoAdapter cryptoAdapter,
-  })  : _storageAdapter = storageAdapter,
-        _cryptoAdapter = cryptoAdapter;
+    PrivateVaultStore? privateVaultStore,
+    VaultRegistryStore? registryStore,
+    String? deviceId,
+  }) : _storageAdapter = storageAdapter,
+       _cryptoAdapter = cryptoAdapter,
+       _privateVaultStore = privateVaultStore ?? InMemoryPrivateVaultStore(),
+       _registryStore = registryStore ?? InMemoryVaultRegistryStore(),
+       _deviceId = deviceId;
+
+  static const _manifestFile = 'manifest.enc';
+  static const _itemsFile = 'items.enc';
+  static const _notesFile = 'notes.enc';
+  static const _settingsFile = 'settings.enc';
+  static const _tagsFile = 'tags.enc';
 
   final VaultStorageAdapter _storageAdapter;
   final CryptoAdapter _cryptoAdapter;
+  final PrivateVaultStore _privateVaultStore;
+  final VaultRegistryStore _registryStore;
+  final String? _deviceId;
   final Random _random = Random.secure();
+  final Map<String, String> _handleToVaultStoreId = <String, String>{};
 
   @override
-  Future<String> readRawVaultFile({
-    required String filePath,
-  }) {
-    return _storageAdapter.read(filePath: filePath);
+  Future<String> readRawVaultFile({required String filePath}) async {
+    final file = await _snapshotForHandle(filePath);
+    return jsonEncode(file.toJson());
   }
 
   @override
   Future<void> writeRawVaultFile({
     required String filePath,
     required String rawContent,
-  }) {
-    return _storageAdapter.write(filePath: filePath, content: rawContent);
+  }) async {
+    await _storageAdapter.write(filePath: filePath, content: rawContent);
   }
 
   @override
-  Future<bool> vaultExists({
-    required String filePath,
-  }) async {
+  Future<bool> vaultExists({required String filePath}) async {
+    if (_handleToVaultStoreId.containsKey(filePath) &&
+        await _privateVaultStore.vaultExists(
+          _handleToVaultStoreId[filePath]!,
+        )) {
+      return true;
+    }
+    if (await _privateVaultStore.vaultExists(filePath)) {
+      return true;
+    }
     try {
       await _storageAdapter.read(filePath: filePath);
       return true;
@@ -58,15 +84,32 @@ class DefaultVaultService implements VaultService {
     required String recoveryPhrase,
     VaultProgressCallback? onProgress,
   }) async {
-    onProgress?.call(const VaultOperationProgress(value: 0.05, message: 'Preparing vault parameters...'));
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.05,
+        message: 'Preparing vault parameters...',
+      ),
+    );
     final guardian = _guardianById(guardianProfileId);
     final now = DateTime.now().toUtc().toIso8601String();
     final saltBytes = utf8.encode('salt-$now-${guardian.id}');
     final nonceBytes = utf8.encode('nonce-$now-${guardian.id}');
-    onProgress?.call(const VaultOperationProgress(value: 0.15, message: 'Generating vault encryption key...'));
-    final vaultKeyBytes = List<int>.generate(32, (_) => _random.nextInt(256));
+    final recoverySaltBytes = utf8.encode('recovery-salt-$now-${guardian.id}');
 
-    onProgress?.call(const VaultOperationProgress(value: 0.25, message: 'Deriving master key (Argon2id)...'));
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.15,
+        message: 'Generating vault encryption key...',
+      ),
+    );
+    final vaultKeyBytes = _randomBytes(32);
+
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.25,
+        message: 'Deriving master key (Argon2id)...',
+      ),
+    );
     final passwordKey = await _cryptoAdapter.deriveKey(
       password: password,
       salt: saltBytes,
@@ -74,8 +117,12 @@ class DefaultVaultService implements VaultService {
       iterations: guardian.iterations,
       parallelism: guardian.parallelism,
     );
-    onProgress?.call(const VaultOperationProgress(value: 0.40, message: 'Deriving recovery key (Argon2id)...'));
-    final recoverySaltBytes = utf8.encode('recovery-salt-$now-${guardian.id}');
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.40,
+        message: 'Deriving recovery key (Argon2id)...',
+      ),
+    );
     final recoveryKey = await _cryptoAdapter.deriveKey(
       password: recoveryPhrase,
       salt: recoverySaltBytes,
@@ -83,33 +130,47 @@ class DefaultVaultService implements VaultService {
       iterations: guardian.iterations,
       parallelism: guardian.parallelism,
     );
-    onProgress?.call(const VaultOperationProgress(value: 0.55, message: 'Wrapping vault key with master key...'));
+
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.55,
+        message: 'Wrapping vault key with master key...',
+      ),
+    );
     final encryptedVaultKeyBytes = await _cryptoAdapter.encrypt(
       plain: vaultKeyBytes,
       key: passwordKey,
     );
-    onProgress?.call(const VaultOperationProgress(value: 0.65, message: 'Wrapping vault key with recovery key...'));
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.65,
+        message: 'Wrapping vault key with recovery key...',
+      ),
+    );
     final encryptedVaultKeyByRecoveryBytes = await _cryptoAdapter.encrypt(
       plain: vaultKeyBytes,
       key: recoveryKey,
     );
 
-    onProgress?.call(const VaultOperationProgress(value: 0.75, message: 'Encrypting vault payload...'));
-    final payload = VaultPayload.empty();
-    final payloadBytes = utf8.encode(jsonEncode(payload.toJson()));
-    final encryptedPayloadBytes = await _cryptoAdapter.encrypt(
-      plain: payloadBytes,
-      key: vaultKeyBytes,
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.75,
+        message: 'Encrypting vault sections...',
+      ),
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.90, message: 'Writing encrypted vault file...'));
-    final file = VaultFile(
+    final header = VaultFile(
       format: 'Nija',
       formatVersion: VaultMigrator.currentVaultFormatVersion,
+      schemaVersion: VaultMigrator.currentPayloadSchemaVersion,
+      storageLayoutVersion: VaultMigrator.currentStorageLayoutVersion,
+      manifestVersion: VaultMigrator.currentManifestVersion,
       vaultId: vaultId,
-      vaultName: vaultName.trim(),
+      vaultName: null,
       createdAt: now,
       updatedAt: now,
+      vaultVersionId: _newUuidV4(),
+      revision: 1,
+      lastModifiedByDeviceId: _deviceId,
       guardian: GuardianMetadata(
         id: guardian.displayName.toLowerCase(),
         profile: guardian.id,
@@ -135,20 +196,42 @@ class DefaultVaultService implements VaultService {
         nonce: base64Encode(nonceBytes),
       ),
       encryptedVaultKey: base64Encode(encryptedVaultKeyBytes),
-      encryptedVaultKeyByRecovery: base64Encode(encryptedVaultKeyByRecoveryBytes),
-      encryptedPayload: base64Encode(encryptedPayloadBytes),
+      encryptedVaultKeyByRecovery: base64Encode(
+        encryptedVaultKeyByRecoveryBytes,
+      ),
     );
 
+    final payload = VaultPayload.empty();
+    await _commitPayload(
+      vaultStoreId: vaultId,
+      header: header,
+      payload: payload,
+      vaultKey: vaultKeyBytes,
+    );
+    await _rememberRegistry(header, label: vaultName.trim());
+    _handleToVaultStoreId[filePath] = vaultId;
+
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.90,
+        message: 'Writing encrypted vault snapshot...',
+      ),
+    );
     await _storageAdapter.write(
       filePath: filePath,
-      content: jsonEncode(file.toJson()),
+      content: await readRawVaultFile(filePath: vaultId),
     );
 
-    onProgress?.call(const VaultOperationProgress(value: 1.0, message: 'Vault created successfully.'));
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 1.0,
+        message: 'Vault created successfully.',
+      ),
+    );
     return Vault(
-      id: file.vaultId,
-      formatVersion: file.formatVersion,
-      guardianProfileId: file.guardian.profile,
+      id: header.vaultId,
+      formatVersion: header.formatVersion,
+      guardianProfileId: header.guardian.profile,
       items: const <String>[],
       notes: const <String>[],
     );
@@ -160,9 +243,9 @@ class DefaultVaultService implements VaultService {
     required String password,
     VaultProgressCallback? onProgress,
   }) async {
-    onProgress?.call(const VaultOperationProgress(value: 0.10, message: 'Reading vault file...'));
     final file = await _readMigratedVaultFile(filePath: filePath);
     return _unlockWithDerivedKey(
+      filePath: filePath,
       file: file,
       secret: password,
       kdf: file.kdf,
@@ -178,9 +261,9 @@ class DefaultVaultService implements VaultService {
     required String recoveryPhrase,
     VaultProgressCallback? onProgress,
   }) async {
-    onProgress?.call(const VaultOperationProgress(value: 0.10, message: 'Reading vault file...'));
     final file = await _readMigratedVaultFile(filePath: filePath);
     return _unlockWithDerivedKey(
+      filePath: filePath,
       file: file,
       secret: recoveryPhrase,
       kdf: file.recoveryKdf,
@@ -197,24 +280,12 @@ class DefaultVaultService implements VaultService {
     required String newPassword,
     VaultProgressCallback? onProgress,
   }) async {
-    onProgress?.call(const VaultOperationProgress(value: 0.10, message: 'Reading vault file...'));
     final file = await _readMigratedVaultFile(filePath: filePath);
-
-    onProgress?.call(const VaultOperationProgress(value: 0.30, message: 'Deriving recovery key (Argon2id)...'));
-    final recoverySalt = base64Decode(file.recoveryKdf.salt);
-    final recoveryKey = await _cryptoAdapter.deriveKey(
-      password: recoveryPhrase,
-      salt: recoverySalt,
-      memoryKb: file.recoveryKdf.memoryKb,
-      iterations: file.recoveryKdf.iterations,
-      parallelism: file.recoveryKdf.parallelism,
+    final recoveryKey = await _deriveKey(recoveryPhrase, file.recoveryKdf);
+    final vaultKey = await _cryptoAdapter.decrypt(
+      cipher: base64Decode(file.encryptedVaultKeyByRecovery),
+      key: recoveryKey,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.50, message: 'Unwrapping vault key...'));
-    final encryptedVaultKeyByRecovery = base64Decode(file.encryptedVaultKeyByRecovery);
-    final vaultKey = await _cryptoAdapter.decrypt(cipher: encryptedVaultKeyByRecovery, key: recoveryKey);
-
-    onProgress?.call(const VaultOperationProgress(value: 0.70, message: 'Deriving new master key (Argon2id)...'));
     final now = DateTime.now().toUtc().toIso8601String();
     final newSaltBytes = utf8.encode('salt-$now-${file.guardian.profile}');
     final newPasswordKey = await _cryptoAdapter.deriveKey(
@@ -224,42 +295,32 @@ class DefaultVaultService implements VaultService {
       iterations: file.kdf.iterations,
       parallelism: file.kdf.parallelism,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.85, message: 'Wrapping vault key with new master key...'));
     final newEncryptedVaultKey = await _cryptoAdapter.encrypt(
       plain: vaultKey,
       key: newPasswordKey,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.95, message: 'Writing updated vault file...'));
-    final updatedFile = VaultFile(
-      format: file.format,
-      formatVersion: file.formatVersion,
-      vaultId: file.vaultId,
-      vaultName: file.vaultName,
-      createdAt: file.createdAt,
-      updatedAt: now,
-      guardian: file.guardian,
-      kdf: KdfMetadata(
-        name: file.kdf.name,
-        version: file.kdf.version,
-        memoryKb: file.kdf.memoryKb,
-        iterations: file.kdf.iterations,
-        parallelism: file.kdf.parallelism,
-        salt: base64Encode(newSaltBytes),
-      ),
-      recoveryKdf: file.recoveryKdf,
-      cipher: file.cipher,
-      encryptedVaultKey: base64Encode(newEncryptedVaultKey),
-      encryptedVaultKeyByRecovery: file.encryptedVaultKeyByRecovery,
-      encryptedPayload: file.encryptedPayload,
-    );
-
-    await _storageAdapter.write(
+    await _commitHeaderMutation(
       filePath: filePath,
-      content: jsonEncode(updatedFile.toJson()),
+      file: file,
+      vaultKey: vaultKey,
+      update: (next) => next.copyWith(
+        kdf: KdfMetadata(
+          name: file.kdf.name,
+          version: file.kdf.version,
+          memoryKb: file.kdf.memoryKb,
+          iterations: file.kdf.iterations,
+          parallelism: file.kdf.parallelism,
+          salt: base64Encode(newSaltBytes),
+        ),
+        encryptedVaultKey: base64Encode(newEncryptedVaultKey),
+      ),
     );
-    onProgress?.call(const VaultOperationProgress(value: 1.0, message: 'Master password updated.'));
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 1.0,
+        message: 'Master password updated.',
+      ),
+    );
   }
 
   @override
@@ -269,24 +330,12 @@ class DefaultVaultService implements VaultService {
     required String newPassword,
     VaultProgressCallback? onProgress,
   }) async {
-    onProgress?.call(const VaultOperationProgress(value: 0.10, message: 'Reading vault file...'));
     final file = await _readMigratedVaultFile(filePath: filePath);
-
-    onProgress?.call(const VaultOperationProgress(value: 0.30, message: 'Deriving current master key (Argon2id)...'));
-    final currentSalt = base64Decode(file.kdf.salt);
-    final currentMasterKey = await _cryptoAdapter.deriveKey(
-      password: currentPassword,
-      salt: currentSalt,
-      memoryKb: file.kdf.memoryKb,
-      iterations: file.kdf.iterations,
-      parallelism: file.kdf.parallelism,
+    final currentMasterKey = await _deriveKey(currentPassword, file.kdf);
+    final vaultKey = await _cryptoAdapter.decrypt(
+      cipher: base64Decode(file.encryptedVaultKey),
+      key: currentMasterKey,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.50, message: 'Unwrapping vault key...'));
-    final encryptedVaultKey = base64Decode(file.encryptedVaultKey);
-    final vaultKey = await _cryptoAdapter.decrypt(cipher: encryptedVaultKey, key: currentMasterKey);
-
-    onProgress?.call(const VaultOperationProgress(value: 0.70, message: 'Deriving new master key (Argon2id)...'));
     final now = DateTime.now().toUtc().toIso8601String();
     final newSaltBytes = utf8.encode('salt-$now-${file.guardian.profile}');
     final newMasterKey = await _cryptoAdapter.deriveKey(
@@ -296,42 +345,32 @@ class DefaultVaultService implements VaultService {
       iterations: file.kdf.iterations,
       parallelism: file.kdf.parallelism,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.85, message: 'Re-wrapping vault key with new master key...'));
     final newEncryptedVaultKey = await _cryptoAdapter.encrypt(
       plain: vaultKey,
       key: newMasterKey,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.95, message: 'Persisting updated vault metadata...'));
-    final updatedFile = VaultFile(
-      format: file.format,
-      formatVersion: file.formatVersion,
-      vaultId: file.vaultId,
-      vaultName: file.vaultName,
-      createdAt: file.createdAt,
-      updatedAt: now,
-      guardian: file.guardian,
-      kdf: KdfMetadata(
-        name: file.kdf.name,
-        version: file.kdf.version,
-        memoryKb: file.kdf.memoryKb,
-        iterations: file.kdf.iterations,
-        parallelism: file.kdf.parallelism,
-        salt: base64Encode(newSaltBytes),
-      ),
-      recoveryKdf: file.recoveryKdf,
-      cipher: file.cipher,
-      encryptedVaultKey: base64Encode(newEncryptedVaultKey),
-      encryptedVaultKeyByRecovery: file.encryptedVaultKeyByRecovery,
-      encryptedPayload: file.encryptedPayload,
-    );
-
-    await _storageAdapter.write(
+    await _commitHeaderMutation(
       filePath: filePath,
-      content: jsonEncode(updatedFile.toJson()),
+      file: file,
+      vaultKey: vaultKey,
+      update: (next) => next.copyWith(
+        kdf: KdfMetadata(
+          name: file.kdf.name,
+          version: file.kdf.version,
+          memoryKb: file.kdf.memoryKb,
+          iterations: file.kdf.iterations,
+          parallelism: file.kdf.parallelism,
+          salt: base64Encode(newSaltBytes),
+        ),
+        encryptedVaultKey: base64Encode(newEncryptedVaultKey),
+      ),
     );
-    onProgress?.call(const VaultOperationProgress(value: 1.0, message: 'Master password rotated.'));
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 1.0,
+        message: 'Master password rotated.',
+      ),
+    );
   }
 
   @override
@@ -341,26 +380,19 @@ class DefaultVaultService implements VaultService {
     required String newRecoveryPhrase,
     VaultProgressCallback? onProgress,
   }) async {
-    onProgress?.call(const VaultOperationProgress(value: 0.10, message: 'Reading vault file...'));
     final file = await _readMigratedVaultFile(filePath: filePath);
-
-    onProgress?.call(const VaultOperationProgress(value: 0.30, message: 'Deriving current recovery key (Argon2id)...'));
-    final currentRecoverySalt = base64Decode(file.recoveryKdf.salt);
-    final currentRecoveryKey = await _cryptoAdapter.deriveKey(
-      password: currentRecoveryPhrase,
-      salt: currentRecoverySalt,
-      memoryKb: file.recoveryKdf.memoryKb,
-      iterations: file.recoveryKdf.iterations,
-      parallelism: file.recoveryKdf.parallelism,
+    final currentRecoveryKey = await _deriveKey(
+      currentRecoveryPhrase,
+      file.recoveryKdf,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.50, message: 'Unwrapping vault key...'));
-    final encryptedByRecovery = base64Decode(file.encryptedVaultKeyByRecovery);
-    final vaultKey = await _cryptoAdapter.decrypt(cipher: encryptedByRecovery, key: currentRecoveryKey);
-
-    onProgress?.call(const VaultOperationProgress(value: 0.70, message: 'Deriving new recovery key (Argon2id)...'));
+    final vaultKey = await _cryptoAdapter.decrypt(
+      cipher: base64Decode(file.encryptedVaultKeyByRecovery),
+      key: currentRecoveryKey,
+    );
     final now = DateTime.now().toUtc().toIso8601String();
-    final newRecoverySaltBytes = utf8.encode('recovery-salt-$now-${file.guardian.profile}');
+    final newRecoverySaltBytes = utf8.encode(
+      'recovery-salt-$now-${file.guardian.profile}',
+    );
     final newRecoveryKey = await _cryptoAdapter.deriveKey(
       password: newRecoveryPhrase,
       salt: newRecoverySaltBytes,
@@ -368,42 +400,32 @@ class DefaultVaultService implements VaultService {
       iterations: file.recoveryKdf.iterations,
       parallelism: file.recoveryKdf.parallelism,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.85, message: 'Re-wrapping vault key with new recovery key...'));
     final newEncryptedByRecovery = await _cryptoAdapter.encrypt(
       plain: vaultKey,
       key: newRecoveryKey,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.95, message: 'Persisting updated vault metadata...'));
-    final updatedFile = VaultFile(
-      format: file.format,
-      formatVersion: file.formatVersion,
-      vaultId: file.vaultId,
-      vaultName: file.vaultName,
-      createdAt: file.createdAt,
-      updatedAt: now,
-      guardian: file.guardian,
-      kdf: file.kdf,
-      recoveryKdf: KdfMetadata(
-        name: file.recoveryKdf.name,
-        version: file.recoveryKdf.version,
-        memoryKb: file.recoveryKdf.memoryKb,
-        iterations: file.recoveryKdf.iterations,
-        parallelism: file.recoveryKdf.parallelism,
-        salt: base64Encode(newRecoverySaltBytes),
-      ),
-      cipher: file.cipher,
-      encryptedVaultKey: file.encryptedVaultKey,
-      encryptedVaultKeyByRecovery: base64Encode(newEncryptedByRecovery),
-      encryptedPayload: file.encryptedPayload,
-    );
-
-    await _storageAdapter.write(
+    await _commitHeaderMutation(
       filePath: filePath,
-      content: jsonEncode(updatedFile.toJson()),
+      file: file,
+      vaultKey: vaultKey,
+      update: (next) => next.copyWith(
+        recoveryKdf: KdfMetadata(
+          name: file.recoveryKdf.name,
+          version: file.recoveryKdf.version,
+          memoryKb: file.recoveryKdf.memoryKb,
+          iterations: file.recoveryKdf.iterations,
+          parallelism: file.recoveryKdf.parallelism,
+          salt: base64Encode(newRecoverySaltBytes),
+        ),
+        encryptedVaultKeyByRecovery: base64Encode(newEncryptedByRecovery),
+      ),
     );
-    onProgress?.call(const VaultOperationProgress(value: 1.0, message: 'Recovery phrase rotated.'));
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 1.0,
+        message: 'Recovery phrase rotated.',
+      ),
+    );
   }
 
   @override
@@ -412,32 +434,24 @@ class DefaultVaultService implements VaultService {
     required String password,
     VaultProgressCallback? onProgress,
   }) async {
-    onProgress?.call(const VaultOperationProgress(value: 0.10, message: 'Reading vault file...'));
     final file = await _readMigratedVaultFile(filePath: filePath);
-
-    onProgress?.call(const VaultOperationProgress(value: 0.35, message: 'Deriving master key (Argon2id)...'));
-    final passwordKey = await _cryptoAdapter.deriveKey(
-      password: password,
-      salt: base64Decode(file.kdf.salt),
-      memoryKb: file.kdf.memoryKb,
-      iterations: file.kdf.iterations,
-      parallelism: file.kdf.parallelism,
-    );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.60, message: 'Decrypting vault key...'));
+    final passwordKey = await _deriveKey(password, file.kdf);
     final vaultKey = await _cryptoAdapter.decrypt(
       cipher: base64Decode(file.encryptedVaultKey),
       key: passwordKey,
     );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.80, message: 'Decrypting vault payload...'));
-    final payloadBytes = await _cryptoAdapter.decrypt(
-      cipher: base64Decode(file.encryptedPayload),
-      key: vaultKey,
+    final payload = await _payloadFromWorkingOrSnapshot(
+      filePath: filePath,
+      file: file,
+      vaultKey: vaultKey,
     );
-    final payloadMap = _decodeMigratedPayload(payloadBytes);
-    onProgress?.call(const VaultOperationProgress(value: 1.0, message: 'Vault payload loaded.'));
-    return VaultPayload.fromJson(payloadMap);
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 1.0,
+        message: 'Vault payload loaded.',
+      ),
+    );
+    return payload;
   }
 
   @override
@@ -447,56 +461,264 @@ class DefaultVaultService implements VaultService {
     required VaultPayload payload,
     VaultProgressCallback? onProgress,
   }) async {
-    onProgress?.call(const VaultOperationProgress(value: 0.10, message: 'Reading vault file...'));
     final file = await _readMigratedVaultFile(filePath: filePath);
-
-    onProgress?.call(const VaultOperationProgress(value: 0.30, message: 'Deriving master key (Argon2id)...'));
-    final passwordKey = await _cryptoAdapter.deriveKey(
-      password: password,
-      salt: base64Decode(file.kdf.salt),
-      memoryKb: file.kdf.memoryKb,
-      iterations: file.kdf.iterations,
-      parallelism: file.kdf.parallelism,
-    );
-
-    onProgress?.call(const VaultOperationProgress(value: 0.50, message: 'Decrypting vault key...'));
+    final passwordKey = await _deriveKey(password, file.kdf);
     final vaultKey = await _cryptoAdapter.decrypt(
       cipher: base64Decode(file.encryptedVaultKey),
       key: passwordKey,
     );
+    final nextHeader = _nextMutationHeader(file);
+    await _commitPayload(
+      vaultStoreId: _storeIdFor(filePath, file),
+      header: nextHeader,
+      payload: payload,
+      vaultKey: vaultKey,
+    );
+    await _rememberRegistry(nextHeader, label: _displayLabel(nextHeader));
+    _handleToVaultStoreId[filePath] = nextHeader.vaultId;
+    await _writeSnapshotToHandle(filePath, nextHeader.vaultId);
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 1.0,
+        message: 'Vault payload persisted.',
+      ),
+    );
+  }
 
-    onProgress?.call(const VaultOperationProgress(value: 0.75, message: 'Encrypting updated payload...'));
-    final payloadBytes = utf8.encode(jsonEncode(payload.toJson()));
-    final encryptedPayload = await _cryptoAdapter.encrypt(
-      plain: payloadBytes,
-      key: vaultKey,
+  @override
+  Future<void> renameVault({
+    required String filePath,
+    required String label,
+  }) async {
+    final file = await _readMigratedVaultFile(filePath: filePath);
+    final storeId = _storeIdFor(filePath, file);
+    final nextHeader = _nextMutationHeader(file).copyWith(clearVaultName: true);
+    final sections = <String, Uint8List>{
+      _manifestFile: await _privateVaultStore.readSection(
+        storeId,
+        _manifestFile,
+      ),
+      _itemsFile: await _privateVaultStore.readSection(storeId, _itemsFile),
+      _notesFile: await _privateVaultStore.readSection(storeId, _notesFile),
+      _settingsFile: await _privateVaultStore.readSection(
+        storeId,
+        _settingsFile,
+      ),
+      _tagsFile: await _privateVaultStore.readSection(storeId, _tagsFile),
+    };
+    await _privateVaultStore.commitVault(
+      vaultStoreId: storeId,
+      header: nextHeader,
+      sections: sections,
     );
+    await _rememberRegistry(nextHeader, label: label);
+    _handleToVaultStoreId[filePath] = storeId;
+    await _writeSnapshotToHandle(filePath, storeId);
+  }
 
-    onProgress?.call(const VaultOperationProgress(value: 0.90, message: 'Writing vault file...'));
-    final now = DateTime.now().toUtc().toIso8601String();
-    final updatedFile = VaultFile(
-      format: file.format,
-      formatVersion: file.formatVersion,
-      vaultId: file.vaultId,
-      vaultName: file.vaultName,
-      createdAt: file.createdAt,
-      updatedAt: now,
-      guardian: file.guardian,
-      kdf: file.kdf,
-      recoveryKdf: file.recoveryKdf,
-      cipher: file.cipher,
-      encryptedVaultKey: file.encryptedVaultKey,
-      encryptedVaultKeyByRecovery: file.encryptedVaultKeyByRecovery,
-      encryptedPayload: base64Encode(encryptedPayload),
-    );
-    await _storageAdapter.write(
-      filePath: filePath,
-      content: jsonEncode(updatedFile.toJson()),
-    );
-    onProgress?.call(const VaultOperationProgress(value: 1.0, message: 'Vault payload persisted.'));
+  @override
+  Future<ImportResult> importNijaFile({
+    required String filePath,
+    required String unlockCredential,
+    bool confirmReplace = false,
+  }) async {
+    try {
+      final incomingRaw = await _readSnapshotFile(filePath);
+      final incoming = incomingRaw.copyWith(clearVaultName: true);
+      if (incoming.format != 'Nija') {
+        throw StateError('Unsupported vault file format.');
+      }
+      final existing = await _registryStore.findActiveByVaultId(
+        incoming.vaultId,
+      );
+      final vaultKey = await _unwrapVaultKey(incoming, unlockCredential);
+      final payload = await _payloadFromSnapshot(incoming, vaultKey);
+      final sections = await _sectionsForPayload(
+        header: incoming,
+        payload: payload,
+        vaultKey: vaultKey,
+      );
+
+      if (existing == null) {
+        await _privateVaultStore.commitVault(
+          vaultStoreId: incoming.vaultId,
+          header: incoming,
+          sections: sections,
+        );
+        await _rememberRegistry(incoming, label: _displayLabel(incoming));
+        _handleToVaultStoreId[filePath] = incoming.vaultId;
+        return ImportResult(
+          status: ImportStatus.imported,
+          vaultId: incoming.vaultId,
+          incomingRevision: incoming.revision,
+          incomingUpdatedAt: incoming.updatedAt,
+          userSafeMessage: 'Vault imported.',
+        );
+      }
+
+      final local = await _privateVaultStore.readHeader(existing.id);
+      if (incoming.vaultVersionId == local.vaultVersionId) {
+        return ImportResult(
+          status: ImportStatus.alreadyUpToDate,
+          vaultId: incoming.vaultId,
+          localRevision: local.revision,
+          incomingRevision: incoming.revision,
+          localUpdatedAt: local.updatedAt,
+          incomingUpdatedAt: incoming.updatedAt,
+          userSafeMessage: 'Vault already up to date.',
+        );
+      }
+      if (_hasRevision(incoming) && _hasRevision(local)) {
+        if (incoming.revision > local.revision) {
+          if (!confirmReplace) {
+            return ImportResult(
+              status: ImportStatus.failed,
+              vaultId: incoming.vaultId,
+              localRevision: local.revision,
+              incomingRevision: incoming.revision,
+              localUpdatedAt: local.updatedAt,
+              incomingUpdatedAt: incoming.updatedAt,
+              userSafeMessage: 'Imported vault is newer. Confirm replace.',
+            );
+          }
+          return _replaceImportedVault(
+            filePath: filePath,
+            existing: existing,
+            incoming: incoming,
+            sections: sections,
+            statusMessage: 'Vault updated from imported file.',
+          );
+        }
+        if (incoming.revision < local.revision) {
+          return ImportResult(
+            status: ImportStatus.incomingOlder,
+            vaultId: incoming.vaultId,
+            localRevision: local.revision,
+            incomingRevision: incoming.revision,
+            localUpdatedAt: local.updatedAt,
+            incomingUpdatedAt: incoming.updatedAt,
+            userSafeMessage: 'Imported vault is older.',
+          );
+        }
+        return _createConflictCopy(
+          incoming: incoming,
+          sections: sections,
+          local: local,
+        );
+      }
+
+      final fallback = _compareUpdatedAt(incoming.updatedAt, local.updatedAt);
+      if (fallback > 0 && confirmReplace) {
+        return _replaceImportedVault(
+          filePath: filePath,
+          existing: existing,
+          incoming: incoming,
+          sections: sections,
+          statusMessage: 'Vault updated from imported legacy file.',
+        );
+      }
+      if (fallback < 0) {
+        return ImportResult(
+          status: ImportStatus.incomingOlder,
+          vaultId: incoming.vaultId,
+          localRevision: local.revision,
+          incomingRevision: incoming.revision,
+          localUpdatedAt: local.updatedAt,
+          incomingUpdatedAt: incoming.updatedAt,
+          userSafeMessage: 'Imported vault is older.',
+        );
+      }
+      return _createConflictCopy(
+        incoming: incoming,
+        sections: sections,
+        local: local,
+      );
+    } catch (error) {
+      return ImportResult(
+        status: ImportStatus.failed,
+        vaultId: '',
+        userSafeMessage: 'Failed to import vault. $error',
+      );
+    }
+  }
+
+  @override
+  Future<ExportResult> exportVault({
+    required String vaultId,
+    required String destinationPath,
+  }) async {
+    try {
+      final snapshot = await _snapshotForHandle(vaultId);
+      await _storageAdapter.write(
+        filePath: destinationPath,
+        content: jsonEncode(snapshot.toJson()),
+      );
+      return ExportResult(
+        status: ExportStatus.exported,
+        vaultId: snapshot.vaultId,
+        vaultVersionId: snapshot.vaultVersionId,
+        revision: snapshot.revision,
+        updatedAt: snapshot.updatedAt,
+        destinationPath: destinationPath,
+        userSafeMessage: 'Vault exported.',
+      );
+    } catch (error) {
+      return ExportResult(
+        status: ExportStatus.failed,
+        vaultId: vaultId,
+        vaultVersionId: '',
+        revision: 0,
+        updatedAt: '',
+        destinationPath: destinationPath,
+        userSafeMessage: 'Failed to export vault. $error',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> readVaultInternals({
+    required String filePath,
+  }) async {
+    final storeId = _handleToVaultStoreId[filePath] ?? filePath;
+    final snapshot = await _snapshotForHandle(filePath);
+    final structure = await _privateVaultStore.describeVault(storeId);
+    return <String, dynamic>{
+      'format': snapshot.format,
+      'formatVersion': snapshot.formatVersion,
+      'schemaVersion': snapshot.schemaVersion,
+      'storageLayoutVersion': snapshot.storageLayoutVersion,
+      'manifestVersion': snapshot.manifestVersion,
+      'snapshotBytes': utf8.encode(jsonEncode(snapshot.toJson())).length,
+      'vaultId': snapshot.vaultId,
+      'vaultVersionId': snapshot.vaultVersionId,
+      'revision': snapshot.revision,
+      'createdAt': snapshot.createdAt,
+      'updatedAt': snapshot.updatedAt,
+      'lastModifiedByDeviceId': snapshot.lastModifiedByDeviceId ?? '',
+      'crypto': <String, dynamic>{
+        'guardianProfile': snapshot.guardian.profile,
+        'kdf': snapshot.kdf.name,
+        'kdfMemoryKb': snapshot.kdf.memoryKb,
+        'kdfIterations': snapshot.kdf.iterations,
+        'kdfParallelism': snapshot.kdf.parallelism,
+        'kdfSaltBytes': _base64ByteLength(snapshot.kdf.salt),
+        'recoveryKdfSaltBytes': _base64ByteLength(snapshot.recoveryKdf.salt),
+        'cipher': snapshot.cipher.name,
+        'cipherNonceBytes': _base64ByteLength(snapshot.cipher.nonce),
+        'encryptedVaultKeyBytes': _base64ByteLength(snapshot.encryptedVaultKey),
+        'encryptedRecoveryKeyBytes': _base64ByteLength(
+          snapshot.encryptedVaultKeyByRecovery,
+        ),
+      },
+      'encryptedSections': snapshot.encryptedSections.map(
+        (name, value) => MapEntry<String, int>(name, _base64ByteLength(value)),
+      ),
+      'workingStore': structure,
+    };
   }
 
   Future<Vault> _unlockWithDerivedKey({
+    required String filePath,
     required VaultFile file,
     required String secret,
     required KdfMetadata kdf,
@@ -504,26 +726,45 @@ class DefaultVaultService implements VaultService {
     required String deriveMessage,
     VaultProgressCallback? onProgress,
   }) async {
-    final salt = base64Decode(kdf.salt);
-    onProgress?.call(VaultOperationProgress(value: 0.35, message: deriveMessage));
-    final passwordKey = await _cryptoAdapter.deriveKey(
-      password: secret,
-      salt: salt,
-      memoryKb: kdf.memoryKb,
-      iterations: kdf.iterations,
-      parallelism: kdf.parallelism,
+    onProgress?.call(
+      VaultOperationProgress(value: 0.35, message: deriveMessage),
     );
-    onProgress?.call(const VaultOperationProgress(value: 0.60, message: 'Decrypting vault key...'));
-    final encryptedVaultKey = base64Decode(encryptedVaultKeyBase64);
-    final vaultKey = await _cryptoAdapter.decrypt(cipher: encryptedVaultKey, key: passwordKey);
-    onProgress?.call(const VaultOperationProgress(value: 0.80, message: 'Decrypting vault payload...'));
-    final encryptedPayload = base64Decode(file.encryptedPayload);
-    final payloadBytes = await _cryptoAdapter.decrypt(cipher: encryptedPayload, key: vaultKey);
+    final passwordKey = await _deriveKey(secret, kdf);
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.60,
+        message: 'Decrypting vault key...',
+      ),
+    );
+    final vaultKey = await _cryptoAdapter.decrypt(
+      cipher: base64Decode(encryptedVaultKeyBase64),
+      key: passwordKey,
+    );
+    onProgress?.call(
+      const VaultOperationProgress(
+        value: 0.80,
+        message: 'Decrypting vault payload...',
+      ),
+    );
+    final payload = await _payloadFromWorkingOrSnapshot(
+      filePath: filePath,
+      file: file,
+      vaultKey: vaultKey,
+    );
+    if (!await _privateVaultStore.vaultExists(_storeIdFor(filePath, file))) {
+      await _commitPayload(
+        vaultStoreId: file.vaultId,
+        header: file,
+        payload: payload,
+        vaultKey: vaultKey,
+      );
+    }
+    await _rememberRegistry(file, label: _displayLabel(file));
+    _handleToVaultStoreId[filePath] = file.vaultId;
 
-    final payloadMap = _decodeMigratedPayload(payloadBytes);
-    final payload = VaultPayload.fromJson(payloadMap);
-
-    onProgress?.call(const VaultOperationProgress(value: 1.0, message: 'Vault unlocked.'));
+    onProgress?.call(
+      const VaultOperationProgress(value: 1.0, message: 'Vault unlocked.'),
+    );
     return Vault(
       id: file.vaultId,
       formatVersion: file.formatVersion,
@@ -533,6 +774,387 @@ class DefaultVaultService implements VaultService {
     );
   }
 
+  Future<void> _commitHeaderMutation({
+    required String filePath,
+    required VaultFile file,
+    required List<int> vaultKey,
+    required VaultFile Function(VaultFile next) update,
+  }) async {
+    final payload = await _payloadFromWorkingOrSnapshot(
+      filePath: filePath,
+      file: file,
+      vaultKey: vaultKey,
+    );
+    final nextHeader = update(_nextMutationHeader(file));
+    await _commitPayload(
+      vaultStoreId: _storeIdFor(filePath, file),
+      header: nextHeader,
+      payload: payload,
+      vaultKey: vaultKey,
+    );
+    await _rememberRegistry(nextHeader, label: _displayLabel(nextHeader));
+    await _writeSnapshotToHandle(filePath, nextHeader.vaultId);
+  }
+
+  Future<ImportResult> _replaceImportedVault({
+    required String filePath,
+    required VaultRegistryEntry existing,
+    required VaultFile incoming,
+    required Map<String, Uint8List> sections,
+    required String statusMessage,
+  }) async {
+    final stagedId = await _privateVaultStore.stageVault(
+      vaultStoreId: existing.id,
+      header: incoming,
+      sections: sections,
+    );
+    await _privateVaultStore.promoteStagedVault(
+      stagedVaultStoreId: stagedId,
+      vaultStoreId: existing.id,
+    );
+    await _rememberRegistry(incoming, label: existing.label);
+    _handleToVaultStoreId[filePath] = existing.id;
+    return ImportResult(
+      status: ImportStatus.imported,
+      vaultId: incoming.vaultId,
+      localRevision: existing.revision,
+      incomingRevision: incoming.revision,
+      localUpdatedAt: existing.updatedAt,
+      incomingUpdatedAt: incoming.updatedAt,
+      userSafeMessage: statusMessage,
+    );
+  }
+
+  Future<ImportResult> _createConflictCopy({
+    required VaultFile incoming,
+    required Map<String, Uint8List> sections,
+    required VaultFile local,
+  }) async {
+    final conflictId =
+        '${incoming.vaultId}-conflict-${DateTime.now().millisecondsSinceEpoch}';
+    final label = '${_displayLabel(incoming)} Conflict ${_timestampForName()}';
+    await _privateVaultStore.commitVault(
+      vaultStoreId: conflictId,
+      header: incoming,
+      sections: sections,
+    );
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _registryStore.upsert(
+      VaultRegistryEntry(
+        id: conflictId,
+        vaultId: incoming.vaultId,
+        label: label,
+        revision: incoming.revision,
+        vaultVersionId: incoming.vaultVersionId,
+        updatedAt: incoming.updatedAt,
+        addedAtEpochMs: now,
+        isConflict: true,
+      ),
+    );
+    return ImportResult(
+      status: ImportStatus.conflictCreated,
+      vaultId: incoming.vaultId,
+      conflictVaultId: conflictId,
+      localRevision: local.revision,
+      incomingRevision: incoming.revision,
+      localUpdatedAt: local.updatedAt,
+      incomingUpdatedAt: incoming.updatedAt,
+      userSafeMessage: 'Conflict copy created.',
+    );
+  }
+
+  Future<VaultFile> _snapshotForHandle(String handle) async {
+    final storeId = _handleToVaultStoreId[handle] ?? handle;
+    if (await _privateVaultStore.vaultExists(storeId)) {
+      final header = await _privateVaultStore.readHeader(storeId);
+      final manifest = await _privateVaultStore.readSection(
+        storeId,
+        _manifestFile,
+      );
+      final items = await _privateVaultStore.readSection(storeId, _itemsFile);
+      final notes = await _privateVaultStore.readSection(storeId, _notesFile);
+      final settings = await _privateVaultStore.readSection(
+        storeId,
+        _settingsFile,
+      );
+      final tags = await _privateVaultStore.readSection(storeId, _tagsFile);
+      return header.copyWith(
+        formatVersion: VaultMigrator.currentVaultFormatVersion,
+        encryptedPayload: null,
+        encryptedManifest: base64Encode(manifest),
+        encryptedSections: <String, String>{
+          _itemsFile: base64Encode(items),
+          _notesFile: base64Encode(notes),
+          _settingsFile: base64Encode(settings),
+          _tagsFile: base64Encode(tags),
+        },
+      );
+    }
+    return _readSnapshotFile(handle);
+  }
+
+  Future<VaultFile> _readMigratedVaultFile({required String filePath}) async {
+    final storeId = _handleToVaultStoreId[filePath] ?? filePath;
+    if (await _privateVaultStore.vaultExists(storeId)) {
+      return _privateVaultStore.readHeader(storeId);
+    }
+    return _readSnapshotFile(filePath);
+  }
+
+  Future<VaultFile> _readSnapshotFile(String filePath) async {
+    final raw = await _storageAdapter.read(filePath: filePath);
+    final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    final migrated = VaultMigrator.migrateVaultFileJson(decoded);
+    return VaultFile.fromJson(migrated);
+  }
+
+  Future<VaultPayload> _payloadFromWorkingOrSnapshot({
+    required String filePath,
+    required VaultFile file,
+    required List<int> vaultKey,
+  }) async {
+    final storeId = _storeIdFor(filePath, file);
+    if (await _privateVaultStore.vaultExists(storeId)) {
+      return _payloadFromWorking(storeId, vaultKey);
+    }
+    return _payloadFromSnapshot(file, vaultKey);
+  }
+
+  Future<VaultPayload> _payloadFromWorking(
+    String vaultStoreId,
+    List<int> vaultKey,
+  ) async {
+    final items = await _decryptSection(vaultStoreId, _itemsFile, vaultKey);
+    final notes = await _decryptSection(vaultStoreId, _notesFile, vaultKey);
+    final settings = await _decryptSection(
+      vaultStoreId,
+      _settingsFile,
+      vaultKey,
+    );
+    final tags = await _decryptSection(vaultStoreId, _tagsFile, vaultKey);
+    final header = await _privateVaultStore.readHeader(vaultStoreId);
+    return VaultPayload.fromJson(
+      VaultMigrator.migratePayloadJson(<String, dynamic>{
+        'schemaVersion': header.schemaVersion,
+        'items': items,
+        'notes': notes,
+        'settings': settings,
+        'tags': tags,
+        'audit': const <Map<String, dynamic>>[],
+      }),
+    );
+  }
+
+  Future<dynamic> _decryptSection(
+    String vaultStoreId,
+    String fileName,
+    List<int> vaultKey,
+  ) async {
+    final cipher = await _privateVaultStore.readSection(vaultStoreId, fileName);
+    final plain = await _cryptoAdapter.decrypt(cipher: cipher, key: vaultKey);
+    return jsonDecode(utf8.decode(plain));
+  }
+
+  Future<VaultPayload> _payloadFromSnapshot(
+    VaultFile file,
+    List<int> vaultKey,
+  ) async {
+    if (file.encryptedSections.isNotEmpty) {
+      final items = await _decryptSnapshotSection(file, _itemsFile, vaultKey);
+      final notes = await _decryptSnapshotSection(file, _notesFile, vaultKey);
+      final settings = await _decryptSnapshotSection(
+        file,
+        _settingsFile,
+        vaultKey,
+      );
+      final tags = await _decryptSnapshotSection(file, _tagsFile, vaultKey);
+      return VaultPayload.fromJson(
+        VaultMigrator.migratePayloadJson(<String, dynamic>{
+          'schemaVersion': file.schemaVersion,
+          'items': items,
+          'notes': notes,
+          'settings': settings,
+          'tags': tags,
+          'audit': const <Map<String, dynamic>>[],
+        }),
+      );
+    }
+    final encryptedPayload = file.encryptedPayload;
+    if (encryptedPayload == null || encryptedPayload.isEmpty) {
+      throw StateError('Vault snapshot has no encrypted payload.');
+    }
+    final payloadBytes = await _cryptoAdapter.decrypt(
+      cipher: base64Decode(encryptedPayload),
+      key: vaultKey,
+    );
+    final decoded = Map<String, dynamic>.from(
+      jsonDecode(utf8.decode(payloadBytes)) as Map,
+    );
+    return VaultPayload.fromJson(VaultMigrator.migratePayloadJson(decoded));
+  }
+
+  Future<dynamic> _decryptSnapshotSection(
+    VaultFile file,
+    String fileName,
+    List<int> vaultKey,
+  ) async {
+    final section = file.encryptedSections[fileName];
+    if (section == null) {
+      throw StateError('Vault snapshot missing section: $fileName');
+    }
+    final plain = await _cryptoAdapter.decrypt(
+      cipher: base64Decode(section),
+      key: vaultKey,
+    );
+    return jsonDecode(utf8.decode(plain));
+  }
+
+  Future<void> _commitPayload({
+    required String vaultStoreId,
+    required VaultFile header,
+    required VaultPayload payload,
+    required List<int> vaultKey,
+  }) async {
+    final sections = await _sectionsForPayload(
+      header: header,
+      payload: payload,
+      vaultKey: vaultKey,
+    );
+    await _privateVaultStore.commitVault(
+      vaultStoreId: vaultStoreId,
+      header: header,
+      sections: sections,
+    );
+  }
+
+  Future<Map<String, Uint8List>> _sectionsForPayload({
+    required VaultFile header,
+    required VaultPayload payload,
+    required List<int> vaultKey,
+  }) async {
+    final manifest = <String, dynamic>{
+      'manifestVersion': header.manifestVersion,
+      'storageLayoutVersion': header.storageLayoutVersion,
+      'sections': const <String>[
+        _itemsFile,
+        _notesFile,
+        _settingsFile,
+        _tagsFile,
+      ],
+    };
+    return <String, Uint8List>{
+      _itemsFile: await _encryptJson(payload.items, vaultKey),
+      _notesFile: await _encryptJson(payload.notes, vaultKey),
+      _settingsFile: await _encryptJson(payload.settings, vaultKey),
+      _tagsFile: await _encryptJson(payload.tags, vaultKey),
+      _manifestFile: await _encryptJson(manifest, vaultKey),
+    };
+  }
+
+  Future<Uint8List> _encryptJson(dynamic value, List<int> vaultKey) async {
+    final encrypted = await _cryptoAdapter.encrypt(
+      plain: utf8.encode(jsonEncode(value)),
+      key: vaultKey,
+    );
+    return Uint8List.fromList(encrypted);
+  }
+
+  Future<List<int>> _unwrapVaultKey(VaultFile file, String password) async {
+    final passwordKey = await _deriveKey(password, file.kdf);
+    return _cryptoAdapter.decrypt(
+      cipher: base64Decode(file.encryptedVaultKey),
+      key: passwordKey,
+    );
+  }
+
+  Future<List<int>> _deriveKey(String secret, KdfMetadata kdf) {
+    return _cryptoAdapter.deriveKey(
+      password: secret,
+      salt: base64Decode(kdf.salt),
+      memoryKb: kdf.memoryKb,
+      iterations: kdf.iterations,
+      parallelism: kdf.parallelism,
+    );
+  }
+
+  VaultFile _nextMutationHeader(VaultFile file) {
+    final now = DateTime.now().toUtc().toIso8601String();
+    return file.copyWith(
+      formatVersion: VaultMigrator.currentVaultFormatVersion,
+      schemaVersion: VaultMigrator.currentPayloadSchemaVersion,
+      storageLayoutVersion: VaultMigrator.currentStorageLayoutVersion,
+      manifestVersion: VaultMigrator.currentManifestVersion,
+      updatedAt: now,
+      revision: file.revision + 1,
+      vaultVersionId: _newUuidV4(),
+      lastModifiedByDeviceId: _deviceId,
+      encryptedPayload: null,
+    );
+  }
+
+  String _storeIdFor(String handle, VaultFile file) {
+    return _handleToVaultStoreId[handle] ?? file.vaultId;
+  }
+
+  Future<void> _writeSnapshotToHandle(
+    String handle,
+    String vaultStoreId,
+  ) async {
+    try {
+      final snapshot = await _snapshotForHandle(vaultStoreId);
+      await _storageAdapter.write(
+        filePath: handle,
+        content: jsonEncode(snapshot.toJson()),
+      );
+    } catch (_) {
+      // The private working copy is the active source of truth.
+    }
+  }
+
+  Future<void> _rememberRegistry(
+    VaultFile header, {
+    required String label,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final existing = await _registryStore.findActiveByVaultId(header.vaultId);
+    await _registryStore.upsert(
+      VaultRegistryEntry(
+        id: header.vaultId,
+        vaultId: header.vaultId,
+        label: label.trim().isEmpty ? 'vault.nija' : label.trim(),
+        revision: header.revision,
+        vaultVersionId: header.vaultVersionId,
+        updatedAt: header.updatedAt,
+        addedAtEpochMs: existing?.addedAtEpochMs ?? now,
+        lastOpenedAtEpochMs: existing?.lastOpenedAtEpochMs ?? 0,
+      ),
+    );
+  }
+
+  bool _hasRevision(VaultFile file) {
+    return file.revision > 0 && !file.vaultVersionId.startsWith('legacy-');
+  }
+
+  int _compareUpdatedAt(String incoming, String local) {
+    final incomingDate = DateTime.tryParse(incoming);
+    final localDate = DateTime.tryParse(local);
+    if (incomingDate == null || localDate == null) return 0;
+    return incomingDate.compareTo(localDate);
+  }
+
+  String _displayLabel(VaultFile file) {
+    return file.vaultName?.trim().isNotEmpty == true
+        ? file.vaultName!.trim()
+        : 'vault.nija';
+  }
+
+  String _timestampForName() {
+    final now = DateTime.now();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${now.year}${two(now.month)}${two(now.day)}-'
+        '${two(now.hour)}${two(now.minute)}';
+  }
+
   GuardianProfile _guardianById(String guardianProfileId) {
     return GuardianProfiles.all.firstWhere(
       (profile) => profile.id == guardianProfileId,
@@ -540,17 +1162,28 @@ class DefaultVaultService implements VaultService {
     );
   }
 
-  Future<VaultFile> _readMigratedVaultFile({required String filePath}) async {
-    final raw = await _storageAdapter.read(filePath: filePath);
-    final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-    final migrated = VaultMigrator.migrateVaultFileJson(decoded);
-    return VaultFile.fromJson(migrated);
+  List<int> _randomBytes(int length) {
+    return List<int>.generate(length, (_) => _random.nextInt(256));
   }
 
-  Map<String, dynamic> _decodeMigratedPayload(List<int> payloadBytes) {
-    final decoded = Map<String, dynamic>.from(
-      jsonDecode(utf8.decode(payloadBytes)) as Map,
-    );
-    return VaultMigrator.migratePayloadJson(decoded);
+  String _newUuidV4() {
+    final bytes = _randomBytes(16);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-'
+        '${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-'
+        '${hex.substring(16, 20)}-'
+        '${hex.substring(20)}';
+  }
+
+  int _base64ByteLength(String value) {
+    if (value.isEmpty) return 0;
+    try {
+      return base64Decode(value).length;
+    } catch (_) {
+      return 0;
+    }
   }
 }

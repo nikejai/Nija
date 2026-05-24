@@ -41,6 +41,7 @@ typedef CloudBackupAction = Future<void> Function();
 typedef CloudBackupAccountRead = Future<String?> Function();
 typedef CloudBackupAccountChange = Future<bool> Function();
 typedef RenameVault = Future<void> Function(String name);
+typedef ReadVaultInternals = Future<Map<String, dynamic>> Function();
 
 class VaultAppShell extends StatefulWidget {
   const VaultAppShell({
@@ -66,6 +67,7 @@ class VaultAppShell extends StatefulWidget {
     required this.onReadCloudBackupAccount,
     required this.onChangeCloudBackupAccount,
     this.onRenameVault,
+    this.onReadVaultInternals,
   });
 
   final List<String> recoveryWords;
@@ -89,6 +91,7 @@ class VaultAppShell extends StatefulWidget {
   final CloudBackupAccountRead onReadCloudBackupAccount;
   final CloudBackupAccountChange onChangeCloudBackupAccount;
   final RenameVault? onRenameVault;
+  final ReadVaultInternals? onReadVaultInternals;
 
   @override
   State<VaultAppShell> createState() => _VaultAppShellState();
@@ -229,6 +232,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _buildTypesTab(context),
       _buildFavoritesTab(context),
       _buildSettingsTab(context),
+      if (kDebugMode) _buildDebugInternalsTab(context),
     ];
 
     return WillPopScope(
@@ -317,6 +321,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 icon: const Icon(Icons.settings_outlined),
                 label: AppStrings.tabSettings,
               ),
+              if (kDebugMode)
+                const NavigationDestination(
+                  icon: Icon(Icons.bug_report_outlined),
+                  label: 'Debug',
+                ),
             ],
             onDestinationSelected: (value) => setState(() => _tabIndex = value),
           ),
@@ -1672,6 +1681,153 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ],
       ),
     );
+  }
+
+  Widget _buildDebugInternalsTab(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: FutureBuilder<Map<String, dynamic>>(
+        future: widget.onReadVaultInternals?.call(),
+        builder: (context, snapshot) {
+          final data = snapshot.data;
+          return ListView(
+            children: [
+              const _SectionHeader(
+                title: 'Vault internals',
+                subtitle: 'Debug-only storage metadata and encrypted sections.',
+              ),
+              const SizedBox(height: 14),
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const Center(child: CircularProgressIndicator())
+              else if (snapshot.hasError || data == null)
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.error_outline),
+                    title: const Text('Unable to read internals'),
+                    subtitle: Text(snapshot.error?.toString() ?? 'No data'),
+                  ),
+                )
+              else ...[
+                _DebugInfoCard(
+                  title: 'Snapshot',
+                  rows: _debugRows(data, const [
+                    'format',
+                    'formatVersion',
+                    'schemaVersion',
+                    'storageLayoutVersion',
+                    'manifestVersion',
+                    'snapshotBytes',
+                  ]),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Identity',
+                  rows: _debugRows(data, const [
+                    'vaultId',
+                    'vaultVersionId',
+                    'revision',
+                    'createdAt',
+                    'updatedAt',
+                    'lastModifiedByDeviceId',
+                  ]),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Crypto',
+                  rows: _debugMapRows(data['crypto']),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Encrypted sections',
+                  rows: _debugMapRows(data['encryptedSections']),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Working folder',
+                  rows: _workingFolderRows(data['workingStore']),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Working files',
+                  rows: _workingFileRows(data['workingStore']),
+                ),
+                const SizedBox(height: 10),
+                _DebugInfoCard(
+                  title: 'Session',
+                  rows: [
+                    MapEntry<String, String>(
+                      'activeVaultName',
+                      _activeVaultName,
+                    ),
+                    MapEntry<String, String>(
+                      'vaultSizeBytes',
+                      widget.vaultSizeBytes.toString(),
+                    ),
+                    MapEntry<String, String>('items', _items.length.toString()),
+                    MapEntry<String, String>('notes', _notes.length.toString()),
+                    MapEntry<String, String>(
+                      'customTypes',
+                      _customTypeDefinitions.length.toString(),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  List<MapEntry<String, String>> _debugRows(
+    Map<String, dynamic> data,
+    List<String> keys,
+  ) {
+    return keys
+        .where((key) => data.containsKey(key))
+        .map((key) => MapEntry<String, String>(key, data[key].toString()))
+        .toList();
+  }
+
+  List<MapEntry<String, String>> _debugMapRows(dynamic value) {
+    if (value is! Map) return const <MapEntry<String, String>>[];
+    return value.entries
+        .map(
+          (entry) => MapEntry<String, String>(
+            entry.key.toString(),
+            entry.value.toString(),
+          ),
+        )
+        .toList();
+  }
+
+  List<MapEntry<String, String>> _workingFolderRows(dynamic value) {
+    if (value is! Map) return const <MapEntry<String, String>>[];
+    return <MapEntry<String, String>>[
+      MapEntry<String, String>('type', value['type']?.toString() ?? ''),
+      MapEntry<String, String>('root', value['root']?.toString() ?? ''),
+      const MapEntry<String, String>(
+        'layout',
+        'header.json, manifest.enc, items.enc, notes.enc, settings.enc, tags.enc',
+      ),
+    ];
+  }
+
+  List<MapEntry<String, String>> _workingFileRows(dynamic value) {
+    if (value is! Map) return const <MapEntry<String, String>>[];
+    final files = value['files'];
+    if (files is! Map) return const <MapEntry<String, String>>[];
+    final rows =
+        files.entries
+            .map(
+              (entry) => MapEntry<String, String>(
+                entry.key.toString(),
+                '${entry.value} bytes',
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+    return rows;
   }
 
   Future<void> _showRotateMasterPasswordDialog(BuildContext context) async {
@@ -4535,6 +4691,70 @@ class _SectionHeader extends StatelessWidget {
         const SizedBox(height: 2),
         Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
       ],
+    );
+  }
+}
+
+class _DebugInfoCard extends StatelessWidget {
+  const _DebugInfoCard({required this.title, required this.rows});
+
+  final String title;
+  final List<MapEntry<String, String>> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            if (rows.isEmpty)
+              const Text(
+                'No data',
+                style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              )
+            else
+              ...rows.map(
+                (row) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 132,
+                        child: Text(
+                          row.key,
+                          style: const TextStyle(
+                            color: Color(0xFF6B7280),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: SelectableText(
+                          row.value,
+                          style: const TextStyle(
+                            color: Color(0xFF111827),
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

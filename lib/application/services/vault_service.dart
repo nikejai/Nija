@@ -1,11 +1,9 @@
 import '../../domain/models/vault.dart';
 import '../../domain/models/vault_payload.dart';
+import '../../domain/models/vault_transfer_result.dart';
 
 class VaultOperationProgress {
-  const VaultOperationProgress({
-    required this.value,
-    required this.message,
-  });
+  const VaultOperationProgress({required this.value, required this.message});
 
   final double value;
   final String message;
@@ -14,18 +12,14 @@ class VaultOperationProgress {
 typedef VaultProgressCallback = void Function(VaultOperationProgress progress);
 
 abstract class VaultService {
-  Future<String> readRawVaultFile({
-    required String filePath,
-  });
+  Future<String> readRawVaultFile({required String filePath});
 
   Future<void> writeRawVaultFile({
     required String filePath,
     required String rawContent,
   });
 
-  Future<bool> vaultExists({
-    required String filePath,
-  });
+  Future<bool> vaultExists({required String filePath});
 
   Future<Vault> createVault({
     required String filePath,
@@ -82,4 +76,19 @@ abstract class VaultService {
     required VaultPayload payload,
     VaultProgressCallback? onProgress,
   });
+
+  Future<void> renameVault({required String filePath, required String label});
+
+  Future<ImportResult> importNijaFile({
+    required String filePath,
+    required String unlockCredential,
+    bool confirmReplace = false,
+  });
+
+  Future<ExportResult> exportVault({
+    required String vaultId,
+    required String destinationPath,
+  });
+
+  Future<Map<String, dynamic>> readVaultInternals({required String filePath});
 }
