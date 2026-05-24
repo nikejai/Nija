@@ -96,9 +96,11 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
           style: vaultPageHeadingStyle(context),
         ),
         const SizedBox(height: 4),
-        const Text(
+        Text(
           'Choose the template name, icon, color, and fields used for new vault items.',
-          style: TextStyle(color: Color(0xFF6B7280)),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 12),
         Center(
@@ -216,9 +218,11 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
           style: vaultPageHeadingStyle(context),
         ),
         const SizedBox(height: 4),
-        const Text(
+        Text(
           'Add the fields this custom item type should collect.',
-          style: TextStyle(color: Color(0xFF6B7280)),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 8),
         Row(
@@ -262,7 +266,7 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                       initialValue: row.valueType,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontSize: 14,
-                        color: const Color(0xFF171717),
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                       items: const [
                         DropdownMenuItem(
@@ -373,7 +377,9 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                             border: Border.all(
                               color: selected
                                   ? const Color(0xFF6366F1)
-                                  : const Color(0xFFE5E7EB),
+                                  : Theme.of(
+                                      context,
+                                    ).colorScheme.outlineVariant,
                               width: selected ? 2 : 1,
                             ),
                           ),
@@ -388,7 +394,9 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                                 option.icon,
                                 color: selected
                                     ? const Color(0xFF4F46E5)
-                                    : const Color(0xFF4B5563),
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
                               ),
                               const SizedBox(height: 6),
                               Text(

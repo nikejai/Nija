@@ -92,6 +92,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   Widget build(BuildContext context) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final keyboardVisible = keyboardInset > 0;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return PopScope(
       canPop: false,
@@ -131,15 +132,15 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
                 child: TextField(
                   controller: _titleController,
-                  style: const TextStyle(
-                    color: Color(0xFF111827),
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     hintText: 'Untitled note',
                     hintStyle: TextStyle(
-                      color: Color(0xFF111827),
+                      color: colorScheme.onSurfaceVariant,
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
@@ -201,8 +202,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                         padding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
                         customStyles: quill.DefaultStyles(
                           paragraph: quill.DefaultTextBlockStyle(
-                            const TextStyle(
-                              color: Color(0xFF111827),
+                            TextStyle(
+                              color: colorScheme.onSurface,
                               fontSize: 15,
                               height: 1.5,
                             ),
@@ -330,6 +331,7 @@ class NoteViewScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final delta = note['delta'] as List<dynamic>?;
     final document = delta == null
         ? (quill.Document()
@@ -394,8 +396,8 @@ class NoteViewScreen extends StatelessWidget {
               config: quill.QuillEditorConfig(
                 customStyles: quill.DefaultStyles(
                   paragraph: quill.DefaultTextBlockStyle(
-                    const TextStyle(
-                      color: Color(0xFF111827),
+                    TextStyle(
+                      color: colorScheme.onSurface,
                       fontSize: 15,
                       height: 1.5,
                     ),

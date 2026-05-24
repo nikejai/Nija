@@ -193,11 +193,20 @@ class _VaultEntryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const borderRadius = 12.0;
+    final colorScheme = Theme.of(context).colorScheme;
+    final titleStyle = Theme.of(context).textTheme.bodyLarge?.copyWith(
+      color: colorScheme.onSurface,
+      fontWeight: FontWeight.w600,
+    );
+    final metaStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: colorScheme.onSurfaceVariant,
+      fontSize: 12,
+    );
     return Material(
-      color: Colors.white,
+      color: colorScheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(borderRadius),
-        side: const BorderSide(color: Color(0xFFE5E7EB)),
+        side: BorderSide(color: colorScheme.outlineVariant),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(borderRadius),
@@ -236,28 +245,16 @@ class _VaultEntryTile extends StatelessWidget {
                   children: [
                     Text(
                       entry.title,
-                      style: const TextStyle(
-                        color: Color(0xFF111827),
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: titleStyle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      '${entry.type} · ${entry.updated}',
-                      style: const TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontSize: 12,
-                      ),
-                    ),
+                    Text('${entry.type} · ${entry.updated}', style: metaStyle),
                     if (entry.subtitle.isNotEmpty)
                       Text(
                         entry.subtitle,
-                        style: const TextStyle(
-                          color: Color(0xFF6B7280),
-                          fontSize: 12,
-                        ),
+                        style: metaStyle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -269,7 +266,7 @@ class _VaultEntryTile extends StatelessWidget {
                   padding: EdgeInsets.only(right: 4),
                   child: Icon(Icons.star, color: Color(0xFFF59E0B), size: 14),
                 ),
-              _buildTrailing(),
+              _buildTrailing(context),
             ],
           ),
         ),
@@ -277,20 +274,24 @@ class _VaultEntryTile extends StatelessWidget {
     );
   }
 
-  Widget _buildTrailing() {
+  Widget _buildTrailing(BuildContext context) {
     switch (trailingMode) {
       case VaultEntryTrailingMode.none:
         return const SizedBox.shrink();
       case VaultEntryTrailingMode.chevron:
-        return const Icon(
+        return Icon(
           Icons.chevron_right,
-          color: Color(0xFF9CA3AF),
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
           size: 18,
         );
       case VaultEntryTrailingMode.more:
         return IconButton(
           onPressed: onMoreTap,
-          icon: const Icon(Icons.more_vert, color: Color(0xFF9CA3AF), size: 18),
+          icon: Icon(
+            Icons.more_vert,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            size: 18,
+          ),
         );
     }
   }
