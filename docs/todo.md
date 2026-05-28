@@ -189,3 +189,27 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Scope: update tests expecting old `Custom templates`, `All types`, note action keys, selection/share actions, and related labels.
 - [ ] Re-run release readiness gates.
   - Goal: `./scripts/release_hardening_gate.sh`, `flutter test`, and `flutter build apk --release` all pass.
+
+## 14) Vault App Shell File Split
+
+- [x] Move encrypted import/share UI out of `vault_app_shell.dart`.
+  - Goal: keep vault shell focused on orchestration, not import bundle screens.
+  - Scope: move `_EncryptedShareChoice`, `_EncryptedImportEntry`, `_PreparedVaultImport`, `_EncryptedShareInputDialog`, `_EncryptedImportBundleScreen`, `_EncryptedImportEntryPreviewScreen`, `_ImportPreviewHeader`, `_ImportPreviewRow`, and import preview helpers into `lib/features/vault/presentation/widgets/encrypted_import_widgets.dart` or a dedicated `encrypted_import/` folder.
+- [ ] Move custom template manager into its own screen file.
+  - Goal: isolate custom template CRUD from shell navigation.
+  - Scope: move `_CustomTemplateManagerScreen` and related state into `lib/features/vault/presentation/custom_template_manager_screen.dart`.
+- [ ] Move settings widgets and dialogs into settings-focused files.
+  - Goal: keep settings layout reusable and easier to test.
+  - Scope: move `_SettingsSection`, `_SettingsRow`, `_SettingsActionRow`, `_AutoLockSecondsSheet`, `_RenameVaultDialog`, `_PasswordStrengthMeter`, and related formatting helpers into `lib/features/vault/presentation/widgets/vault_settings_widgets.dart`.
+- [ ] Move document detail UI into a dedicated screen file.
+  - Goal: separate document rendering/export logic from the shell.
+  - Scope: move `_DocumentDetailScreen`, `_DocumentHeader`, `_DocumentPreviewMessage`, document filename/extension/size/mime helpers, and document payload helpers into `lib/features/vault/presentation/document_detail_screen.dart`.
+- [ ] Move item detail and identity photo UI into dedicated files.
+  - Goal: separate item viewing/editing and identity photo viewing from shell state.
+  - Scope: move `_ItemDetailScreen`, `_IdentityPhotosSection`, `_IdentityFullPhoto`, `_IdentityPhotoPreview`, and identity photo size helpers into `lib/features/vault/presentation/item_detail_screen.dart` plus optional identity photo widget file.
+- [ ] Move shared small vault widgets into a common widget file.
+  - Goal: reduce noise in shell and reuse visual primitives consistently.
+  - Scope: move `_EntryMetadataPanel`, `_EntryMetadataLine`, `_EmptyState`, `_TinyChip`, `_SectionHeader`, `_DebugInfoCard`, `_HomeTypeCard`, `_AllItemsSelectionActionBar`, `_SelectionActionNavItem`, `_AllItemsFiltersOverlay`, `_ActiveFilterChip`, icon/color helpers, and metadata timestamp helpers into focused widget/helper files.
+- [ ] Re-run format, analyzer, and targeted widget tests after each split.
+  - Goal: keep every extraction behavior-preserving.
+  - Scope: run `dart format`, `flutter analyze`, and the most relevant `flutter test` target after each moved group.
