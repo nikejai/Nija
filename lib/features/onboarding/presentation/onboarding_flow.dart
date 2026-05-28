@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -42,6 +43,8 @@ enum OnboardingStep { welcome, setup, recovery, created, unlock, app }
 
 enum _CloudMergeOutcome { noMergeNeeded, merged, cancelled }
 
+enum _VaultPickerAction { importFromDevice, importFromCloud }
+
 class OnboardingFlow extends StatefulWidget {
   const OnboardingFlow({
     super.key,
@@ -51,6 +54,12 @@ class OnboardingFlow extends StatefulWidget {
     this.onThemeModeChanged,
     this.vaultService,
     this.vaultFilePath,
+    this.autoLockDelay = const Duration(minutes: 5),
+    this.autoLockSeconds = 300,
+    this.onAutoLockSecondsChanged,
+    this.biometricAuthService,
+    this.biometricCredentialStore,
+    this.biometricEnrollmentStore,
   });
 
   final String languageMode;
@@ -59,6 +68,12 @@ class OnboardingFlow extends StatefulWidget {
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   final VaultService? vaultService;
   final String? vaultFilePath;
+  final Duration autoLockDelay;
+  final int autoLockSeconds;
+  final ValueChanged<int>? onAutoLockSecondsChanged;
+  final BiometricAuthService? biometricAuthService;
+  final BiometricCredentialStore? biometricCredentialStore;
+  final BiometricEnrollmentStore? biometricEnrollmentStore;
 
   @override
   State<OnboardingFlow> createState() => _OnboardingFlowState();
@@ -68,8 +83,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     with WidgetsBindingObserver {
   static const _vaultOpTimeout = Duration(seconds: 20);
   static const _unlockBackExitWindow = Duration(seconds: 2);
-  static const _pausedLockDelay = Duration(seconds: 2);
   static const _prefsDeviceIdKey = 'nija_device_id_v1';
+  static const _defaultVaultName = 'Nija Vault';
   OnboardingStep _step = OnboardingStep.welcome;
   GuardianProfile _selectedGuardian = GuardianProfiles.owl;
   final _passwordController = TextEditingController();
@@ -86,8 +101,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   List<Map<String, dynamic>> _customTypeDefinitions = <Map<String, dynamic>>[];
   Timer? _busyWatchdog;
   Timer? _backgroundLockTimer;
+  Timer? _inactivityLockTimer;
   int _busyRunId = 0;
   bool _lifecycleLockSuppressed = false;
+  AppLifecycleState _lastLifecycleState = AppLifecycleState.resumed;
   final _vaultReferenceCache = VaultReferenceCache();
   final VaultPortabilityAdapter _vaultPortability =
       VaultPortabilityAdapterImpl();
@@ -96,9 +113,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   final _secretIntentBridge = SecretIntentBridge();
   final _encryptedShareCodec = EncryptedShareCodec();
   final _vaultMergeHelper = const VaultMergeHelper();
-  final _biometricAuthService = BiometricAuthService();
-  final _biometricCredentialStore = BiometricCredentialStore();
-  final _biometricEnrollmentStore = BiometricEnrollmentStore();
+  late final BiometricAuthService _biometricAuthService;
+  late final BiometricCredentialStore _biometricCredentialStore;
+  late final BiometricEnrollmentStore _biometricEnrollmentStore;
   List<VaultReference> _knownVaults = const <VaultReference>[];
   bool _enableVaultReferenceCache = true;
   bool _storageReady = false;
@@ -116,6 +133,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   @override
   void initState() {
     super.initState();
+    _biometricAuthService =
+        widget.biometricAuthService ?? BiometricAuthService();
+    _biometricCredentialStore =
+        widget.biometricCredentialStore ?? BiometricCredentialStore();
+    _biometricEnrollmentStore =
+        widget.biometricEnrollmentStore ?? BiometricEnrollmentStore();
     WidgetsBinding.instance.addObserver(this);
     _prepareVaultDraft();
     unawaited(_initializeDeviceMetadata());
@@ -152,6 +175,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     WidgetsBinding.instance.removeObserver(this);
     _busyWatchdog?.cancel();
     _backgroundLockTimer?.cancel();
+    _inactivityLockTimer?.cancel();
     _passwordController.dispose();
     _vaultNameController.dispose();
     super.dispose();
@@ -159,29 +183,22 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lastLifecycleState = state;
     if (state == AppLifecycleState.resumed) {
       _backgroundLockTimer?.cancel();
+      _scheduleInactivityLockIfNeeded();
       unawaited(_consumePendingSecretIntent());
       return;
     }
     if (state == AppLifecycleState.detached && _step == OnboardingStep.app) {
+      if (_shouldSuppressLifecycleLock) return;
       _backgroundLockTimer?.cancel();
-      _clearSensitiveSessionState();
-      setState(() => _step = OnboardingStep.unlock);
+      _inactivityLockTimer?.cancel();
+      _lockVaultSession();
       return;
     }
     if (state == AppLifecycleState.paused && _step == OnboardingStep.app) {
-      if (_lifecycleLockSuppressed) return;
-      _backgroundLockTimer?.cancel();
-      _backgroundLockTimer = Timer(_pausedLockDelay, () {
-        if (!mounted ||
-            _step != OnboardingStep.app ||
-            _lifecycleLockSuppressed) {
-          return;
-        }
-        _clearSensitiveSessionState();
-        setState(() => _step = OnboardingStep.unlock);
-      });
+      _scheduleBackgroundLockIfNeeded();
     }
   }
 
@@ -235,6 +252,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onLanguageModeChanged: widget.onLanguageModeChanged,
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
+        autoLockSeconds: widget.autoLockSeconds,
+        onAutoLockSecondsChanged: widget.onAutoLockSecondsChanged,
         biometricEnabled: _biometricEnabled,
         onBiometricChanged: _onBiometricPreferenceChanged,
         onPersistVaultData: _persistVaultData,
@@ -252,10 +271,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onChangeCloudBackupAccount: _changeCloudBackupAccount,
         onRenameVault: _renameActiveVault,
         onReadVaultInternals: kDebugMode ? _readVaultInternals : null,
-        onLockNow: () {
-          _clearSensitiveSessionState();
-          setState(() => _step = OnboardingStep.unlock);
-        },
+        onLockNow: _lockVaultSession,
       ),
     };
 
@@ -265,58 +281,63 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         if (didPop) return;
         unawaited(_handleRootPopInvoked());
       },
-      child: Stack(
-        children: [
-          screen,
-          if (_isBusy)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withValues(alpha: 0.25),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 340),
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(
-                              height: 22,
-                              width: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => _handleUserActivity(),
+        onPointerMove: (_) => _handleUserActivity(),
+        child: Stack(
+          children: [
+            screen,
+            if (_isBusy)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 340),
+                      child: Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(
+                                height: 22,
+                                width: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 12),
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 220),
-                              child: Text(
-                                _busyMessage,
-                                key: ValueKey(_busyMessage),
-                                style: Theme.of(context).textTheme.bodyLarge
-                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              const SizedBox(height: 12),
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 220),
+                                child: Text(
+                                  _busyMessage,
+                                  key: ValueKey(_busyMessage),
+                                  style: Theme.of(context).textTheme.bodyLarge
+                                      ?.copyWith(fontWeight: FontWeight.w600),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 10),
-                            LinearProgressIndicator(
-                              value: _busyProgress.clamp(0, 1),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '${(_busyProgress * 100).clamp(0, 100).toStringAsFixed(0)}%',
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                          ],
+                              const SizedBox(height: 10),
+                              LinearProgressIndicator(
+                                value: _busyProgress.clamp(0, 1),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '${(_busyProgress * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -373,6 +394,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   void _handleUnlock() {
     setState(() => _step = OnboardingStep.app);
+    _scheduleInactivityLockIfNeeded();
     unawaited(_markVaultAsOpened(_vaultFilePath));
 
     unawaited(_maybePromptToEnableBiometrics());
@@ -380,21 +402,22 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _maybePromptToEnableBiometrics() async {
     if (_biometricEnabled) return;
+    final vaultId = _vaultFilePath;
     final enrolledForVault = await _biometricEnrollmentStore.isEnrolledForVault(
-      _vaultFilePath,
+      vaultId,
     );
     if (enrolledForVault) return;
     final hasSavedCredential =
         (await _biometricCredentialStore.readMasterPassword(
-          vaultId: _vaultFilePath,
+          vaultId: vaultId,
         ))?.isNotEmpty ==
         true;
     if (hasSavedCredential) {
       await _biometricEnrollmentStore.setEnrolledForVault(
-        vaultId: _vaultFilePath,
+        vaultId: vaultId,
         enrolled: true,
       );
-      if (mounted && !_biometricEnabled) {
+      if (mounted && _vaultFilePath == vaultId && !_biometricEnabled) {
         setState(() => _biometricEnabled = true);
       }
       return;
@@ -406,9 +429,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     final canUseBiometrics = await _biometricAuthService.canUseBiometrics();
     if (!canUseBiometrics) return;
 
-    if (!mounted || _step != OnboardingStep.app) return;
+    if (!mounted || _step != OnboardingStep.app || _vaultFilePath != vaultId) {
+      return;
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || _vaultFilePath != vaultId) return;
       final shouldEnable = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -427,7 +453,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         ),
       );
 
-      if (shouldEnable == true && mounted) {
+      if (shouldEnable == true && mounted && _vaultFilePath == vaultId) {
         await _enableBiometricForCurrentVault();
       }
     });
@@ -447,11 +473,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     await _syncKnownVaults();
     if (!mounted) return;
 
-    final selected = await showModalBottomSheet<VaultReference>(
+    final selected = await showModalBottomSheet<Object>(
       context: context,
       builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: ListView(
+          shrinkWrap: true,
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom + 8,
+          ),
           children: [
             ListTile(
               title: Text(
@@ -476,7 +505,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             ListTile(
               leading: const Icon(Icons.file_open_outlined),
               title: Text(AppStrings.importVaultFromDevice),
-              onTap: () => Navigator.of(context).pop(),
+              onTap: () => Navigator.of(
+                context,
+              ).pop(_VaultPickerAction.importFromDevice),
+            ),
+            ListTile(
+              leading: const Icon(Icons.cloud_download_outlined),
+              title: const Text('Import vault from cloud'),
+              onTap: () =>
+                  Navigator.of(context).pop(_VaultPickerAction.importFromCloud),
             ),
           ],
         ),
@@ -484,7 +521,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     );
 
     if (!mounted) return;
-    if (selected != null) {
+    if (selected is VaultReference) {
       setState(() {
         _vaultFilePath = selected.id;
         _activeVaultName = selected.label;
@@ -493,7 +530,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       await _refreshBiometricStateForActiveVault();
       return;
     }
-    await _importVaultFromLocal(continueToUnlock: true);
+    if (selected == _VaultPickerAction.importFromDevice) {
+      await _importVaultFromLocal(continueToUnlock: true);
+    }
+    if (selected == _VaultPickerAction.importFromCloud) {
+      await _importVaultFromCloud(continueToUnlock: true);
+    }
   }
 
   Future<void> _createVaultAndProceed() async {
@@ -518,7 +560,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       _recoveryWords = RecoveryPhraseGenerator.generate();
       final recoveryPhrase = _recoveryWords.join(' ');
-      final vaultName = _vaultNameController.text.trim();
+      final vaultName = _vaultNameController.text.trim().isEmpty
+          ? _defaultVaultName
+          : _vaultNameController.text.trim();
       await _vaultService.createVault(
         filePath: _vaultFilePath,
         vaultId: _draftVaultId,
@@ -530,6 +574,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       if (!mounted) return;
       _activeVaultName = vaultName;
+      await _resetBiometricForVault(_vaultFilePath);
       await _rememberVaultReference(_vaultFilePath, label: vaultName);
       _stopBusy();
       _vaultCreatedInSession = true;
@@ -595,8 +640,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _unlockWithBiometric() async {
     if (!_biometricEnabled || _isBusy || !_storageReady) return;
+    final vaultId = _vaultFilePath;
     final savedPassword = await _biometricCredentialStore.readMasterPassword(
-      vaultId: _vaultFilePath,
+      vaultId: vaultId,
     );
     if (savedPassword == null || savedPassword.isEmpty) {
       if (!mounted) return;
@@ -610,7 +656,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return;
     }
     final authenticated = await _biometricAuthService.authenticateForUnlock();
-    if (!authenticated) return;
+    if (!authenticated || !mounted || _vaultFilePath != vaultId) return;
     _passwordController.text = savedPassword;
     await _unlockWithPassword();
   }
@@ -646,6 +692,45 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         password: password.trim(),
       );
       if (!mounted) return;
+      final normalizedType = decoded.contentType.trim().toLowerCase();
+      if (normalizedType == 'vault_bundle') {
+        final entries = _encryptedImportEntriesFromBundle(decoded.plainText);
+        if (entries.isNotEmpty) {
+          if (entries.length > 1) {
+            final importedAny = await Navigator.of(context).push<bool>(
+              MaterialPageRoute<bool>(
+                builder: (context) => _EncryptedImportBundleScreen(
+                  entries: entries,
+                  onImportEntry: _importEncryptedBundleEntryWithAuth,
+                  onImportAll: _importEncryptedBundleEntriesWithAuth,
+                ),
+              ),
+            );
+            if (importedAny == true && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(AppStrings.encryptedSecretImported)),
+              );
+            }
+            return;
+          }
+          final importedSingle = await Navigator.of(context).push<bool>(
+            MaterialPageRoute<bool>(
+              builder: (context) => _EncryptedImportEntryPreviewScreen(
+                entry: entries.first,
+                alreadyImported: false,
+                onImport: () =>
+                    _importEncryptedBundleEntryWithAuth(entries.first),
+              ),
+            ),
+          );
+          if (importedSingle == true && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(AppStrings.encryptedSecretImported)),
+            );
+          }
+          return;
+        }
+      }
       final fields = _parseEncryptedSecretFields(decoded.plainText);
       final shouldImport = await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
@@ -722,7 +807,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (!authenticated) {
       return;
     }
-    final applied = _applyImportedSecret(payload);
+    final applied = await _applyImportedSecret(payload);
     if (!applied) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -908,7 +993,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
   }
 
-  bool _applyImportedSecret(DecryptedSharePayload payload) {
+  Future<bool> _applyImportedSecret(DecryptedSharePayload payload) async {
     final normalized = payload.contentType.trim().toLowerCase();
     if (normalized == 'note') {
       final note = _noteFromImported(payload.plainText);
@@ -922,7 +1007,304 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       setState(() => _vaultItems.insert(0, item));
       return true;
     }
+    if (normalized == 'vault_bundle') {
+      return _importEncryptedBundleEntries(
+        _encryptedImportEntriesFromBundle(payload.plainText),
+      );
+    }
     return false;
+  }
+
+  List<_EncryptedImportEntry> _encryptedImportEntriesFromBundle(
+    String plainText,
+  ) {
+    final decoded = jsonDecode(plainText);
+    if (decoded is! Map) return const <_EncryptedImportEntry>[];
+    final root = Map<String, dynamic>.from(decoded);
+    final entries = root['entries'];
+    if (entries is! List) return const <_EncryptedImportEntry>[];
+    final result = <_EncryptedImportEntry>[];
+    for (var i = 0; i < entries.length; i++) {
+      final raw = entries[i];
+      if (raw is! Map) continue;
+      final entry = Map<String, dynamic>.from(raw);
+      final kind = entry['kind']?.toString().trim().toLowerCase() ?? '';
+      if (!_isSupportedBundleImportKind(kind)) continue;
+      result.add(
+        _EncryptedImportEntry(
+          index: i,
+          kind: kind == 'item' || kind == 'secret' ? 'vault_item' : kind,
+          bundleEntry: entry,
+          title: _bundleImportTitle(entry, kind),
+          subtitle: _bundleImportSubtitle(entry, kind),
+        ),
+      );
+    }
+    return result;
+  }
+
+  bool _isSupportedBundleImportKind(String kind) {
+    return kind == 'note' ||
+        kind == 'vault_item' ||
+        kind == 'item' ||
+        kind == 'secret' ||
+        kind == 'document';
+  }
+
+  String _bundleImportTitle(Map<String, dynamic> entry, String kind) {
+    final rawEntry = entry['entry'];
+    if (rawEntry is Map) {
+      final title = rawEntry['title']?.toString().trim() ?? '';
+      if (title.isNotEmpty) return title;
+    }
+    if (kind == 'document') {
+      final fileName = entry['fileName']?.toString().trim() ?? '';
+      if (fileName.isNotEmpty) return fileName;
+      return 'Document';
+    }
+    final plainText = entry['plainText']?.toString() ?? '';
+    final firstLine = _safePlainTextPreviewLine(plainText);
+    if (firstLine != null) return firstLine;
+    return kind == 'note' ? 'Note' : 'Secret';
+  }
+
+  String? _safePlainTextPreviewLine(String plainText) {
+    final firstLine = plainText
+        .split('\n')
+        .map((line) => line.trim())
+        .firstWhere((line) => line.isNotEmpty, orElse: () => '');
+    if (firstLine.isEmpty || _looksLikeEncodedPreviewData(firstLine)) {
+      return null;
+    }
+    return firstLine;
+  }
+
+  String _bundleImportSubtitle(Map<String, dynamic> entry, String kind) {
+    if (kind == 'note') return 'Secure Note';
+    if (kind == 'document') {
+      final extension = entry['extension']?.toString().trim().toUpperCase();
+      final size = entry['sizeBytes'];
+      final formattedSize = size == null
+          ? ''
+          : _formatDocumentByteCount(int.tryParse(size.toString()) ?? 0);
+      return [
+        if (extension != null && extension.isNotEmpty) extension,
+        if (formattedSize.isNotEmpty) formattedSize,
+      ].join(' · ');
+    }
+    final rawEntry = entry['entry'];
+    if (rawEntry is Map) {
+      final type = rawEntry['type']?.toString().trim() ?? '';
+      if (type.isNotEmpty) return type;
+    }
+    return 'Vault Item';
+  }
+
+  Future<bool> _importEncryptedBundleEntryWithAuth(
+    _EncryptedImportEntry entry,
+  ) async {
+    final authenticated = await _ensureAuthenticatedVaultSessionForAction(
+      actionLabel: 'Import secret',
+    );
+    if (!authenticated) return false;
+    final ok = await _importEncryptedBundleEntry(entry);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.encryptedSecretImportFailed)),
+      );
+    }
+    return ok;
+  }
+
+  Future<bool> _importEncryptedBundleEntriesWithAuth(
+    List<_EncryptedImportEntry> entries,
+  ) async {
+    final authenticated = await _ensureAuthenticatedVaultSessionForAction(
+      actionLabel: 'Import secret',
+    );
+    if (!authenticated) return false;
+    final ok = await _importEncryptedBundleEntries(entries);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.encryptedSecretImportFailed)),
+      );
+    }
+    return ok;
+  }
+
+  Future<bool> _importEncryptedBundleEntry(_EncryptedImportEntry entry) async {
+    final importedAt = DateTime.now().toUtc().toIso8601String();
+    final imported = await _preparedImportFromBundleEntry(
+      entry.bundleEntry,
+      entry.index,
+      importedAt,
+    );
+    if (imported == null || !mounted) return false;
+    _insertPreparedImport(imported);
+    await _persistVaultData(
+      items: _vaultItems,
+      notes: _vaultNotes,
+      customTypeDefinitions: _customTypeDefinitions,
+    );
+    return true;
+  }
+
+  Future<bool> _importEncryptedBundleEntries(
+    List<_EncryptedImportEntry> entries,
+  ) async {
+    if (entries.isEmpty) return false;
+    final importedAt = DateTime.now().toUtc().toIso8601String();
+    final prepared = _PreparedVaultImport();
+    for (final entry in entries) {
+      final imported = await _preparedImportFromBundleEntry(
+        entry.bundleEntry,
+        entry.index,
+        importedAt,
+      );
+      if (imported == null) continue;
+      prepared.items.addAll(imported.items);
+      prepared.notes.addAll(imported.notes);
+    }
+    if (prepared.isEmpty || !mounted) return false;
+    _insertPreparedImport(prepared);
+    await _persistVaultData(
+      items: _vaultItems,
+      notes: _vaultNotes,
+      customTypeDefinitions: _customTypeDefinitions,
+    );
+    return true;
+  }
+
+  Future<_PreparedVaultImport?> _preparedImportFromBundleEntry(
+    Map<String, dynamic> entry,
+    int index,
+    String importedAt,
+  ) async {
+    final kind = entry['kind']?.toString().trim().toLowerCase() ?? '';
+    if (kind == 'note') {
+      final note = _noteFromBundleEntry(entry, index, importedAt);
+      if (note == null) return null;
+      return _PreparedVaultImport(notes: [note]);
+    }
+    if (kind == 'vault_item' || kind == 'item' || kind == 'secret') {
+      final item = _itemFromBundleEntry(entry, index, importedAt);
+      if (item == null) return null;
+      return _PreparedVaultImport(items: [item]);
+    }
+    if (kind == 'document') {
+      final item = await _documentFromBundleEntry(entry, index, importedAt);
+      if (item == null) return null;
+      return _PreparedVaultImport(items: [item]);
+    }
+    return null;
+  }
+
+  void _insertPreparedImport(_PreparedVaultImport imported) {
+    setState(() {
+      _vaultItems.insertAll(0, imported.items);
+      _vaultNotes.insertAll(0, imported.notes);
+    });
+  }
+
+  Map<String, dynamic>? _noteFromBundleEntry(
+    Map<String, dynamic> bundleEntry,
+    int index,
+    String importedAt,
+  ) {
+    final rawEntry = bundleEntry['entry'];
+    if (rawEntry is Map) {
+      final note = Map<String, dynamic>.from(rawEntry);
+      note['id'] = _importedVaultId('note', index);
+      note['pinned'] = false;
+      _markImportedEntryVisible(note, importedAt: importedAt);
+      return note;
+    }
+    final plainText = bundleEntry['plainText']?.toString();
+    if (plainText == null || plainText.trim().isEmpty) return null;
+    final note = _noteFromImported(plainText);
+    if (note == null) return null;
+    note['id'] = _importedVaultId('note', index);
+    _markImportedEntryVisible(note, importedAt: importedAt);
+    return note;
+  }
+
+  Map<String, dynamic>? _itemFromBundleEntry(
+    Map<String, dynamic> bundleEntry,
+    int index,
+    String importedAt,
+  ) {
+    final rawEntry = bundleEntry['entry'];
+    if (rawEntry is Map) {
+      final item = Map<String, dynamic>.from(rawEntry);
+      item['id'] = _importedVaultId('item', index);
+      item['pinned'] = false;
+      final type = item['type']?.toString().trim() ?? '';
+      if (type.isEmpty) item['type'] = 'Item';
+      _markImportedEntryVisible(item, importedAt: importedAt);
+      return item;
+    }
+    final plainText = bundleEntry['plainText']?.toString();
+    if (plainText == null || plainText.trim().isEmpty) return null;
+    final item = _itemFromImported(plainText);
+    if (item == null) return null;
+    item['id'] = _importedVaultId('item', index);
+    _markImportedEntryVisible(item, importedAt: importedAt);
+    return item;
+  }
+
+  Future<Map<String, dynamic>?> _documentFromBundleEntry(
+    Map<String, dynamic> bundleEntry,
+    int index,
+    String importedAt,
+  ) async {
+    final rawBytes = bundleEntry['bytesBase64']?.toString();
+    if (rawBytes == null || rawBytes.isEmpty) return null;
+    final bytes = base64Decode(rawBytes);
+    final rawEntry = bundleEntry['entry'];
+    final item = rawEntry is Map
+        ? Map<String, dynamic>.from(rawEntry)
+        : <String, dynamic>{};
+    final fileName = bundleEntry['fileName']?.toString().trim();
+    final extension = bundleEntry['extension']?.toString().trim();
+    item
+      ..remove('documentSection')
+      ..remove('documentStorage')
+      ..['id'] = _importedVaultId('document', index)
+      ..['type'] = 'Documents'
+      ..['title'] = item['title']?.toString().trim().isNotEmpty == true
+          ? item['title']
+          : fileName ?? 'Imported document'
+      ..['pinned'] = false
+      ..['updated'] = 'Now'
+      ..['updatedAt'] = importedAt
+      ..['createdAt'] = item['createdAt'] ?? importedAt
+      ..['documentUploadedAt'] = item['documentUploadedAt'] ?? importedAt
+      ..['documentFileName'] =
+          fileName ?? item['documentFileName'] ?? 'document'
+      ..['documentExtension'] =
+          extension ?? item['documentExtension'] ?? 'document'
+      ..['documentSizeBytes'] = bytes.length;
+    final sectionName = await _persistVaultDocument(
+      documentId: item['id']?.toString() ?? '',
+      bytes: bytes,
+    );
+    item['documentStorage'] = 'private-section';
+    item['documentSection'] = sectionName;
+    return item;
+  }
+
+  void _markImportedEntryVisible(
+    Map<String, dynamic> entry, {
+    String? importedAt,
+  }) {
+    final timestamp = importedAt ?? DateTime.now().toUtc().toIso8601String();
+    entry['updated'] = 'Now';
+    entry['updatedAt'] = timestamp;
+    entry['createdAt'] = entry['createdAt'] ?? timestamp;
+  }
+
+  String _importedVaultId(String prefix, int index) {
+    return '$prefix-imported-${DateTime.now().microsecondsSinceEpoch}-$index';
   }
 
   Map<String, dynamic>? _noteFromImported(String plainText) {
@@ -1133,7 +1515,71 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     _lifecycleLockSuppressed = suppressed;
     if (suppressed) {
       _backgroundLockTimer?.cancel();
+      _inactivityLockTimer?.cancel();
+      return;
     }
+    if (_lastLifecycleState == AppLifecycleState.paused) {
+      _scheduleBackgroundLockIfNeeded();
+    } else {
+      _scheduleInactivityLockIfNeeded();
+    }
+  }
+
+  bool get _shouldSuppressLifecycleLock => _lifecycleLockSuppressed || _isBusy;
+
+  bool get _shouldSuppressAutoLock =>
+      _shouldSuppressLifecycleLock || widget.autoLockDelay <= Duration.zero;
+
+  void _handleUserActivity() {
+    if (_step != OnboardingStep.app ||
+        _lastLifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _scheduleInactivityLockIfNeeded();
+  }
+
+  void _scheduleInactivityLockIfNeeded() {
+    _inactivityLockTimer?.cancel();
+    if (!mounted ||
+        _step != OnboardingStep.app ||
+        _lastLifecycleState != AppLifecycleState.resumed ||
+        _shouldSuppressAutoLock) {
+      return;
+    }
+    _inactivityLockTimer = Timer(widget.autoLockDelay, () {
+      if (!mounted ||
+          _step != OnboardingStep.app ||
+          _lastLifecycleState != AppLifecycleState.resumed ||
+          _shouldSuppressAutoLock) {
+        return;
+      }
+      _lockVaultSession();
+    });
+  }
+
+  void _scheduleBackgroundLockIfNeeded() {
+    _backgroundLockTimer?.cancel();
+    if (!mounted || _step != OnboardingStep.app || _shouldSuppressAutoLock) {
+      return;
+    }
+    _inactivityLockTimer?.cancel();
+    _backgroundLockTimer = Timer(widget.autoLockDelay, () {
+      if (!mounted ||
+          _step != OnboardingStep.app ||
+          _lastLifecycleState == AppLifecycleState.resumed ||
+          _shouldSuppressAutoLock) {
+        return;
+      }
+      _lockVaultSession();
+    });
+  }
+
+  void _lockVaultSession() {
+    _backgroundLockTimer?.cancel();
+    _inactivityLockTimer?.cancel();
+    _clearSensitiveSessionState();
+    if (!mounted) return;
+    setState(() => _step = OnboardingStep.unlock);
   }
 
   Future<void> _renameActiveVault(String name) async {
@@ -1386,6 +1832,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (!mounted) return;
     _busyWatchdog?.cancel();
     final runId = ++_busyRunId;
+    _backgroundLockTimer?.cancel();
+    _inactivityLockTimer?.cancel();
     setState(() {
       _isBusy = true;
       _busyProgress = 0.0;
@@ -1421,6 +1869,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _busyProgress = 0;
       _busyMessage = '';
     });
+    if (_lastLifecycleState == AppLifecycleState.paused) {
+      _scheduleBackgroundLockIfNeeded();
+    } else {
+      _scheduleInactivityLockIfNeeded();
+    }
   }
 
   void _logOperationError(
@@ -1470,7 +1923,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _syncKnownVaults() async {
     if (!_enableVaultReferenceCache) return;
-    final known = await _vaultReferenceCache.readAll();
+    final known = await _mergedKnownAndPrivateVaultReferences();
     if (!mounted) return;
     setState(() {
       _knownVaults = known;
@@ -1479,7 +1932,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _restoreKnownVaultSession() async {
     if (!_enableVaultReferenceCache) return;
-    final known = await _vaultReferenceCache.readAll();
+    final known = await _mergedKnownAndPrivateVaultReferences();
     if (!mounted) return;
     if (known.isEmpty) {
       setState(() => _knownVaults = known);
@@ -1492,6 +1945,81 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _step = OnboardingStep.unlock;
     });
     await _refreshBiometricStateForActiveVault();
+  }
+
+  Future<List<VaultReference>> _mergedKnownAndPrivateVaultReferences() async {
+    final cached = await _vaultReferenceCache.readAll();
+    final discovered = await _discoverPrivateVaultReferences();
+    final byId = <String, VaultReference>{};
+    for (final entry in discovered) {
+      byId[entry.id] = entry;
+    }
+    for (final entry in cached) {
+      byId[entry.id] = entry;
+    }
+    return byId.values.toList(growable: true)..sort((a, b) {
+      final openCmp = b.lastOpenedAtEpochMs.compareTo(a.lastOpenedAtEpochMs);
+      if (openCmp != 0) return openCmp;
+      return b.addedAtEpochMs.compareTo(a.addedAtEpochMs);
+    });
+  }
+
+  Future<List<VaultReference>> _discoverPrivateVaultReferences() async {
+    if (kIsWeb) return const <VaultReference>[];
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      final vaultsDir = Directory(
+        '${docsDir.path}${Platform.pathSeparator}vaults',
+      );
+      if (!await vaultsDir.exists()) return const <VaultReference>[];
+      final discovered = <VaultReference>[];
+      await for (final entity in vaultsDir.list(followLinks: false)) {
+        if (entity is! Directory) continue;
+        final vaultStoreId = entity.path.split(Platform.pathSeparator).last;
+        if (vaultStoreId.isEmpty ||
+            vaultStoreId.endsWith('.incoming') ||
+            vaultStoreId.endsWith('.rollback')) {
+          continue;
+        }
+        final headerFile = File(
+          '${entity.path}${Platform.pathSeparator}header.json',
+        );
+        if (!await headerFile.exists()) continue;
+        final reference = await _privateVaultReferenceFromHeader(
+          vaultStoreId: vaultStoreId,
+          headerFile: headerFile,
+        );
+        if (reference != null) discovered.add(reference);
+      }
+      return discovered;
+    } catch (_) {
+      return const <VaultReference>[];
+    }
+  }
+
+  Future<VaultReference?> _privateVaultReferenceFromHeader({
+    required String vaultStoreId,
+    required File headerFile,
+  }) async {
+    try {
+      final decoded = jsonDecode(await headerFile.readAsString());
+      if (decoded is! Map) return null;
+      final header = Map<String, dynamic>.from(decoded);
+      final vaultId = header['vaultId']?.toString().trim() ?? '';
+      final id = vaultId.isEmpty ? vaultStoreId : vaultId;
+      final label = header['vaultName']?.toString().trim().isNotEmpty == true
+          ? header['vaultName'].toString().trim()
+          : id;
+      final stat = await headerFile.stat();
+      return VaultReference(
+        id: id,
+        label: label,
+        addedAtEpochMs: stat.changed.millisecondsSinceEpoch,
+        lastOpenedAtEpochMs: 0,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _initializeLocalVaultPath() async {
@@ -1597,7 +2125,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   void _prepareVaultDraft() {
     _draftVaultId = _newVaultId();
-    _vaultNameController.text = _draftVaultId;
+    _vaultNameController.text = _defaultVaultName;
+    _biometricEnabled = false;
+    _biometricPromptShown = false;
   }
 
   String _newVaultId() {
@@ -1648,111 +2178,222 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _importVaultFromLocal({required bool continueToUnlock}) async {
-    final approved = await _requestFileAccessConsent(
-      title: 'Allow vault import',
-      message:
-          'Nija needs temporary file access to let you choose an encrypted vault file from your device. '
-          'We only access the file you select.',
-    );
-    if (!approved) return;
     try {
       final imported = await _vaultPortability.importVaultFromLocal();
       if (imported == null) return;
-      await _vaultService.writeRawVaultFile(
-        filePath: imported.storageId,
-        rawContent: imported.content,
-      );
-      var credential = _passwordController.text.trim();
-      if (credential.isEmpty) {
-        final prompted = await _promptImportVaultCredential();
-        if (prompted == null || prompted.isEmpty) return;
-        credential = prompted;
-      }
-      var result = await _vaultService.importNijaFile(
-        filePath: imported.storageId,
-        unlockCredential: credential,
-      );
-      if (result.status == ImportStatus.failed) {
-        final prompted = await _promptImportVaultCredential(
-          title: 'Unlock imported vault',
-          message:
-              'The selected file did not unlock with the active vault password. Enter the password that was valid when this file was exported.',
-        );
-        if (prompted == null || prompted.isEmpty || prompted == credential) {
-          throw StateError(result.userSafeMessage);
-        }
-        credential = prompted;
-        result = await _vaultService.importNijaFile(
-          filePath: imported.storageId,
-          unlockCredential: credential,
-        );
-      }
-      if (result.status == ImportStatus.failed &&
-          result.userSafeMessage.contains('Confirm replace')) {
-        final replace = await _confirmReplaceNewerImportedVault(result);
-        if (replace) {
-          result = await _vaultService.importNijaFile(
-            filePath: imported.storageId,
-            unlockCredential: credential,
-            confirmReplace: true,
-          );
-        }
-      }
-      if (result.status == ImportStatus.failed) {
-        throw StateError(result.userSafeMessage);
-      }
-      if (result.status == ImportStatus.alreadyUpToDate ||
-          result.status == ImportStatus.incomingOlder) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
-        return;
-      }
-      if (result.status == ImportStatus.conflictCreated) {
-        final conflictVaultId = result.conflictVaultId;
-        if (conflictVaultId == null || conflictVaultId.isEmpty) {
-          throw StateError('Conflict import did not return conflict vault id.');
-        }
-        await _reviewAndMergeVaultConflict(
-          conflictVaultId: conflictVaultId,
-          importedPassword: credential,
-        );
-        return;
-      }
-      final activeId = result.conflictVaultId ?? result.vaultId;
-      final importedLabel = result.status == ImportStatus.conflictCreated
-          ? 'Vault conflict copy'
-          : await _resolveVaultLabel(activeId);
-      await _resetBiometricForVault(activeId);
-      await _rememberVaultReference(activeId, label: importedLabel);
-      if (!mounted) return;
-      setState(() {
-        _vaultFilePath = activeId;
-        _activeVaultName = importedLabel;
-        if (continueToUnlock) {
-          _step = OnboardingStep.unlock;
-        }
-      });
-      await _refreshVaultSize();
-      await _refreshBiometricStateForActiveVault();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            result.userSafeMessage.trim().isEmpty
-                ? AppStrings.vaultImportedSuccess
-                : result.userSafeMessage,
-          ),
-        ),
+      await _importVaultFile(
+        imported: imported,
+        continueToUnlock: continueToUnlock,
       );
     } catch (error, stackTrace) {
+      if (_isFilePickerCancellation(error)) return;
       _logOperationError('importVaultFromLocal', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(AppStrings.vaultImportFailed)));
     }
+  }
+
+  Future<void> _importVaultFromCloud({required bool continueToUnlock}) async {
+    try {
+      _startBusy('Checking cloud backups...');
+      final backups = await _vaultPortability.listCloudBackups();
+      _stopBusy();
+      if (!mounted) return;
+      if (backups.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No cloud vault backups found.')),
+        );
+        return;
+      }
+      final selected = await showModalBottomSheet<CloudVaultBackupFile>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 8,
+            ),
+            children: [
+              const ListTile(
+                title: Text(
+                  'Select cloud vault',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              ...backups.map((backup) {
+                return ListTile(
+                  leading: const Icon(Icons.cloud_done_outlined),
+                  title: Text(_cloudBackupLabel(backup)),
+                  subtitle: Text(_cloudBackupSubtitle(backup)),
+                  onTap: () => Navigator.of(context).pop(backup),
+                );
+              }),
+            ],
+          ),
+        ),
+      );
+      if (selected == null || !mounted) return;
+      final importedPath = await _localPathForCloudBackup(selected.storageId);
+      await _importVaultFile(
+        imported: ImportedVaultFile(
+          storageId: importedPath,
+          label: _cloudBackupLabel(selected),
+          content: selected.content,
+        ),
+        continueToUnlock: continueToUnlock,
+      );
+    } catch (error, stackTrace) {
+      _stopBusy();
+      _logOperationError('importVaultFromCloud', error, stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to import cloud vault. ${_errorHint(error)}'),
+        ),
+      );
+    }
+  }
+
+  String _cloudBackupLabel(CloudVaultBackupFile backup) {
+    final label = backup.label.trim();
+    if (label.isNotEmpty) {
+      final withoutExtension = label.toLowerCase().endsWith('.nija')
+          ? label.substring(0, label.length - 5)
+          : label;
+      return withoutExtension
+          .replaceAll(RegExp(r'^backup_\d{8}_\d{4}_'), '')
+          .replaceAll(RegExp(r'[_-]+'), ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+    }
+    return 'Cloud vault backup';
+  }
+
+  String _cloudBackupSubtitle(CloudVaultBackupFile backup) {
+    final label = backup.label.trim();
+    if (label.isEmpty) return 'Google Drive backup';
+    return label.toLowerCase().endsWith('.nija') ? label : '$label.nija';
+  }
+
+  Future<void> _importVaultFile({
+    required ImportedVaultFile imported,
+    required bool continueToUnlock,
+  }) async {
+    await _vaultService.writeRawVaultFile(
+      filePath: imported.storageId,
+      rawContent: imported.content,
+    );
+    final selectedVaultLabel = _humanImportLabel(imported);
+    var credential = _passwordController.text.trim();
+    if (credential.isEmpty) {
+      final prompted = await _promptImportVaultCredential(
+        message: 'Selected vault: $selectedVaultLabel',
+      );
+      if (prompted == null || prompted.isEmpty) return;
+      credential = prompted;
+    }
+    var result = await _vaultService.importNijaFile(
+      filePath: imported.storageId,
+      unlockCredential: credential,
+    );
+    if (result.status == ImportStatus.failed) {
+      final prompted = await _promptImportVaultCredential(
+        title: 'Unlock imported vault',
+        message:
+            'Selected vault: $selectedVaultLabel\n\nThe selected file did not unlock with the active vault password. Enter the password that was valid when this file was exported.',
+      );
+      if (prompted == null || prompted.isEmpty || prompted == credential) {
+        throw StateError(result.userSafeMessage);
+      }
+      credential = prompted;
+      result = await _vaultService.importNijaFile(
+        filePath: imported.storageId,
+        unlockCredential: credential,
+      );
+    }
+    if (result.status == ImportStatus.failed &&
+        result.userSafeMessage.contains('Confirm replace')) {
+      final replace = await _confirmReplaceNewerImportedVault(result);
+      if (replace) {
+        result = await _vaultService.importNijaFile(
+          filePath: imported.storageId,
+          unlockCredential: credential,
+          confirmReplace: true,
+        );
+      }
+    }
+    if (result.status == ImportStatus.failed) {
+      throw StateError(result.userSafeMessage);
+    }
+    if (result.status == ImportStatus.alreadyUpToDate ||
+        result.status == ImportStatus.incomingOlder) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
+      return;
+    }
+    if (result.status == ImportStatus.conflictCreated) {
+      final conflictVaultId = result.conflictVaultId;
+      if (conflictVaultId == null || conflictVaultId.isEmpty) {
+        throw StateError('Conflict import did not return conflict vault id.');
+      }
+      await _reviewAndMergeVaultConflict(
+        conflictVaultId: conflictVaultId,
+        importedPassword: credential,
+      );
+      return;
+    }
+    final activeId = result.conflictVaultId ?? result.vaultId;
+    final resolvedLabel = await _resolveVaultLabel(activeId);
+    final importedLabel = result.status == ImportStatus.conflictCreated
+        ? 'Vault conflict copy'
+        : resolvedLabel == activeId
+        ? selectedVaultLabel
+        : resolvedLabel;
+    await _resetBiometricForVault(activeId);
+    await _rememberVaultReference(activeId, label: importedLabel);
+    if (!mounted) return;
+    setState(() {
+      _vaultFilePath = activeId;
+      _activeVaultName = importedLabel;
+      if (continueToUnlock) {
+        _step = OnboardingStep.unlock;
+      }
+    });
+    await _refreshVaultSize();
+    await _refreshBiometricStateForActiveVault();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result.userSafeMessage.trim().isEmpty
+              ? AppStrings.vaultImportedSuccess
+              : result.userSafeMessage,
+        ),
+      ),
+    );
+  }
+
+  String _humanImportLabel(ImportedVaultFile imported) {
+    final label = imported.label.trim();
+    if (label.isNotEmpty) return label;
+    final storageName = _displayNameForVault(imported.storageId);
+    final withoutExtension = storageName.toLowerCase().endsWith('.nija')
+        ? storageName.substring(0, storageName.length - 5)
+        : storageName;
+    final humanized = withoutExtension
+        .replaceAll(RegExp(r'[_-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return humanized.isEmpty ? 'Imported vault' : humanized;
+  }
+
+  bool _isFilePickerCancellation(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('cancel') || text.contains('abort');
   }
 
   Future<void> _reviewAndMergeVaultConflict({
@@ -1868,7 +2509,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (!approved) return;
     try {
       final exportName = await _promptExportFileName(
-        initialName: _displayNameForVault(_vaultFilePath),
+        initialName: _defaultVaultExportName(),
       );
       if (exportName == null) return;
       await _waitForDialogTeardown();
@@ -1939,9 +2580,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       final now = DateTime.now();
       final stamp =
           '${now.year.toString().padLeft(4, '0')}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
-      final baseName = _displayNameForVault(
-        _vaultFilePath,
-      ).replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final baseName = _defaultVaultExportName().replaceAll(
+        RegExp(r'[^a-zA-Z0-9._-]'),
+        '_',
+      );
       final suggestedName = 'backup_${stamp}_$baseName';
       _updateBusyStep('Checking cloud backup status...', 0.30);
       final existingBackup = await _vaultPortability.readCloudBackup(
@@ -2252,6 +2894,21 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
   }
 
+  String _defaultVaultExportName() {
+    final visibleName = _activeVaultName.trim().isNotEmpty
+        ? _activeVaultName.trim()
+        : _displayNameForVault(_vaultFilePath);
+    final withoutExtension = visibleName.toLowerCase().endsWith('.nija')
+        ? visibleName.substring(0, visibleName.length - 5)
+        : visibleName;
+    final safeName = withoutExtension
+        .replaceAll(RegExp(r'[^a-zA-Z0-9._ -]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final baseName = safeName.isEmpty ? 'vault' : safeName;
+    return '$baseName.nija';
+  }
+
   Future<void> _waitForDialogTeardown() async {
     await Future<void>.delayed(Duration.zero);
     await WidgetsBinding.instance.endOfFrame;
@@ -2346,16 +3003,21 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _resetBiometricForVault(String vaultId) async {
-    await _biometricCredentialStore.removeMasterPassword(vaultId: vaultId);
-    await _biometricEnrollmentStore.setEnrolledForVault(
-      vaultId: vaultId,
-      enrolled: false,
-    );
+    try {
+      await _biometricCredentialStore.removeMasterPassword(vaultId: vaultId);
+      await _biometricEnrollmentStore.setEnrolledForVault(
+        vaultId: vaultId,
+        enrolled: false,
+      );
+    } catch (_) {
+      // Biometric cleanup should not block vault creation, import, or unlock.
+    }
     if (!mounted || vaultId != _vaultFilePath) return;
     setState(() => _biometricEnabled = false);
   }
 
   Future<void> _enableBiometricForCurrentVault() async {
+    final vaultId = _vaultFilePath;
     final canUse = await _biometricAuthService.canUseBiometrics();
     if (!canUse) {
       if (!mounted) return;
@@ -2367,7 +3029,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return;
     }
     final authenticated = await _biometricAuthService.authenticateForUnlock();
-    if (!authenticated) return;
+    if (!authenticated || !mounted || _vaultFilePath != vaultId) return;
     final password = _passwordController.text.trim();
     if (password.isEmpty) {
       if (!mounted) return;
@@ -2381,14 +3043,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return;
     }
     await _biometricCredentialStore.saveMasterPassword(
-      vaultId: _vaultFilePath,
+      vaultId: vaultId,
       password: password,
     );
     await _biometricEnrollmentStore.setEnrolledForVault(
-      vaultId: _vaultFilePath,
+      vaultId: vaultId,
       enrolled: true,
     );
-    if (!mounted) return;
+    if (!mounted || _vaultFilePath != vaultId) return;
     setState(() => _biometricEnabled = true);
     ScaffoldMessenger.of(
       context,
@@ -2396,14 +3058,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _disableBiometricForCurrentVault() async {
-    await _biometricCredentialStore.removeMasterPassword(
-      vaultId: _vaultFilePath,
-    );
+    final vaultId = _vaultFilePath;
+    await _biometricCredentialStore.removeMasterPassword(vaultId: vaultId);
     await _biometricEnrollmentStore.setEnrolledForVault(
-      vaultId: _vaultFilePath,
+      vaultId: vaultId,
       enrolled: false,
     );
-    if (!mounted) return;
+    if (!mounted || _vaultFilePath != vaultId) return;
     setState(() => _biometricEnabled = false);
     ScaffoldMessenger.of(
       context,
@@ -2411,23 +3072,22 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _refreshBiometricStateForActiveVault() async {
+    final vaultId = _vaultFilePath;
     final hasSavedCredential =
         (await _biometricCredentialStore.readMasterPassword(
-          vaultId: _vaultFilePath,
+          vaultId: vaultId,
         ))?.isNotEmpty ==
         true;
-    var enrolled = await _biometricEnrollmentStore.isEnrolledForVault(
-      _vaultFilePath,
-    );
+    var enrolled = await _biometricEnrollmentStore.isEnrolledForVault(vaultId);
     if (!enrolled && hasSavedCredential) {
       await _biometricEnrollmentStore.setEnrolledForVault(
-        vaultId: _vaultFilePath,
+        vaultId: vaultId,
         enrolled: true,
       );
       enrolled = true;
     }
     final canUseBiometrics = await _biometricAuthService.canUseBiometrics();
-    if (!mounted) return;
+    if (!mounted || _vaultFilePath != vaultId) return;
     setState(() {
       _biometricEnabled = enrolled && hasSavedCredential && canUseBiometrics;
     });
@@ -2553,17 +3213,19 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
       if (action != 'submit') return false;
 
+      final vaultId = _vaultFilePath;
       _startBusy('Resetting master password...');
       try {
         await _vaultService
             .resetMasterPasswordAfterRecovery(
-              filePath: _vaultFilePath,
+              filePath: vaultId,
               recoveryPhrase: recoveryPhrase,
               newPassword: newPasswordController.text.trim(),
               onProgress: _updateBusy,
             )
             .timeout(_vaultOpTimeout);
         _passwordController.text = newPasswordController.text.trim();
+        await _resetBiometricForVault(vaultId);
         return true;
       } on TimeoutException {
         if (!mounted) return false;
@@ -2601,11 +3263,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     required String newPassword,
   }) async {
     if (_isBusy) return;
+    final vaultId = _vaultFilePath;
     _startBusy('Rotating master password...');
     try {
       await _vaultService
           .rotateMasterPassword(
-            filePath: _vaultFilePath,
+            filePath: vaultId,
             currentPassword: currentPassword,
             newPassword: newPassword,
             onProgress: _updateBusy,
@@ -2613,6 +3276,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           .timeout(_vaultOpTimeout);
       if (!mounted) return;
       _passwordController.text = newPassword;
+      await _resetBiometricForVault(vaultId);
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Master password updated.')));
@@ -2744,13 +3409,11 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   bool get _canCreateVault {
-    final vaultName = widget.vaultNameController.text.trim();
     final password = widget.passwordController.text;
     final confirm = _confirmPasswordController.text;
-    final hasVaultName = vaultName.isNotEmpty;
     final hasPassword = password.trim().isNotEmpty;
     final hasConfirm = confirm.trim().isNotEmpty;
-    return hasVaultName && hasPassword && hasConfirm && password == confirm;
+    return hasPassword && hasConfirm && password == confirm;
   }
 
   @override
@@ -2825,13 +3488,14 @@ class _SetupScreenState extends State<SetupScreen> {
               ),
             ),
             TextField(
+              key: const ValueKey('setup-vault-name-field'),
               controller: widget.vaultNameController,
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
-                labelText: AppStrings.vaultName,
+                labelText: '${AppStrings.vaultName} (optional)',
                 helperText: widget.defaultVaultId.isEmpty
                     ? null
-                    : 'Default: ${widget.defaultVaultId}',
+                    : 'Used to identify this vault later',
               ),
             ),
             const SizedBox(height: 10),
@@ -3330,6 +3994,810 @@ class _EncryptedSecretViewerScreenState
       ),
     );
   }
+}
+
+class _EncryptedImportEntry {
+  const _EncryptedImportEntry({
+    required this.index,
+    required this.kind,
+    required this.bundleEntry,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final int index;
+  final String kind;
+  final Map<String, dynamic> bundleEntry;
+  final String title;
+  final String subtitle;
+}
+
+class _PreparedVaultImport {
+  _PreparedVaultImport({
+    List<Map<String, dynamic>>? items,
+    List<Map<String, dynamic>>? notes,
+  }) : items = items ?? <Map<String, dynamic>>[],
+       notes = notes ?? <Map<String, dynamic>>[];
+
+  final List<Map<String, dynamic>> items;
+  final List<Map<String, dynamic>> notes;
+
+  bool get isEmpty => items.isEmpty && notes.isEmpty;
+}
+
+class _EncryptedImportBundleScreen extends StatefulWidget {
+  const _EncryptedImportBundleScreen({
+    required this.entries,
+    required this.onImportEntry,
+    required this.onImportAll,
+  });
+
+  final List<_EncryptedImportEntry> entries;
+  final Future<bool> Function(_EncryptedImportEntry entry) onImportEntry;
+  final Future<bool> Function(List<_EncryptedImportEntry> entries) onImportAll;
+
+  @override
+  State<_EncryptedImportBundleScreen> createState() =>
+      _EncryptedImportBundleScreenState();
+}
+
+class _EncryptedImportBundleScreenState
+    extends State<_EncryptedImportBundleScreen> {
+  final Set<int> _importedIndexes = <int>{};
+  bool _importingAll = false;
+
+  List<_EncryptedImportEntry> get _remainingEntries => widget.entries
+      .where((entry) => !_importedIndexes.contains(entry.index))
+      .toList();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Encrypted file'),
+        actions: [
+          TextButton(
+            onPressed: _remainingEntries.isEmpty || _importingAll
+                ? null
+                : _importAll,
+            child: _importingAll
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Import all'),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          itemCount: widget.entries.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final entry = widget.entries[index];
+            final imported = _importedIndexes.contains(entry.index);
+            return Material(
+              color: colorScheme.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: colorScheme.outlineVariant),
+              ),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: _colorForImportEntry(
+                    entry,
+                  ).withValues(alpha: 0.16),
+                  child: Icon(
+                    _iconForImportEntry(entry),
+                    color: _colorForImportEntry(entry),
+                  ),
+                ),
+                title: Text(
+                  entry.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  imported ? 'Imported' : entry.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: imported
+                    ? const Icon(Icons.check_circle, color: Color(0xFF22C55E))
+                    : const Icon(Icons.chevron_right),
+                onTap: () => _openEntry(entry, imported: imported),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openEntry(
+    _EncryptedImportEntry entry, {
+    required bool imported,
+  }) async {
+    final didImport = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => _EncryptedImportEntryPreviewScreen(
+          entry: entry,
+          alreadyImported: imported,
+          onImport: () => widget.onImportEntry(entry),
+        ),
+      ),
+    );
+    if (didImport == true && mounted) {
+      setState(() => _importedIndexes.add(entry.index));
+    }
+  }
+
+  Future<void> _importAll() async {
+    setState(() => _importingAll = true);
+    final remaining = _remainingEntries;
+    final ok = await widget.onImportAll(remaining);
+    if (!mounted) return;
+    setState(() {
+      _importingAll = false;
+      if (ok) {
+        _importedIndexes.addAll(remaining.map((entry) => entry.index));
+      }
+    });
+    if (ok) {
+      Navigator.of(context).pop(true);
+    }
+  }
+}
+
+class _EncryptedImportEntryPreviewScreen extends StatefulWidget {
+  const _EncryptedImportEntryPreviewScreen({
+    required this.entry,
+    required this.alreadyImported,
+    required this.onImport,
+  });
+
+  final _EncryptedImportEntry entry;
+  final bool alreadyImported;
+  final Future<bool> Function() onImport;
+
+  @override
+  State<_EncryptedImportEntryPreviewScreen> createState() =>
+      _EncryptedImportEntryPreviewScreenState();
+}
+
+class _EncryptedImportEntryPreviewScreenState
+    extends State<_EncryptedImportEntryPreviewScreen> {
+  late bool _imported;
+  bool _importing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _imported = widget.alreadyImported;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = widget.entry;
+    return Scaffold(
+      appBar: AppBar(title: Text(_previewTitle(entry))),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(child: _buildPreview(context, entry)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _imported || _importing ? null : _importEntry,
+                  icon: _importing
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          _imported
+                              ? Icons.check_circle_outline
+                              : Icons.file_download_outlined,
+                        ),
+                  label: Text(_imported ? 'Imported' : 'Import item'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreview(BuildContext context, _EncryptedImportEntry entry) {
+    if (entry.kind == 'note') return _buildNotePreview(entry);
+    if (entry.kind == 'document') return _buildDocumentPreview(entry);
+    return _buildVaultItemPreview(context, entry);
+  }
+
+  Widget _buildVaultItemPreview(
+    BuildContext context,
+    _EncryptedImportEntry entry,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final rawEntry = entry.bundleEntry['entry'];
+    final item = rawEntry is Map
+        ? Map<String, dynamic>.from(rawEntry)
+        : const <String, dynamic>{};
+    final fields = (item['fields'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((field) => Map<String, dynamic>.from(field))
+        .toList();
+    if (fields.isEmpty) {
+      fields.addAll(_plainTextPreviewFields(entry.bundleEntry['plainText']));
+    }
+    final type = item['type']?.toString().trim();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      children: [
+        _ImportPreviewHeader(
+          icon: _iconForImportEntry(entry),
+          color: _colorForImportEntry(entry),
+          title: entry.title,
+          subtitle: entry.subtitle,
+        ),
+        const SizedBox(height: 16),
+        if (type != null && type.isNotEmpty)
+          _ImportPreviewRow(label: 'Type', value: type),
+        if (fields.isEmpty)
+          Text(
+            'No fields to preview.',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          )
+        else
+          ...fields.map((field) {
+            final label = field['label']?.toString() ?? 'Field';
+            final value = field['value']?.toString() ?? '';
+            return _ImportPreviewRow(label: label, value: value);
+          }),
+      ],
+    );
+  }
+
+  Widget _buildNotePreview(_EncryptedImportEntry entry) {
+    final body = _notePreviewBody(entry);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      children: [
+        _ImportPreviewHeader(
+          icon: Icons.sticky_note_2_outlined,
+          color: const Color(0xFF6366F1),
+          title: entry.title,
+          subtitle: 'Secure Note',
+        ),
+        const SizedBox(height: 16),
+        _ImportPreviewRow(label: 'Content', value: body.isEmpty ? '-' : body),
+      ],
+    );
+  }
+
+  Widget _buildDocumentPreview(_EncryptedImportEntry entry) {
+    return _DocumentImportPreview(entry: entry);
+  }
+
+  String _previewTitle(_EncryptedImportEntry entry) {
+    if (entry.kind == 'note') return 'Note';
+    if (entry.kind == 'document') return 'Document';
+    return entry.subtitle.isEmpty ? 'Vault Item' : entry.subtitle;
+  }
+
+  String _notePreviewBody(_EncryptedImportEntry entry) {
+    final rawEntry = entry.bundleEntry['entry'];
+    if (rawEntry is Map) {
+      final delta = rawEntry['delta'];
+      if (delta is List) {
+        return delta
+            .whereType<Map>()
+            .map((op) => op['insert']?.toString() ?? '')
+            .join()
+            .trim();
+      }
+      final preview = rawEntry['preview']?.toString().trim() ?? '';
+      if (preview.isNotEmpty) return preview;
+    }
+    final plainText = entry.bundleEntry['plainText']?.toString() ?? '';
+    if (_looksLikeEncodedPreviewData(plainText)) return '';
+    return plainText.split('\n').skip(1).join('\n').trim();
+  }
+
+  Future<void> _importEntry() async {
+    setState(() => _importing = true);
+    final ok = await widget.onImport();
+    if (!mounted) return;
+    setState(() {
+      _importing = false;
+      _imported = ok;
+    });
+    if (ok) {
+      Navigator.of(context).pop(true);
+    }
+  }
+}
+
+class _DocumentImportPreview extends StatefulWidget {
+  const _DocumentImportPreview({required this.entry});
+
+  final _EncryptedImportEntry entry;
+
+  @override
+  State<_DocumentImportPreview> createState() => _DocumentImportPreviewState();
+}
+
+class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
+  static const MethodChannel _documentOpenChannel = MethodChannel(
+    'nija/document_open',
+  );
+
+  bool _openedExternalPreview = false;
+
+  String get _fileName =>
+      widget.entry.bundleEntry['fileName']?.toString().trim().isNotEmpty == true
+      ? widget.entry.bundleEntry['fileName'].toString().trim()
+      : widget.entry.title;
+
+  String get _extension {
+    final extension = widget.entry.bundleEntry['extension']?.toString().trim();
+    if (extension != null && extension.isNotEmpty) {
+      return extension.toUpperCase();
+    }
+    final dot = _fileName.lastIndexOf('.');
+    if (dot == -1 || dot == _fileName.length - 1) return 'FILE';
+    return _fileName.substring(dot + 1).toUpperCase();
+  }
+
+  Uint8List? get _bytes {
+    final rawBytes = widget.entry.bundleEntry['bytesBase64']?.toString();
+    if (rawBytes == null || rawBytes.isEmpty) return null;
+    try {
+      return Uint8List.fromList(base64Decode(rawBytes));
+    } on FormatException {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = _bytes;
+    final size = int.tryParse(
+      widget.entry.bundleEntry['sizeBytes']?.toString() ?? '',
+    );
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+          child: Column(
+            children: [
+              _DocumentImportHeader(
+                title: widget.entry.title,
+                fileName: _fileName,
+                extension: _extension,
+                size: bytes == null
+                    ? size == null
+                          ? '-'
+                          : _formatDocumentByteCount(size)
+                    : _formatDocumentByteCount(bytes.length),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: _buildPreview(context, bytes),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPreview(BuildContext context, Uint8List? bytes) {
+    if (bytes == null) {
+      return const _DocumentPreviewMessage(
+        icon: Icons.error_outline,
+        title: 'Unable to preview document',
+        subtitle: 'The encrypted file does not contain readable document data.',
+      );
+    }
+    if (bytes.isEmpty) {
+      return const _DocumentPreviewMessage(
+        icon: Icons.insert_drive_file_outlined,
+        title: 'Empty document',
+        subtitle: 'There is no content to preview.',
+      );
+    }
+    if (_isImageExtension(_extension)) {
+      return InteractiveViewer(
+        minScale: 0.5,
+        maxScale: 4,
+        child: Center(
+          child: Image.memory(
+            bytes,
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stackTrace) {
+              _openExternalPreviewOnce(bytes);
+              return const _DocumentPreviewMessage(
+                icon: Icons.broken_image_outlined,
+                title: 'Image preview failed',
+                subtitle: 'Opening this document in another app.',
+              );
+            },
+          ),
+        ),
+      );
+    }
+    if (_isTextExtension(_extension)) {
+      final text = utf8.decode(bytes, allowMalformed: true);
+      return Scrollbar(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(14),
+          child: SelectableText(
+            text,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+          ),
+        ),
+      );
+    }
+    _openExternalPreviewOnce(bytes);
+    return _DocumentPreviewMessage(
+      icon: _extension == 'PDF'
+          ? Icons.picture_as_pdf_outlined
+          : Icons.insert_drive_file_outlined,
+      title: 'Opening $_extension document',
+      subtitle: 'Choose an app that can preview this file.',
+    );
+  }
+
+  void _openExternalPreviewOnce(Uint8List bytes) {
+    if (_openedExternalPreview) return;
+    _openedExternalPreview = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _openDocument(bytes);
+    });
+  }
+
+  Future<void> _openDocument(Uint8List bytes) async {
+    final mimeType = _mimeTypeForExtension(_extension);
+    try {
+      await _documentOpenChannel.invokeMethod<bool>('openDocument', {
+        'fileName': _fileName,
+        'mimeType': mimeType,
+        'bytes': bytes,
+      });
+    } on MissingPluginException {
+      await _shareDocumentFallback(bytes, mimeType);
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message ?? 'No app can open this file.')),
+      );
+      await _shareDocumentFallback(bytes, mimeType);
+    }
+  }
+
+  Future<void> _shareDocumentFallback(Uint8List bytes, String mimeType) async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile.fromData(bytes, name: _fileName, mimeType: mimeType)],
+      ),
+    );
+  }
+}
+
+class _DocumentImportHeader extends StatelessWidget {
+  const _DocumentImportHeader({
+    required this.title,
+    required this.fileName,
+    required this.extension,
+    required this.size,
+  });
+
+  final String title;
+  final String fileName;
+  final String extension;
+  final String size;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFB7185).withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(
+            Icons.insert_drive_file_outlined,
+            color: Color(0xFFFB7185),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '$extension · $size · $fileName',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DocumentPreviewMessage extends StatelessWidget {
+  const _DocumentPreviewMessage({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: colorScheme.onSurfaceVariant, size: 42),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ImportPreviewHeader extends StatelessWidget {
+  const _ImportPreviewHeader({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(icon, color: color, size: 30),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: Theme.of(
+            context,
+          ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+class _ImportPreviewRow extends StatelessWidget {
+  const _ImportPreviewRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(color: colorScheme.onSurface)),
+        ],
+      ),
+    );
+  }
+}
+
+IconData _iconForImportEntry(_EncryptedImportEntry entry) {
+  if (entry.kind == 'note') return Icons.sticky_note_2_outlined;
+  if (entry.kind == 'document') return Icons.folder_outlined;
+  return Icons.lock_outline;
+}
+
+Color _colorForImportEntry(_EncryptedImportEntry entry) {
+  if (entry.kind == 'note') return const Color(0xFF6366F1);
+  if (entry.kind == 'document') return const Color(0xFFFB923C);
+  return const Color(0xFF22C55E);
+}
+
+List<Map<String, dynamic>> _plainTextPreviewFields(Object? rawPlainText) {
+  final plainText = rawPlainText?.toString() ?? '';
+  if (_looksLikeEncodedPreviewData(plainText)) {
+    return const <Map<String, dynamic>>[];
+  }
+  final fields = <Map<String, dynamic>>[];
+  final lines = plainText
+      .split('\n')
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList();
+  for (final line in lines.skip(1)) {
+    if (line.startsWith('Type: ')) continue;
+    final separator = line.indexOf(':');
+    if (separator <= 0 || separator >= line.length - 1) continue;
+    final label = line.substring(0, separator).trim();
+    final value = line.substring(separator + 1).trim();
+    if (label.isEmpty || value.isEmpty) continue;
+    fields.add(<String, dynamic>{'label': label, 'value': value});
+  }
+  return fields;
+}
+
+bool _looksLikeEncodedPreviewData(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return false;
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return true;
+  final lower = trimmed.toLowerCase();
+  return lower.contains('ciphertext') ||
+      lower.contains('schemaversion') ||
+      lower.contains('vault_bundle') ||
+      lower.contains('bytesbase64');
+}
+
+bool _isImageExtension(String extension) {
+  return const <String>{
+    'PNG',
+    'JPG',
+    'JPEG',
+    'GIF',
+    'WEBP',
+    'BMP',
+  }.contains(extension.toUpperCase());
+}
+
+bool _isTextExtension(String extension) {
+  return const <String>{
+    'TXT',
+    'MD',
+    'JSON',
+    'CSV',
+    'LOG',
+    'XML',
+    'YAML',
+    'YML',
+  }.contains(extension.toUpperCase());
+}
+
+String _mimeTypeForExtension(String extension) {
+  switch (extension.toUpperCase()) {
+    case 'PNG':
+      return 'image/png';
+    case 'JPG':
+    case 'JPEG':
+      return 'image/jpeg';
+    case 'GIF':
+      return 'image/gif';
+    case 'WEBP':
+      return 'image/webp';
+    case 'PDF':
+      return 'application/pdf';
+    case 'JSON':
+      return 'application/json';
+    case 'CSV':
+      return 'text/csv';
+    case 'TXT':
+    case 'MD':
+    case 'LOG':
+    case 'YAML':
+    case 'YML':
+      return 'text/plain';
+    case 'XML':
+      return 'application/xml';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+String _formatDocumentByteCount(int bytes) {
+  if (bytes <= 0) return '0 B';
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
+  final mb = kb / 1024;
+  return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
 }
 
 class _VaultMergeScreen extends StatefulWidget {

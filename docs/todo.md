@@ -103,6 +103,21 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 
 ## 10) Reported Bug Backlog (2026-05-21)
 
+- [x] Fix `Add item` list styling in dark mode so the list uses the same themed elements as the rest of the app.
+- [x] Refresh biometric settings when the active vault changes.
+  - Repro: create a new vault; unlock screen can still show the old vault master-key and biometric state.
+- [x] Hide password values from list preview for single-field custom templates.
+- [x] Prevent vault auto-lock when the app backgrounds during an in-progress operation.
+- [x] Align dashboard filter menu with the all-items filter menu.
+  - Dashboard should only show categories that are present, matching all-items behavior.
+- [x] Show the current vault name in the app UI.
+- [x] Ensure auto-lock works after the app is minimized or left unused for the configured duration.
+- [x] Implement auto-lock configuration with a seconds-based slider.
+- [x] Show numbers in notes preview mode.
+- [x] Add support for identity items to attach ID photos.
+  - Support a dynamic number of photos per identity.
+- [x] Reset biometric password state for the vault when the master password is updated.
+- [x] Show password strength when updating the master password.
 - [x] Biometrics keeps prompting to enable even after biometrics has already been enabled.
 - [x] Rework Notes UI: ensure editor scrolls while typing, prevent keyboard from hiding writable area, and make Notes menu items collapsible.
 - [x] Improve pin interactions: long-press to show pin/delete actions, support adding notes to pinned items, and show delete action near edit when opening notes or secrets.

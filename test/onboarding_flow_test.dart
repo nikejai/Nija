@@ -10,8 +10,8 @@ void main() {
     await tester.ensureVisible(find.text('Create vault'));
     await tester.tap(find.text('Create vault'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(0), 'StrongPass123');
     await tester.enterText(find.byType(TextField).at(1), 'StrongPass123');
+    await tester.enterText(find.byType(TextField).at(2), 'StrongPass123');
     await tester.pumpAndSettle();
     final createEncryptedVaultButton = find.byKey(
       const ValueKey('create-encrypted-vault-button'),
@@ -56,6 +56,61 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Choose Guardian'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const ValueKey('setup-vault-name-field')),
+          )
+          .controller
+          ?.text,
+      'Nija Vault',
+    );
+  });
+
+  testWidgets('vault name is optional during onboarding setup', (tester) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnboardingFlow(
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          vaultService: DefaultVaultService(
+            storageAdapter: InMemoryVaultStorageAdapter(),
+            cryptoAdapter: PrototypeCryptoAdapter(),
+          ),
+          vaultFilePath: 'test.nija',
+        ),
+      ),
+    );
+
+    await tester.ensureVisible(find.text('Create vault'));
+    await tester.tap(find.text('Create vault'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('setup-vault-name-field')),
+      '',
+    );
+    await tester.enterText(find.byType(TextField).at(1), 'StrongPass123');
+    await tester.enterText(find.byType(TextField).at(2), 'StrongPass123');
+    await tester.pumpAndSettle();
+
+    final createEncryptedVaultFinder = find.byKey(
+      const ValueKey('create-encrypted-vault-button'),
+    );
+    await tester.scrollUntilVisible(
+      createEncryptedVaultFinder,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final createEncryptedVaultButton = tester.widget<ElevatedButton>(
+      createEncryptedVaultFinder,
+    );
+    expect(createEncryptedVaultButton.onPressed, isNotNull);
   });
 
   testWidgets('create encrypted vault moves setup to recovery', (tester) async {
@@ -84,8 +139,8 @@ void main() {
 
     expect(find.text('Choose Guardian'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField).at(0), 'StrongPass123');
     await tester.enterText(find.byType(TextField).at(1), 'StrongPass123');
+    await tester.enterText(find.byType(TextField).at(2), 'StrongPass123');
     await tester.pumpAndSettle();
 
     final createEncryptedVaultButton = find.byKey(

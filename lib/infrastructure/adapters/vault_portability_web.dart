@@ -31,7 +31,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
         completer.complete(
           ImportedVaultFile(
             storageId: 'web_imported_${timestamp}_${file.name}',
-            label: file.name,
+            label: _importLabel(file.name, content),
             content: content,
           ),
         );
@@ -41,6 +41,26 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
 
     input.click();
     return completer.future;
+  }
+
+  String _importLabel(String fileName, String content) {
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is Map) {
+        final vaultName = decoded['vaultName']?.toString().trim() ?? '';
+        if (vaultName.isNotEmpty) return vaultName;
+      }
+    } catch (_) {
+      // Fall back to the selected file name.
+    }
+    final withoutExtension = fileName.toLowerCase().endsWith('.nija')
+        ? fileName.substring(0, fileName.length - 5)
+        : fileName;
+    final humanized = withoutExtension
+        .replaceAll(RegExp(r'[_-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return humanized.isEmpty ? fileName : humanized;
   }
 
   @override
@@ -76,6 +96,11 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       content: content,
     );
     return result != null && result.isNotEmpty;
+  }
+
+  @override
+  Future<List<CloudVaultBackupFile>> listCloudBackups() async {
+    return const <CloudVaultBackupFile>[];
   }
 
   @override
