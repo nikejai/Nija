@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -180,6 +183,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
   final Map<String, TextEditingController> _controllers =
       <String, TextEditingController>{};
   final Set<String> _revealedSensitiveFields = <String>{};
+  final List<Map<String, dynamic>> _idPhotos = <Map<String, dynamic>>[];
   late final TextEditingController _tagsController;
 
   @override
@@ -297,6 +301,17 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
         .where((entry) => entry.isNotEmpty)
         .toList();
     _tagsController.text = tags.join(', ');
+    _idPhotos
+      ..clear()
+      ..addAll(
+        (item['idPhotos'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map>()
+            .map((entry) => Map<String, dynamic>.from(entry))
+            .where((entry) {
+              final bytes = entry['bytesBase64']?.toString() ?? '';
+              return bytes.isNotEmpty;
+            }),
+      );
   }
 
   bool get _canSave {
@@ -492,6 +507,10 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                       onChanged: (_) => setState(() {}),
                       decoration: const InputDecoration(hintText: 'Add tags'),
                     ),
+                    if (_supportsIdPhotos) ...[
+                      const SizedBox(height: 12),
+                      _buildIdPhotosSection(context),
+                    ],
                     const SizedBox(height: 14),
                     SizedBox(
                       width: double.infinity,
@@ -528,7 +547,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
 
     String subtitle = '';
     for (final field in _template.fields) {
-      if (field.label == 'Title') continue;
+      if (field.label == 'Title' || field.sensitive) continue;
       final value = _controllers[field.label]!.text.trim();
       if (value.isNotEmpty) {
         subtitle = value;
@@ -552,7 +571,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
         .where((entry) => entry.isNotEmpty)
         .toList();
 
-    Navigator.of(context).pop({
+    final item = {
       ...Map<String, dynamic>.from(widget.initialItem ?? const {}),
       'id':
           widget.initialItem?['id']?.toString() ??
@@ -564,7 +583,139 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       'pinned': widget.initialItem?['pinned'] == true,
       'tags': tags,
       'fields': fields,
-    });
+    };
+    if (_idPhotos.isNotEmpty) {
+      item['idPhotos'] = _idPhotos
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+    } else {
+      item.remove('idPhotos');
+    }
+    Navigator.of(context).pop(item);
+  }
+
+  bool get _supportsIdPhotos => _type.trim().toLowerCase() == 'identity';
+
+  Widget _buildIdPhotosSection(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'ID photos',
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                key: const ValueKey('identity-add-photo'),
+                onPressed: _pickIdPhoto,
+                icon: const Icon(Icons.add_photo_alternate_outlined),
+                label: const Text('Add photo'),
+              ),
+            ],
+          ),
+          if (_idPhotos.isEmpty)
+            Text(
+              'No photos attached.',
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
+            )
+          else
+            ..._idPhotos.asMap().entries.map((entry) {
+              final index = entry.key;
+              final photo = entry.value;
+              return Padding(
+                padding: EdgeInsets.only(top: index == 0 ? 4 : 8),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: _idPhotoPreview(photo, width: 44, height: 44),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        photo['name']?.toString() ?? 'ID photo ${index + 1}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: colorScheme.onSurface),
+                      ),
+                    ),
+                    IconButton(
+                      key: ValueKey('identity-remove-photo-$index'),
+                      onPressed: () =>
+                          setState(() => _idPhotos.removeAt(index)),
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Remove photo',
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _idPhotoPreview(
+    Map<String, dynamic> photo, {
+    required double width,
+    required double height,
+  }) {
+    try {
+      final bytes = base64Decode(photo['bytesBase64']?.toString() ?? '');
+      return Image.memory(
+        bytes,
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+      );
+    } catch (_) {
+      return Container(
+        width: width,
+        height: height,
+        color: Theme.of(context).colorScheme.surface,
+        child: const Icon(Icons.broken_image_outlined, size: 18),
+      );
+    }
+  }
+
+  Future<void> _pickIdPhoto() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null) return;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final photos = result.files
+        .where((file) => file.bytes != null && file.bytes!.isNotEmpty)
+        .map(
+          (file) => <String, dynamic>{
+            'id': '${now}_${file.name}_${_idPhotos.length}',
+            'name': file.name,
+            'sizeBytes': file.size,
+            'extension': file.extension,
+            'addedAt': now,
+            'bytesBase64': base64Encode(file.bytes!),
+          },
+        )
+        .toList();
+    if (photos.isEmpty) return;
+    setState(() => _idPhotos.addAll(photos));
   }
 }
 
@@ -630,9 +781,16 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
               separatorBuilder: (context, index) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final option = filtered[index];
+                final colorScheme = Theme.of(context).colorScheme;
                 return Material(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
+                  key: ValueKey(
+                    'new-item-category-${option.kind}-${option.type}',
+                  ),
+                  color: colorScheme.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: colorScheme.outlineVariant),
+                  ),
                   child: ListTile(
                     leading: Container(
                       width: 32,
@@ -643,9 +801,21 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                       ),
                       child: Icon(option.icon, color: option.color, size: 18),
                     ),
-                    title: Text(option.type),
-                    subtitle: Text(option.subtitle),
-                    trailing: const Icon(Icons.chevron_right),
+                    title: Text(
+                      option.type,
+                      style: TextStyle(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Text(
+                      option.subtitle,
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
+                    trailing: Icon(
+                      Icons.chevron_right,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                     onTap: () async {
                       if (option.kind == 'note' &&
                           widget.onCreateNote != null) {

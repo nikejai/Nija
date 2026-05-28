@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
@@ -21,20 +20,52 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
 
   @override
   Future<ImportedVaultFile?> importVaultFromLocal() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const <String>['nija', 'json', 'txt'],
-      withData: false,
-    );
-    final file = result?.files.isNotEmpty == true ? result!.files.first : null;
-    final path = file?.path;
-    if (path == null || path.isEmpty) return null;
-    final content = await File(path).readAsString();
-    return ImportedVaultFile(
-      storageId: path,
-      label: file!.name,
-      content: content,
-    );
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const <String>['nija', 'json', 'txt'],
+        withData: false,
+      );
+      final file = result?.files.isNotEmpty == true
+          ? result!.files.first
+          : null;
+      final path = file?.path;
+      if (path == null || path.isEmpty) return null;
+      final content = await File(path).readAsString();
+      return ImportedVaultFile(
+        storageId: path,
+        label: _importLabel(file!.name, content),
+        content: content,
+      );
+    } on PlatformException catch (error) {
+      if (_isPickerCancellation(error)) return null;
+      rethrow;
+    }
+  }
+
+  bool _isPickerCancellation(PlatformException error) {
+    final text = '${error.code} ${error.message ?? ''}'.toLowerCase();
+    return text.contains('cancel') || text.contains('abort');
+  }
+
+  String _importLabel(String fileName, String content) {
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is Map) {
+        final vaultName = decoded['vaultName']?.toString().trim() ?? '';
+        if (vaultName.isNotEmpty) return vaultName;
+      }
+    } catch (_) {
+      // Fall back to the selected file name.
+    }
+    final withoutExtension = fileName.toLowerCase().endsWith('.nija')
+        ? fileName.substring(0, fileName.length - 5)
+        : fileName;
+    final humanized = withoutExtension
+        .replaceAll(RegExp(r'[_-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return humanized.isEmpty ? fileName : humanized;
   }
 
   @override
@@ -121,6 +152,14 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     return null;
   }
 
+  @override
+  Future<List<CloudVaultBackupFile>> listCloudBackups() async {
+    if (Platform.isAndroid) {
+      return _listGoogleDriveBackups();
+    }
+    return const <CloudVaultBackupFile>[];
+  }
+
   Future<bool> _backupToGoogleDrive({
     required String vaultId,
     required String suggestedName,
@@ -150,7 +189,8 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
         if (existingId == null || existingId.isEmpty) return false;
         final meta = drive.File()
           ..name = suggestedName
-          ..modifiedTime = DateTime.now().toUtc();
+          ..modifiedTime = DateTime.now().toUtc()
+          ..appProperties = <String, String>{'nijaVaultId': vaultId};
         await driveApi.files.update(meta, existingId, uploadMedia: media);
         return true;
       }
@@ -212,6 +252,97 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     } finally {
       authedClient?.close();
     }
+  }
+
+  Future<List<CloudVaultBackupFile>> _listGoogleDriveBackups() async {
+    _GoogleAuthClient? authedClient;
+    try {
+      final googleSignIn = _googleSignInClient();
+      final account =
+          googleSignIn.currentUser ?? await googleSignIn.signInSilently();
+      final signedIn = account ?? await googleSignIn.signIn();
+      if (signedIn == null) return const <CloudVaultBackupFile>[];
+      final authHeaders = await signedIn.authHeaders;
+      authedClient = _GoogleAuthClient(authHeaders);
+      final driveApi = drive.DriveApi(authedClient);
+      final list = await driveApi.files.list(
+        q: 'trashed=false',
+        $fields: 'files(id,name,modifiedTime,appProperties,mimeType)',
+        spaces: 'drive',
+        pageSize: 100,
+      );
+      final files = list.files ?? const <drive.File>[];
+      final backups = <CloudVaultBackupFile>[];
+      for (final file in files) {
+        final id = file.id;
+        if (id == null || id.isEmpty) continue;
+        final appVaultId = file.appProperties?['nijaVaultId']?.trim() ?? '';
+        final name = file.name ?? '';
+        if (appVaultId.isEmpty && !_looksLikeVaultBackupName(name)) {
+          continue;
+        }
+        final media = await driveApi.files.get(
+          id,
+          downloadOptions: drive.DownloadOptions.fullMedia,
+        );
+        if (media is! drive.Media) continue;
+        final bytes = <int>[];
+        await for (final chunk in media.stream) {
+          bytes.addAll(chunk);
+        }
+        final content = utf8.decode(bytes);
+        if (!_looksLikeNijaVaultContent(content)) continue;
+        backups.add(
+          CloudVaultBackupFile(
+            storageId: 'gdrive_$id.nija',
+            label: _cloudBackupLabelFromContent(
+              fallbackName: name,
+              content: content,
+            ),
+            content: content,
+          ),
+        );
+      }
+      return backups;
+    } catch (error) {
+      debugPrint('[VaultPortability][GoogleDriveListBackups] $error');
+      return const <CloudVaultBackupFile>[];
+    } finally {
+      authedClient?.close();
+    }
+  }
+
+  bool _looksLikeVaultBackupName(String name) {
+    final normalized = name.toLowerCase();
+    return normalized.endsWith('.nija') || normalized.startsWith('backup_');
+  }
+
+  bool _looksLikeNijaVaultContent(String content) {
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is! Map) return false;
+      return decoded['format'] == 'Nija' &&
+          (decoded['vaultId']?.toString().trim().isNotEmpty ?? false) &&
+          (decoded['encryptedVaultKey']?.toString().trim().isNotEmpty ?? false);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  String _cloudBackupLabelFromContent({
+    required String fallbackName,
+    required String content,
+  }) {
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is Map) {
+        final vaultName = decoded['vaultName']?.toString().trim() ?? '';
+        if (vaultName.isNotEmpty) return vaultName;
+      }
+    } catch (_) {
+      // Fall back to file name.
+    }
+    return fallbackName.isEmpty ? 'Google Drive backup' : fallbackName;
   }
 
   @override

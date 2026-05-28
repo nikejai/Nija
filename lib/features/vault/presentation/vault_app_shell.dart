@@ -11,6 +11,7 @@ import '../../../core/config/app_features.dart';
 import '../../../core/localization/app_strings.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/secure_clipboard.dart';
+import '../../../domain/validators/vault_validators.dart';
 import '../../../infrastructure/adapters/secret_share_portability.dart';
 import '../../../infrastructure/adapters/secret_share_portability_base.dart';
 import 'add_vault_item_screen.dart';
@@ -66,6 +67,8 @@ class VaultAppShell extends StatefulWidget {
     required this.onLanguageModeChanged,
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
+    this.autoLockSeconds = 300,
+    this.onAutoLockSecondsChanged,
     required this.biometricEnabled,
     required this.onBiometricChanged,
     required this.onPersistVaultData,
@@ -95,6 +98,8 @@ class VaultAppShell extends StatefulWidget {
   final LanguageModeChanged onLanguageModeChanged;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final int autoLockSeconds;
+  final ValueChanged<int>? onAutoLockSecondsChanged;
   final bool biometricEnabled;
   final BiometricChanged onBiometricChanged;
   final PersistVaultData onPersistVaultData;
@@ -155,6 +160,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   String _allItemsFilterDateRange = 'any';
   bool _cloudBackupEnabled = false;
   bool _cloudBackupAutoEnabled = false;
+  bool _importingEncryptedSecret = false;
   String _cloudBackupFrequency = 'daily';
   int _cloudBackupLastAtEpochMs = 0;
   String _cloudBackupAccountLabel = 'Not connected';
@@ -435,7 +441,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       typeCounts[type] = (typeCounts[type] ?? 0) + 1;
     }
     final dashboardTypes = <MapEntry<String, int>>[
-      MapEntry<String, int>('Notes', _notes.length),
+      if (_notes.isNotEmpty) MapEntry<String, int>('Notes', _notes.length),
       ...typeCounts.entries,
     ]..sort((a, b) => b.value.compareTo(a.value));
 
@@ -514,6 +520,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: IconButton(
+                    key: const ValueKey('dashboard-filter-selector'),
                     onPressed: () => _openAllItemsFiltersOverlay(
                       _allTypeFilterOptions(),
                       showAllItemsOnApply: true,
@@ -981,13 +988,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return _entryUpdatedSortValue(bv).compareTo(_entryUpdatedSortValue(av));
     });
 
-    final typeOptions = <String>{'all', 'Notes'};
-    for (final item in _items) {
-      final type = item['type']?.toString().trim();
-      if (type != null && type.isNotEmpty) typeOptions.add(type);
-    }
-    final sortedTypeOptions = typeOptions.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final sortedTypeOptions = ['all', ..._allTypeFilterOptions()];
 
     final query = _allItemsQuery.trim().toLowerCase();
     final filterSearch = _allItemsFilterSearch.trim().toLowerCase();
@@ -1221,9 +1222,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
             ),
             if (_allItemsSelectionMode)
               _AllItemsSelectionActionBar(
-                onShare: _showSelectionActionComingSoon,
-                onMove: _showSelectionActionComingSoon,
-                onLock: _showSelectionActionComingSoon,
+                onFavorite: _togglePinSelectedAllItems,
                 onDelete: _deleteSelectedAllItems,
                 onMore: _showAllItemsMoreActions,
               ),
@@ -1313,6 +1312,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final entry = row['entry'] as Map<String, dynamic>;
     if (kind == 'note') {
       _showNoteQuickActions(context, entry);
+    } else if (_isDocumentItem(entry)) {
+      _showDocumentQuickActions(context, entry);
     } else {
       _showItemQuickActions(context, entry);
     }
@@ -1334,6 +1335,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
         builder: (_) => _DocumentDetailScreen(
           item: accessedItem,
           onReadDocument: widget.onReadVaultDocument,
+          onShareEncryptedDocument: _shareEncryptedDocument,
+          onExportEncryptedDocument: _exportEncryptedDocument,
           showDeleteAction: true,
         ),
       ),
@@ -1531,24 +1534,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   List<String> _allTypeFilterOptions() {
-    final options = <String>{'Notes'};
+    final options = <String>{};
+
+    if (_notes.isNotEmpty) {
+      options.add('Notes');
+    }
 
     for (final item in _items) {
       final type = item['type']?.toString().trim();
-      if (type != null && type.isNotEmpty) {
-        options.add(type);
-      }
-    }
-
-    for (final template in AddVaultItemScreen.templates) {
-      final type = template.type.trim();
-      if (type.isNotEmpty) {
-        options.add(type);
-      }
-    }
-
-    for (final definition in _customTypeDefinitions) {
-      final type = definition['name']?.toString().trim();
       if (type != null && type.isNotEmpty) {
         options.add(type);
       }
@@ -1572,6 +1565,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       ThemeMode.dark => 'Dark',
       ThemeMode.system => 'System',
     };
+    final autoLockLabel = _formatAutoLockSeconds(widget.autoLockSeconds);
     final backupSubtitle = AppFeatures.isPaidBuild
         ? (_cloudBackupEnabled
               ? _cloudBackupLastAtEpochMs <= 0
@@ -1610,15 +1604,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 onTap: () => _showRotateMasterPasswordDialog(context),
               ),
               _SettingsRow(
+                key: const ValueKey('settings-auto-lock-row'),
                 icon: Icons.key_outlined,
                 title: AppStrings.settingsAutoLock,
                 subtitle: 'Lock Nija automatically',
-                value: '5 minutes',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(AppStrings.settingComingSoon)),
-                  );
-                },
+                value: autoLockLabel,
+                onTap: () => _showAutoLockPicker(context),
               ),
               _SettingsRow(
                 key: const ValueKey('settings-biometrics-switch'),
@@ -1702,8 +1693,18 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 key: const ValueKey('settings-import-encrypted-secret'),
                 icon: Icons.file_download_outlined,
                 title: 'Import',
-                subtitle: 'Import data from a file',
-                onTap: _importEncryptedSecret,
+                subtitle: _importingEncryptedSecret
+                    ? 'Importing data...'
+                    : 'Import data from a file',
+                trailing: _importingEncryptedSecret
+                    ? const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
+                onTap: _importingEncryptedSecret
+                    ? null
+                    : _importEncryptedSecret,
               ),
               _SettingsRow(
                 icon: Icons.file_upload_outlined,
@@ -2001,9 +2002,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
         context: context,
         builder: (context) => StatefulBuilder(
           builder: (context, setLocalState) {
+            final nextPassword = nextController.text.trim();
             final canSubmit =
                 currentController.text.trim().isNotEmpty &&
-                nextController.text.trim().isNotEmpty &&
+                nextPassword.isNotEmpty &&
                 nextController.text == confirmController.text;
             return AlertDialog(
               title: const Text('Rotate master password'),
@@ -2027,6 +2029,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       labelText: 'New master password',
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  _PasswordStrengthMeter(password: nextPassword),
                   const SizedBox(height: 10),
                   TextField(
                     controller: confirmController,
@@ -2146,6 +2150,24 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
+  Future<void> _showAutoLockPicker(BuildContext context) async {
+    final onChanged = widget.onAutoLockSecondsChanged;
+    if (onChanged == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.settingComingSoon)));
+      return;
+    }
+
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      builder: (context) =>
+          _AutoLockSecondsSheet(initialSeconds: widget.autoLockSeconds),
+    );
+    if (selected == null || selected == widget.autoLockSeconds) return;
+    onChanged(selected);
+  }
+
   Future<void> _showRenameVaultDialog(BuildContext context) async {
     final renamed = await showDialog<String>(
       context: context,
@@ -2213,6 +2235,28 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }
     setState(() => _items[idx] = _preserveLastAccessedAt(result, _items[idx]));
     await _persistVaultData();
+  }
+
+  Future<void> _shareEncryptedDocument(
+    Map<String, dynamic> item,
+    List<int> bytes,
+  ) async {
+    await _shareEncryptedSecret(
+      plainText: _documentEncryptedPayload(item, bytes),
+      suggestedBaseName: _documentSuggestedBaseName(item),
+      contentType: 'document',
+    );
+  }
+
+  Future<void> _exportEncryptedDocument(
+    Map<String, dynamic> item,
+    List<int> bytes,
+  ) async {
+    await _exportEncryptedSecret(
+      plainText: _documentEncryptedPayload(item, bytes),
+      suggestedBaseName: _documentSuggestedBaseName(item),
+      contentType: 'document',
+    );
   }
 
   Future<void> _openNoteDetail(
@@ -3122,31 +3166,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
-  void _showSelectionActionComingSoon() {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(AppStrings.settingComingSoon)));
-  }
-
   Future<void> _showAllItemsMoreActions() async {
     if (_selectedAllItemsKeys.isEmpty) return;
-    final selectedItemIds = _selectedAllItemsKeys
-        .where((key) => key.startsWith('item:'))
-        .map((key) => key.substring(5))
-        .toSet();
-    final selectedNoteIds = _selectedAllItemsKeys
-        .where((key) => key.startsWith('note:'))
-        .map((key) => key.substring(5))
-        .toSet();
-    final selectedItems = _items
-        .where((item) => selectedItemIds.contains(item['id']?.toString() ?? ''))
-        .toList();
-    final selectedNotes = _notes
-        .where((note) => selectedNoteIds.contains(note['id']?.toString() ?? ''))
-        .toList();
-    final hasNonFavorite =
-        selectedItems.any((item) => item['pinned'] != true) ||
-        selectedNotes.any((note) => note['pinned'] != true);
     final selected = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -3154,39 +3175,137 @@ class _VaultAppShellState extends State<VaultAppShell> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: Icon(hasNonFavorite ? Icons.star_outline : Icons.star),
-              title: Text(
-                hasNonFavorite ? 'Add to Favorites' : 'Remove from Favorites',
-              ),
-              onTap: () => Navigator.of(context).pop('favorite'),
+              leading: const Icon(Icons.enhanced_encryption_outlined),
+              title: Text(AppStrings.shareEncryptedFile),
+              onTap: () => Navigator.of(context).pop('share_encrypted'),
             ),
             ListTile(
-              enabled: false,
-              leading: const Icon(Icons.file_upload_outlined),
-              title: const Text('Export'),
-            ),
-            ListTile(
-              enabled: false,
-              leading: const Icon(Icons.category_outlined),
-              title: const Text('Change Category'),
-            ),
-            ListTile(
-              enabled: false,
-              leading: const Icon(Icons.label_outlined),
-              title: const Text('Add Tags'),
-            ),
-            ListTile(
-              enabled: false,
-              leading: const Icon(Icons.merge_type_outlined),
-              title: const Text('Merge'),
+              leading: const Icon(Icons.file_download_outlined),
+              title: Text(AppStrings.exportEncryptedFile),
+              onTap: () => Navigator.of(context).pop('export_encrypted'),
             ),
           ],
         ),
       ),
     );
-    if (selected == 'favorite') {
-      await _togglePinSelectedAllItems();
+    if (selected == 'share_encrypted') {
+      await _shareSelectedAllItemsEncrypted();
+    } else if (selected == 'export_encrypted') {
+      await _exportSelectedAllItemsEncrypted();
     }
+  }
+
+  Future<void> _shareSelectedAllItemsEncrypted() async {
+    final payload = await _selectedAllItemsEncryptedBundle();
+    if (payload == null || !mounted) return;
+    await _shareEncryptedSecret(
+      plainText: payload,
+      suggestedBaseName: _selectedAllItemsBundleBaseName(),
+      contentType: 'vault_bundle',
+    );
+  }
+
+  Future<void> _exportSelectedAllItemsEncrypted() async {
+    final payload = await _selectedAllItemsEncryptedBundle();
+    if (payload == null || !mounted) return;
+    await _exportEncryptedSecret(
+      plainText: payload,
+      suggestedBaseName: _selectedAllItemsBundleBaseName(),
+      contentType: 'vault_bundle',
+    );
+  }
+
+  Future<String?> _selectedAllItemsEncryptedBundle() async {
+    final entries = <Map<String, dynamic>>[];
+    try {
+      for (final item in _selectedItemsForAllItemsSelection()) {
+        if (_isDocumentItem(item)) {
+          final bytes = await _readDocumentBytesForAction(item);
+          entries.add(_documentBundleEntry(item, bytes));
+        } else {
+          entries.add(<String, dynamic>{
+            'kind': 'vault_item',
+            'entry': _portableEntryCopy(item),
+            'plainText': _itemPlainText(item),
+          });
+        }
+      }
+      for (final note in _selectedNotesForAllItemsSelection()) {
+        entries.add(<String, dynamic>{
+          'kind': 'note',
+          'entry': _portableEntryCopy(note),
+          'plainText': _notePlainText(note),
+        });
+      }
+    } catch (_) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to read selected document.')),
+      );
+      return null;
+    }
+    if (entries.isEmpty) return null;
+    return jsonEncode(<String, dynamic>{
+      'schemaVersion': 1,
+      'kind': 'vault_bundle',
+      'createdAt': DateTime.now().toUtc().toIso8601String(),
+      'count': entries.length,
+      'entries': entries,
+    });
+  }
+
+  List<Map<String, dynamic>> _selectedItemsForAllItemsSelection() {
+    final selectedIds = _selectedAllItemsKeys
+        .where((key) => key.startsWith('item:'))
+        .map((key) => key.substring(5))
+        .toSet();
+    return _items
+        .where((item) => selectedIds.contains(item['id']?.toString() ?? ''))
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _selectedNotesForAllItemsSelection() {
+    final selectedIds = _selectedAllItemsKeys
+        .where((key) => key.startsWith('note:'))
+        .map((key) => key.substring(5))
+        .toSet();
+    return _notes
+        .where((note) => selectedIds.contains(note['id']?.toString() ?? ''))
+        .toList();
+  }
+
+  Map<String, dynamic> _documentBundleEntry(
+    Map<String, dynamic> item,
+    List<int> bytes,
+  ) {
+    return <String, dynamic>{
+      'kind': 'document',
+      'entry': _portableEntryCopy(item, removeDocumentStoragePointer: true),
+      'fileName': _documentFileName(item),
+      'extension': _documentExtension(item),
+      'mimeType': _mimeTypeForExtension(_documentExtension(item)),
+      'sizeBytes': bytes.length,
+      'bytesBase64': base64Encode(bytes),
+    };
+  }
+
+  Map<String, dynamic> _portableEntryCopy(
+    Map<String, dynamic> entry, {
+    bool removeDocumentStoragePointer = false,
+  }) {
+    final copy = _deepCopyEntry(entry)..remove('__documentBytes__');
+    if (removeDocumentStoragePointer) {
+      copy
+        ..remove('documentSection')
+        ..remove('documentStorage');
+    }
+    return copy;
+  }
+
+  String _selectedAllItemsBundleBaseName() {
+    final count = _selectedAllItemsKeys.length;
+    final timestamp = DateTime.now().toUtc().toIso8601String().split('.').first;
+    return 'vault-$count-items-${timestamp.replaceAll(':', '')}';
   }
 
   Future<void> _undoAllItemsDelete() async {
@@ -3335,6 +3454,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     try {
       final lines = <String>[];
       final currentLine = StringBuffer();
+      final segmentAttrs = <Map<String, dynamic>>[];
       var orderedIndex = 0;
       for (final raw in delta) {
         final op = Map<String, dynamic>.from(raw as Map);
@@ -3348,15 +3468,21 @@ class _VaultAppShellState extends State<VaultAppShell> {
           final isLineBreak = i < parts.length - 1;
           if (parts[i].isNotEmpty) {
             currentLine.write(parts[i]);
+            segmentAttrs.add(attrs);
           }
           if (!isLineBreak) continue;
           final lineText = currentLine.toString().trim();
           currentLine.clear();
+          final baseAttrs = segmentAttrs.isNotEmpty
+              ? Map<String, dynamic>.from(segmentAttrs.last)
+              : <String, dynamic>{};
+          final lineAttrs = <String, dynamic>{...baseAttrs, ...attrs};
+          segmentAttrs.clear();
           if (lineText.isEmpty) {
-            if (attrs['list'] != 'ordered') orderedIndex = 0;
+            if (lineAttrs['list'] != 'ordered') orderedIndex = 0;
             continue;
           }
-          final listType = attrs['list']?.toString();
+          final listType = lineAttrs['list']?.toString();
           if (listType == 'ordered') {
             orderedIndex += 1;
             lines.add('$orderedIndex. $lineText');
@@ -3685,6 +3811,101 @@ class _VaultAppShellState extends State<VaultAppShell> {
     ).showSnackBar(SnackBar(content: Text(AppStrings.itemDeleted)));
   }
 
+  Future<void> _showDocumentQuickActions(
+    BuildContext context,
+    Map<String, dynamic> item,
+  ) async {
+    final pinned = item['pinned'] == true;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              key: const ValueKey('document-action-open'),
+              leading: const Icon(Icons.open_in_new_outlined),
+              title: const Text('Open document'),
+              onTap: () => Navigator.of(context).pop('open'),
+            ),
+            ListTile(
+              key: const ValueKey('document-action-pin'),
+              leading: Icon(pinned ? Icons.star_outline : Icons.star),
+              title: Text(pinned ? AppStrings.unpin : AppStrings.pin),
+              onTap: () => Navigator.of(context).pop('pin'),
+            ),
+            ListTile(
+              key: const ValueKey('document-action-share-encrypted'),
+              leading: const Icon(Icons.enhanced_encryption_outlined),
+              title: const Text('Share encrypted file'),
+              onTap: () => Navigator.of(context).pop('share_encrypted'),
+            ),
+            ListTile(
+              key: const ValueKey('document-action-export-encrypted'),
+              leading: const Icon(Icons.file_download_outlined),
+              title: const Text('Export encrypted file'),
+              onTap: () => Navigator.of(context).pop('export_encrypted'),
+            ),
+            ListTile(
+              key: const ValueKey('document-action-delete'),
+              leading: const Icon(Icons.delete_outline),
+              title: Text(AppStrings.delete),
+              onTap: () => Navigator.of(context).pop('delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) return;
+    final idx = _items.indexWhere(
+      (entry) => entry['id']?.toString() == item['id']?.toString(),
+    );
+    if (idx == -1) return;
+    if (selected == 'open') {
+      if (!context.mounted) return;
+      await _openDocumentDetail(context, item);
+      return;
+    }
+    if (selected == 'pin') {
+      setState(() => _items[idx]['pinned'] = !pinned);
+      await _persistVaultData();
+      return;
+    }
+    if (selected == 'share_encrypted' || selected == 'export_encrypted') {
+      try {
+        final bytes = await _readDocumentBytesForAction(item);
+        if (selected == 'share_encrypted') {
+          await _shareEncryptedDocument(item, bytes);
+        } else {
+          await _exportEncryptedDocument(item, bytes);
+        }
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to read document.')),
+        );
+      }
+      return;
+    }
+    setState(() => _items.removeAt(idx));
+    await _persistVaultData();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(AppStrings.itemDeleted)));
+  }
+
+  Future<List<int>> _readDocumentBytesForAction(
+    Map<String, dynamic> item,
+  ) async {
+    final sectionName = item['documentSection']?.toString().trim() ?? '';
+    final reader = widget.onReadVaultDocument;
+    if (sectionName.isEmpty || reader == null) {
+      throw StateError('Document reader unavailable.');
+    }
+    return reader(sectionName: sectionName);
+  }
+
   Future<void> _shareEncryptedSecret({
     required String plainText,
     required String suggestedBaseName,
@@ -3775,71 +3996,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
     required String title,
     required String actionLabel,
   }) async {
-    final passwordController = TextEditingController();
-    final fileNameController = TextEditingController(
-      text: '${_sanitizeFileName(suggestedBaseName)}$_encryptedShareExtension',
+    return showDialog<_EncryptedShareChoice>(
+      context: context,
+      builder: (context) => _EncryptedShareInputDialog(
+        initialFileName:
+            '${_sanitizeFileName(suggestedBaseName)}$_encryptedShareExtension',
+        title: title,
+        actionLabel: actionLabel,
+        ensureExtension: _ensureEncryptedShareExtension,
+      ),
     );
-    try {
-      final result = await showDialog<_EncryptedShareChoice>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setLocalState) {
-            final rawName = fileNameController.text.trim();
-            final hasName = rawName.isNotEmpty;
-            final hasPassword = passwordController.text.trim().isNotEmpty;
-            final canShare = hasName && hasPassword;
-            return AlertDialog(
-              title: Text(title),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: fileNameController,
-                    onChanged: (_) => setLocalState(() {}),
-                    decoration: const InputDecoration(labelText: 'File name'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: passwordController,
-                    obscureText: true,
-                    onChanged: (_) => setLocalState(() {}),
-                    decoration: const InputDecoration(
-                      labelText: 'Password for this file',
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: canShare
-                      ? () {
-                          final normalizedName = _ensureEncryptedShareExtension(
-                            fileNameController.text.trim(),
-                          );
-                          Navigator.of(context).pop(
-                            _EncryptedShareChoice(
-                              fileName: normalizedName,
-                              password: passwordController.text,
-                            ),
-                          );
-                        }
-                      : null,
-                  child: Text(actionLabel),
-                ),
-              ],
-            );
-          },
-        ),
-      );
-      return result;
-    } finally {
-      passwordController.dispose();
-      fileNameController.dispose();
-    }
   }
 
   String _ensureEncryptedShareExtension(String fileName) {
@@ -3856,16 +4022,57 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _importEncryptedSecret() async {
-    final imported = await _secretSharePortability.importEncryptedFile();
-    if (imported == null || !mounted) return;
-    final password = await _promptSecretImportPassword(context);
-    if (password == null || password.trim().isEmpty || !mounted) return;
+    if (_importingEncryptedSecret) return;
+    setState(() => _importingEncryptedSecret = true);
     try {
+      final imported = await _secretSharePortability.importEncryptedFile();
+      if (imported == null || !mounted) return;
+      final password = await _promptSecretImportPassword(context);
+      if (password == null || password.trim().isEmpty || !mounted) return;
+      await _waitForOverlayTeardown();
       final decoded = await _encryptedShareCodec.decode(
         encoded: imported.content,
         password: password.trim(),
       );
-      final applied = _applyImportedSecret(decoded);
+      if (decoded.contentType.trim().toLowerCase() == 'vault_bundle') {
+        final entries = _encryptedImportEntriesFromBundle(decoded.plainText);
+        if (entries.isNotEmpty) {
+          if (!mounted) return;
+          if (entries.length > 1) {
+            final importedAny = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(
+                builder: (_) => _EncryptedImportBundleScreen(
+                  entries: entries,
+                  customTypeDefinitions: _customTypeDefinitions,
+                  onImportEntry: _importEncryptedBundleEntry,
+                  onImportAll: _importEncryptedBundleEntries,
+                ),
+              ),
+            );
+            if (!mounted || importedAny != true) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(AppStrings.encryptedSecretImported)),
+            );
+            return;
+          }
+          final importedSingle = await Navigator.of(context).push<bool>(
+            MaterialPageRoute(
+              builder: (_) => _EncryptedImportEntryPreviewScreen(
+                entry: entries.first,
+                customTypeDefinitions: _customTypeDefinitions,
+                alreadyImported: false,
+                onImport: () => _importEncryptedBundleEntry(entries.first),
+              ),
+            ),
+          );
+          if (!mounted || importedSingle != true) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppStrings.encryptedSecretImported)),
+          );
+          return;
+        }
+      }
+      final applied = await _applyImportedSecret(decoded);
       if (!applied) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3883,7 +4090,18 @@ class _VaultAppShellState extends State<VaultAppShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.encryptedSecretImportFailed)),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _importingEncryptedSecret = false);
+      } else {
+        _importingEncryptedSecret = false;
+      }
     }
+  }
+
+  Future<void> _waitForOverlayTeardown() async {
+    await Future<void>.delayed(Duration.zero);
+    await WidgetsBinding.instance.endOfFrame;
   }
 
   Future<String?> _promptSecretImportPassword(BuildContext context) async {
@@ -3926,21 +4144,301 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }
   }
 
-  bool _applyImportedSecret(DecryptedSharePayload payload) {
+  Future<bool> _applyImportedSecret(DecryptedSharePayload payload) async {
     final normalized = payload.contentType.trim().toLowerCase();
     if (normalized == 'note') {
       final note = _noteFromImported(payload.plainText);
       if (note == null) return false;
+      _markImportedEntryVisible(note);
       setState(() => _notes.insert(0, note));
       return true;
     }
     if (normalized == 'vault_item') {
       final item = _itemFromImported(payload.plainText);
       if (item == null) return false;
+      _markImportedEntryVisible(item);
       setState(() => _items.insert(0, item));
       return true;
     }
+    if (normalized == 'document') {
+      final item = await _documentFromImported(payload.plainText);
+      if (item == null) return false;
+      if (!mounted) return false;
+      setState(() => _items.insert(0, item));
+      return true;
+    }
+    if (normalized == 'vault_bundle') {
+      return _applyImportedBundle(payload.plainText);
+    }
     return false;
+  }
+
+  List<_EncryptedImportEntry> _encryptedImportEntriesFromBundle(
+    String plainText,
+  ) {
+    final decoded = jsonDecode(plainText);
+    if (decoded is! Map) return const <_EncryptedImportEntry>[];
+    final root = Map<String, dynamic>.from(decoded);
+    final entries = root['entries'];
+    if (entries is! List) return const <_EncryptedImportEntry>[];
+    final result = <_EncryptedImportEntry>[];
+    for (var i = 0; i < entries.length; i++) {
+      final raw = entries[i];
+      if (raw is! Map) continue;
+      final entry = Map<String, dynamic>.from(raw);
+      final kind = entry['kind']?.toString().trim().toLowerCase() ?? '';
+      if (!_isSupportedBundleImportKind(kind)) continue;
+      result.add(
+        _EncryptedImportEntry(
+          index: i,
+          kind: kind == 'item' || kind == 'secret' ? 'vault_item' : kind,
+          bundleEntry: entry,
+          title: _bundleImportTitle(entry, kind),
+          subtitle: _bundleImportSubtitle(entry, kind),
+        ),
+      );
+    }
+    return result;
+  }
+
+  bool _isSupportedBundleImportKind(String kind) {
+    return kind == 'note' ||
+        kind == 'vault_item' ||
+        kind == 'item' ||
+        kind == 'secret' ||
+        kind == 'document';
+  }
+
+  String _bundleImportTitle(Map<String, dynamic> entry, String kind) {
+    final rawEntry = entry['entry'];
+    if (rawEntry is Map) {
+      final title = rawEntry['title']?.toString().trim() ?? '';
+      if (title.isNotEmpty) return title;
+    }
+    if (kind == 'document') {
+      final fileName = entry['fileName']?.toString().trim() ?? '';
+      if (fileName.isNotEmpty) return fileName;
+      return 'Document';
+    }
+    final plainText = entry['plainText']?.toString() ?? '';
+    final firstLine = _safePlainTextPreviewLine(plainText);
+    if (firstLine != null) return firstLine;
+    return kind == 'note' ? 'Note' : 'Secret';
+  }
+
+  String? _safePlainTextPreviewLine(String plainText) {
+    final firstLine = plainText
+        .split('\n')
+        .map((line) => line.trim())
+        .firstWhere((line) => line.isNotEmpty, orElse: () => '');
+    if (firstLine.isEmpty || _looksLikeEncodedVaultData(firstLine)) {
+      return null;
+    }
+    return firstLine;
+  }
+
+  bool _looksLikeEncodedVaultData(String value) {
+    return _looksLikeEncodedPreviewData(value);
+  }
+
+  String _bundleImportSubtitle(Map<String, dynamic> entry, String kind) {
+    if (kind == 'note') return 'Secure Note';
+    if (kind == 'document') {
+      final extension = entry['extension']?.toString().trim().toUpperCase();
+      final size = entry['sizeBytes'];
+      final formattedSize = size == null
+          ? ''
+          : _formatBytes(int.tryParse(size.toString()) ?? 0);
+      return [
+        if (extension != null && extension.isNotEmpty) extension,
+        if (formattedSize.isNotEmpty) formattedSize,
+      ].join(' · ');
+    }
+    final rawEntry = entry['entry'];
+    if (rawEntry is Map) {
+      final type = rawEntry['type']?.toString().trim() ?? '';
+      if (type.isNotEmpty) return type;
+    }
+    return 'Vault Item';
+  }
+
+  Future<bool> _importEncryptedBundleEntry(_EncryptedImportEntry entry) async {
+    final importedAt = DateTime.now().toUtc().toIso8601String();
+    final imported = await _preparedImportFromBundleEntry(
+      entry.bundleEntry,
+      entry.index,
+      importedAt,
+    );
+    if (imported == null || !mounted) return false;
+    _insertPreparedImport(imported);
+    await _persistVaultData();
+    return true;
+  }
+
+  Future<bool> _importEncryptedBundleEntries(
+    List<_EncryptedImportEntry> entries,
+  ) async {
+    if (entries.isEmpty) return false;
+    final importedAt = DateTime.now().toUtc().toIso8601String();
+    final prepared = _PreparedVaultImport();
+    for (final entry in entries) {
+      final imported = await _preparedImportFromBundleEntry(
+        entry.bundleEntry,
+        entry.index,
+        importedAt,
+      );
+      if (imported == null) continue;
+      prepared.items.addAll(imported.items);
+      prepared.notes.addAll(imported.notes);
+    }
+    if (prepared.isEmpty || !mounted) return false;
+    _insertPreparedImport(prepared);
+    await _persistVaultData();
+    return true;
+  }
+
+  Future<_PreparedVaultImport?> _preparedImportFromBundleEntry(
+    Map<String, dynamic> entry,
+    int index,
+    String importedAt,
+  ) async {
+    final kind = entry['kind']?.toString().trim().toLowerCase() ?? '';
+    if (kind == 'note') {
+      final note = _noteFromBundleEntry(entry, index, importedAt);
+      if (note == null) return null;
+      return _PreparedVaultImport(notes: [note]);
+    }
+    if (kind == 'vault_item' || kind == 'item' || kind == 'secret') {
+      final item = _itemFromBundleEntry(entry, index, importedAt);
+      if (item == null) return null;
+      return _PreparedVaultImport(items: [item]);
+    }
+    if (kind == 'document') {
+      final item = await _documentFromBundleEntry(entry, index, importedAt);
+      if (item == null) return null;
+      return _PreparedVaultImport(items: [item]);
+    }
+    return null;
+  }
+
+  void _insertPreparedImport(_PreparedVaultImport imported) {
+    setState(() {
+      _items.insertAll(0, imported.items);
+      _notes.insertAll(0, imported.notes);
+    });
+  }
+
+  Future<bool> _applyImportedBundle(String plainText) async {
+    return _importEncryptedBundleEntries(
+      _encryptedImportEntriesFromBundle(plainText),
+    );
+  }
+
+  Map<String, dynamic>? _noteFromBundleEntry(
+    Map<String, dynamic> bundleEntry,
+    int index,
+    String importedAt,
+  ) {
+    final rawEntry = bundleEntry['entry'];
+    if (rawEntry is Map) {
+      final note = Map<String, dynamic>.from(rawEntry);
+      note['id'] = _importedVaultId('note', index);
+      note['pinned'] = false;
+      _markImportedEntryVisible(note, importedAt: importedAt);
+      return note;
+    }
+    final plainText = bundleEntry['plainText']?.toString();
+    if (plainText == null || plainText.trim().isEmpty) return null;
+    final note = _noteFromImported(plainText);
+    if (note == null) return null;
+    note['id'] = _importedVaultId('note', index);
+    _markImportedEntryVisible(note, importedAt: importedAt);
+    return note;
+  }
+
+  Map<String, dynamic>? _itemFromBundleEntry(
+    Map<String, dynamic> bundleEntry,
+    int index,
+    String importedAt,
+  ) {
+    final rawEntry = bundleEntry['entry'];
+    if (rawEntry is Map) {
+      final item = Map<String, dynamic>.from(rawEntry);
+      item['id'] = _importedVaultId('item', index);
+      item['pinned'] = false;
+      final type = item['type']?.toString().trim() ?? '';
+      if (type.isEmpty) item['type'] = 'Item';
+      _markImportedEntryVisible(item, importedAt: importedAt);
+      return item;
+    }
+    final plainText = bundleEntry['plainText']?.toString();
+    if (plainText == null || plainText.trim().isEmpty) return null;
+    final item = _itemFromImported(plainText);
+    if (item == null) return null;
+    item['id'] = _importedVaultId('item', index);
+    _markImportedEntryVisible(item, importedAt: importedAt);
+    return item;
+  }
+
+  Future<Map<String, dynamic>?> _documentFromImported(String plainText) async {
+    final decoded = jsonDecode(plainText);
+    if (decoded is! Map) return null;
+    return _documentFromBundleEntry(
+      Map<String, dynamic>.from(decoded),
+      0,
+      DateTime.now().toUtc().toIso8601String(),
+    );
+  }
+
+  Future<Map<String, dynamic>?> _documentFromBundleEntry(
+    Map<String, dynamic> bundleEntry,
+    int index,
+    String importedAt,
+  ) async {
+    final rawBytes = bundleEntry['bytesBase64']?.toString();
+    if (rawBytes == null || rawBytes.isEmpty) return null;
+    final bytes = base64Decode(rawBytes);
+    final rawEntry = bundleEntry['entry'];
+    final item = rawEntry is Map
+        ? Map<String, dynamic>.from(rawEntry)
+        : <String, dynamic>{};
+    final fileName = bundleEntry['fileName']?.toString().trim();
+    final extension = bundleEntry['extension']?.toString().trim();
+    item
+      ..remove('documentSection')
+      ..remove('documentStorage')
+      ..['id'] = _importedVaultId('document', index)
+      ..['type'] = 'Documents'
+      ..['title'] = item['title']?.toString().trim().isNotEmpty == true
+          ? item['title']
+          : fileName ?? 'Imported document'
+      ..['pinned'] = false
+      ..['updated'] = 'Now'
+      ..['updatedAt'] = importedAt
+      ..['createdAt'] = item['createdAt'] ?? importedAt
+      ..['documentUploadedAt'] = item['documentUploadedAt'] ?? importedAt
+      ..['documentFileName'] =
+          fileName ?? item['documentFileName'] ?? 'document'
+      ..['documentExtension'] =
+          extension ?? item['documentExtension'] ?? _documentExtension(item)
+      ..['documentSizeBytes'] = bytes.length
+      ..['__documentBytes__'] = Uint8List.fromList(bytes);
+    final stored = await _isPendingDocumentStored(item);
+    return stored ? item : null;
+  }
+
+  void _markImportedEntryVisible(
+    Map<String, dynamic> entry, {
+    String? importedAt,
+  }) {
+    final timestamp = importedAt ?? DateTime.now().toUtc().toIso8601String();
+    entry['updated'] = 'Now';
+    entry['updatedAt'] = timestamp;
+    entry['createdAt'] = entry['createdAt'] ?? timestamp;
+  }
+
+  String _importedVaultId(String prefix, int index) {
+    return '$prefix-imported-${DateTime.now().microsecondsSinceEpoch}-$index';
   }
 
   Map<String, dynamic>? _noteFromImported(String plainText) {
@@ -4007,6 +4505,611 @@ class _EncryptedShareChoice {
 
   final String fileName;
   final String password;
+}
+
+class _EncryptedImportEntry {
+  const _EncryptedImportEntry({
+    required this.index,
+    required this.kind,
+    required this.bundleEntry,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final int index;
+  final String kind;
+  final Map<String, dynamic> bundleEntry;
+  final String title;
+  final String subtitle;
+}
+
+class _PreparedVaultImport {
+  _PreparedVaultImport({
+    List<Map<String, dynamic>>? items,
+    List<Map<String, dynamic>>? notes,
+  }) : items = items ?? <Map<String, dynamic>>[],
+       notes = notes ?? <Map<String, dynamic>>[];
+
+  final List<Map<String, dynamic>> items;
+  final List<Map<String, dynamic>> notes;
+
+  bool get isEmpty => items.isEmpty && notes.isEmpty;
+}
+
+class _EncryptedShareInputDialog extends StatefulWidget {
+  const _EncryptedShareInputDialog({
+    required this.initialFileName,
+    required this.title,
+    required this.actionLabel,
+    required this.ensureExtension,
+  });
+
+  final String initialFileName;
+  final String title;
+  final String actionLabel;
+  final String Function(String fileName) ensureExtension;
+
+  @override
+  State<_EncryptedShareInputDialog> createState() =>
+      _EncryptedShareInputDialogState();
+}
+
+class _EncryptedShareInputDialogState
+    extends State<_EncryptedShareInputDialog> {
+  late final TextEditingController _fileNameController;
+  late final TextEditingController _passwordController;
+
+  @override
+  void initState() {
+    super.initState();
+    _fileNameController = TextEditingController(text: widget.initialFileName);
+    _passwordController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _fileNameController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rawName = _fileNameController.text.trim();
+    final hasName = rawName.isNotEmpty;
+    final hasPassword = _passwordController.text.trim().isNotEmpty;
+    final canShare = hasName && hasPassword;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _fileNameController,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(labelText: 'File name'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _passwordController,
+            obscureText: true,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              labelText: 'Password for this file',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: canShare
+              ? () {
+                  final normalizedName = widget.ensureExtension(rawName);
+                  Navigator.of(context).pop(
+                    _EncryptedShareChoice(
+                      fileName: normalizedName,
+                      password: _passwordController.text,
+                    ),
+                  );
+                }
+              : null,
+          child: Text(widget.actionLabel),
+        ),
+      ],
+    );
+  }
+}
+
+class _EncryptedImportBundleScreen extends StatefulWidget {
+  const _EncryptedImportBundleScreen({
+    required this.entries,
+    required this.customTypeDefinitions,
+    required this.onImportEntry,
+    required this.onImportAll,
+  });
+
+  final List<_EncryptedImportEntry> entries;
+  final List<Map<String, dynamic>> customTypeDefinitions;
+  final Future<bool> Function(_EncryptedImportEntry entry) onImportEntry;
+  final Future<bool> Function(List<_EncryptedImportEntry> entries) onImportAll;
+
+  @override
+  State<_EncryptedImportBundleScreen> createState() =>
+      _EncryptedImportBundleScreenState();
+}
+
+class _EncryptedImportBundleScreenState
+    extends State<_EncryptedImportBundleScreen> {
+  final Set<int> _importedIndexes = <int>{};
+  bool _importingAll = false;
+
+  List<_EncryptedImportEntry> get _remainingEntries => widget.entries
+      .where((entry) => !_importedIndexes.contains(entry.index))
+      .toList();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Encrypted file'),
+        actions: [
+          TextButton(
+            onPressed: _remainingEntries.isEmpty || _importingAll
+                ? null
+                : _importAll,
+            child: _importingAll
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Import all'),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          itemCount: widget.entries.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final entry = widget.entries[index];
+            final imported = _importedIndexes.contains(entry.index);
+            return Material(
+              color: colorScheme.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: colorScheme.outlineVariant),
+              ),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: _colorForImportEntry(
+                    entry,
+                  ).withValues(alpha: 0.16),
+                  child: Icon(
+                    _iconForImportEntry(entry),
+                    color: _colorForImportEntry(entry),
+                  ),
+                ),
+                title: Text(
+                  entry.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  imported ? 'Imported' : entry.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: imported
+                    ? const Icon(Icons.check_circle, color: Color(0xFF22C55E))
+                    : const Icon(Icons.chevron_right),
+                onTap: () => _openEntry(entry, imported: imported),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openEntry(
+    _EncryptedImportEntry entry, {
+    required bool imported,
+  }) async {
+    final didImport = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => _EncryptedImportEntryPreviewScreen(
+          entry: entry,
+          customTypeDefinitions: widget.customTypeDefinitions,
+          alreadyImported: imported,
+          onImport: () => widget.onImportEntry(entry),
+        ),
+      ),
+    );
+    if (didImport == true && mounted) {
+      setState(() => _importedIndexes.add(entry.index));
+    }
+  }
+
+  Future<void> _importAll() async {
+    setState(() => _importingAll = true);
+    final remaining = _remainingEntries;
+    final ok = await widget.onImportAll(remaining);
+    if (!mounted) return;
+    setState(() {
+      _importingAll = false;
+      if (ok) {
+        _importedIndexes.addAll(remaining.map((entry) => entry.index));
+      }
+    });
+    if (ok) {
+      Navigator.of(context).pop(true);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.encryptedSecretImportFailed)),
+      );
+    }
+  }
+}
+
+class _EncryptedImportEntryPreviewScreen extends StatefulWidget {
+  const _EncryptedImportEntryPreviewScreen({
+    required this.entry,
+    required this.customTypeDefinitions,
+    required this.alreadyImported,
+    required this.onImport,
+  });
+
+  final _EncryptedImportEntry entry;
+  final List<Map<String, dynamic>> customTypeDefinitions;
+  final bool alreadyImported;
+  final Future<bool> Function() onImport;
+
+  @override
+  State<_EncryptedImportEntryPreviewScreen> createState() =>
+      _EncryptedImportEntryPreviewScreenState();
+}
+
+class _EncryptedImportEntryPreviewScreenState
+    extends State<_EncryptedImportEntryPreviewScreen> {
+  late bool _imported;
+  bool _importing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _imported = widget.alreadyImported;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = widget.entry;
+    return Scaffold(
+      appBar: AppBar(title: Text(_previewTitle(entry))),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(child: _buildPreview(context, entry)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _imported || _importing ? null : _importEntry,
+                  icon: _importing
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          _imported
+                              ? Icons.check_circle_outline
+                              : Icons.file_download_outlined,
+                        ),
+                  label: Text(_imported ? 'Imported' : 'Import item'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreview(BuildContext context, _EncryptedImportEntry entry) {
+    if (entry.kind == 'note') return _buildNotePreview(context, entry);
+    if (entry.kind == 'document') return _buildDocumentPreview(context, entry);
+    return _buildVaultItemPreview(context, entry);
+  }
+
+  Widget _buildVaultItemPreview(
+    BuildContext context,
+    _EncryptedImportEntry entry,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final rawEntry = entry.bundleEntry['entry'];
+    final item = rawEntry is Map
+        ? Map<String, dynamic>.from(rawEntry)
+        : const <String, dynamic>{};
+    final fields = (item['fields'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((field) => Map<String, dynamic>.from(field))
+        .toList();
+    if (fields.isEmpty) {
+      fields.addAll(_plainTextPreviewFields(entry.bundleEntry['plainText']));
+    }
+    final type = item['type']?.toString().trim();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      children: [
+        _ImportPreviewHeader(
+          icon: _iconForImportEntry(entry),
+          color: _colorForImportEntry(entry),
+          title: entry.title,
+          subtitle: entry.subtitle,
+        ),
+        const SizedBox(height: 16),
+        if (type != null && type.isNotEmpty)
+          _ImportPreviewRow(label: 'Type', value: type),
+        if (fields.isEmpty)
+          Text(
+            'No fields to preview.',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          )
+        else
+          ...fields.map((field) {
+            final label = field['label']?.toString() ?? 'Field';
+            final value = field['value']?.toString() ?? '';
+            return _ImportPreviewRow(label: label, value: value);
+          }),
+      ],
+    );
+  }
+
+  Widget _buildNotePreview(BuildContext context, _EncryptedImportEntry entry) {
+    final body = _notePreviewBody(entry);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      children: [
+        _ImportPreviewHeader(
+          icon: Icons.sticky_note_2_outlined,
+          color: const Color(0xFF6366F1),
+          title: entry.title,
+          subtitle: 'Secure Note',
+        ),
+        const SizedBox(height: 16),
+        _ImportPreviewRow(label: 'Content', value: body.isEmpty ? '-' : body),
+      ],
+    );
+  }
+
+  Widget _buildDocumentPreview(
+    BuildContext context,
+    _EncryptedImportEntry entry,
+  ) {
+    final fileName = entry.bundleEntry['fileName']?.toString() ?? entry.title;
+    final extension =
+        entry.bundleEntry['extension']?.toString().toUpperCase() ?? '';
+    final size = int.tryParse(entry.bundleEntry['sizeBytes']?.toString() ?? '');
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      children: [
+        _ImportPreviewHeader(
+          icon: Icons.folder_outlined,
+          color: const Color(0xFFFB923C),
+          title: entry.title,
+          subtitle: 'Document',
+        ),
+        const SizedBox(height: 16),
+        _ImportPreviewRow(label: 'File name', value: fileName),
+        _ImportPreviewRow(label: 'Extension', value: extension),
+        _ImportPreviewRow(
+          label: 'Size',
+          value: size == null ? '-' : _formatDocumentByteCount(size),
+        ),
+      ],
+    );
+  }
+
+  String _previewTitle(_EncryptedImportEntry entry) {
+    if (entry.kind == 'note') return 'Note';
+    if (entry.kind == 'document') return 'Document';
+    return entry.subtitle.isEmpty ? 'Vault Item' : entry.subtitle;
+  }
+
+  String _notePreviewBody(_EncryptedImportEntry entry) {
+    final rawEntry = entry.bundleEntry['entry'];
+    if (rawEntry is Map) {
+      final delta = rawEntry['delta'];
+      if (delta is List) {
+        return delta
+            .whereType<Map>()
+            .map((op) => op['insert']?.toString() ?? '')
+            .join()
+            .trim();
+      }
+      final preview = rawEntry['preview']?.toString().trim() ?? '';
+      if (preview.isNotEmpty) return preview;
+    }
+    final plainText = entry.bundleEntry['plainText']?.toString() ?? '';
+    if (_looksLikeEncodedPreviewData(plainText)) return '';
+    return plainText.split('\n').skip(1).join('\n').trim();
+  }
+
+  Future<void> _importEntry() async {
+    setState(() => _importing = true);
+    final ok = await widget.onImport();
+    if (!mounted) return;
+    setState(() {
+      _importing = false;
+      _imported = ok;
+    });
+    if (ok) {
+      Navigator.of(context).pop(true);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.encryptedSecretImportFailed)),
+      );
+    }
+  }
+}
+
+class _ImportPreviewHeader extends StatelessWidget {
+  const _ImportPreviewHeader({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(icon, color: color, size: 30),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: vaultPageHeadingStyle(context),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+class _ImportPreviewRow extends StatelessWidget {
+  const _ImportPreviewRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(color: colorScheme.onSurface)),
+        ],
+      ),
+    );
+  }
+}
+
+IconData _iconForImportEntry(_EncryptedImportEntry entry) {
+  if (entry.kind == 'note') return Icons.sticky_note_2_outlined;
+  if (entry.kind == 'document') return Icons.folder_outlined;
+  final rawEntry = entry.bundleEntry['entry'];
+  if (rawEntry is Map) {
+    return _iconForHomeType(rawEntry['type']?.toString() ?? 'Item');
+  }
+  return Icons.lock_outline;
+}
+
+Color _colorForImportEntry(_EncryptedImportEntry entry) {
+  if (entry.kind == 'note') return const Color(0xFF6366F1);
+  if (entry.kind == 'document') return const Color(0xFFFB923C);
+  final rawEntry = entry.bundleEntry['entry'];
+  if (rawEntry is Map) {
+    return _colorForHomeType(rawEntry['type']?.toString() ?? 'Item');
+  }
+  return const Color(0xFF22C55E);
+}
+
+List<Map<String, dynamic>> _plainTextPreviewFields(Object? rawPlainText) {
+  final plainText = rawPlainText?.toString() ?? '';
+  if (_looksLikeEncodedPreviewData(plainText)) {
+    return const <Map<String, dynamic>>[];
+  }
+  final fields = <Map<String, dynamic>>[];
+  final lines = plainText
+      .split('\n')
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList();
+  for (final line in lines.skip(1)) {
+    if (line.startsWith('Type: ')) continue;
+    final separator = line.indexOf(':');
+    if (separator <= 0 || separator >= line.length - 1) continue;
+    final label = line.substring(0, separator).trim();
+    final value = line.substring(separator + 1).trim();
+    if (label.isEmpty || value.isEmpty) continue;
+    fields.add(<String, dynamic>{'label': label, 'value': value});
+  }
+  return fields;
+}
+
+bool _looksLikeEncodedPreviewData(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return false;
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return true;
+  final lower = trimmed.toLowerCase();
+  return lower.contains('ciphertext') ||
+      lower.contains('schemaversion') ||
+      lower.contains('vault_bundle') ||
+      lower.contains('bytesbase64');
+}
+
+String _formatDocumentByteCount(int bytes) {
+  if (bytes <= 0) return '0 B';
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
+  final mb = kb / 1024;
+  return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
+}
+
+String _formatAutoLockSeconds(int seconds) {
+  if (seconds <= 0) return 'Off';
+  if (seconds == 1) return '1 sec';
+  if (seconds < 60) return '$seconds sec';
+  if (seconds % 60 == 0) {
+    final minutes = seconds ~/ 60;
+    return minutes == 1 ? '60 sec' : '$seconds sec';
+  }
+  return '$seconds sec';
 }
 
 class _SortSelector extends StatelessWidget {
@@ -4480,6 +5583,96 @@ IconData _iconForSetting(String section) {
   return Icons.settings_outlined;
 }
 
+class _PasswordStrengthMeter extends StatelessWidget {
+  const _PasswordStrengthMeter({required this.password});
+
+  final String password;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final score = _passwordStrengthScore(password);
+    final label = _passwordStrengthLabel(score);
+    final color = _passwordStrengthColor(theme, score);
+    final guidance = VaultValidators.isStrongEnoughMasterPassword(password)
+        ? 'Meets recommended minimum'
+        : 'Use 10+ characters with letters and numbers';
+
+    return Semantics(
+      label: 'Password strength $label',
+      child: Column(
+        key: const ValueKey('master-password-strength-meter'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    minHeight: 6,
+                    value: score / 4,
+                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                    color: color,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                key: const ValueKey('master-password-strength-label'),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            guidance,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+int _passwordStrengthScore(String password) {
+  if (password.isEmpty) return 0;
+  var score = 0;
+  if (password.length >= 10) score++;
+  if (password.contains(RegExp(r'[A-Za-z]'))) score++;
+  if (password.contains(RegExp(r'\d'))) score++;
+  if (password.contains(RegExp(r'[^A-Za-z0-9]')) || password.length >= 16) {
+    score++;
+  }
+  return score.clamp(1, 4);
+}
+
+String _passwordStrengthLabel(int score) {
+  return switch (score) {
+    0 => 'Not started',
+    1 => 'Weak',
+    2 => 'Fair',
+    3 => 'Good',
+    _ => 'Strong',
+  };
+}
+
+Color _passwordStrengthColor(ThemeData theme, int score) {
+  return switch (score) {
+    0 => theme.colorScheme.outline,
+    1 => theme.colorScheme.error,
+    2 => const Color(0xFFB45309),
+    3 => const Color(0xFF2563EB),
+    _ => const Color(0xFF15803D),
+  };
+}
+
 class _SettingsSection extends StatelessWidget {
   const _SettingsSection({required this.title, required this.children});
 
@@ -4641,6 +5834,88 @@ class _SettingsRow extends StatelessWidget {
   }
 }
 
+class _AutoLockSecondsSheet extends StatefulWidget {
+  const _AutoLockSecondsSheet({required this.initialSeconds});
+
+  final int initialSeconds;
+
+  @override
+  State<_AutoLockSecondsSheet> createState() => _AutoLockSecondsSheetState();
+}
+
+class _AutoLockSecondsSheetState extends State<_AutoLockSecondsSheet> {
+  late double _seconds;
+
+  @override
+  void initState() {
+    super.initState();
+    _seconds = widget.initialSeconds.clamp(0, 3600).toDouble();
+  }
+
+  int get _roundedSeconds => _seconds.round();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Auto Lock',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(_roundedSeconds),
+                  child: const Text('Done'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                _formatAutoLockSeconds(_roundedSeconds),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Slider(
+              key: const ValueKey('auto-lock-seconds-slider'),
+              value: _seconds,
+              min: 0,
+              max: 3600,
+              divisions: 360,
+              label: _formatAutoLockSeconds(_roundedSeconds),
+              onChanged: (value) => setState(() => _seconds = value),
+            ),
+            Row(
+              children: [
+                Text(
+                  'Off',
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
+                const Spacer(),
+                Text(
+                  '3600 sec',
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SettingsActionRow extends StatelessWidget {
   const _SettingsActionRow({required this.children});
 
@@ -4681,11 +5956,17 @@ class _DocumentDetailScreen extends StatefulWidget {
   const _DocumentDetailScreen({
     required this.item,
     required this.onReadDocument,
+    required this.onShareEncryptedDocument,
+    required this.onExportEncryptedDocument,
     this.showDeleteAction = false,
   });
 
   final Map<String, dynamic> item;
   final ReadVaultDocument? onReadDocument;
+  final Future<void> Function(Map<String, dynamic> item, List<int> bytes)
+  onShareEncryptedDocument;
+  final Future<void> Function(Map<String, dynamic> item, List<int> bytes)
+  onExportEncryptedDocument;
   final bool showDeleteAction;
 
   @override
@@ -4795,15 +6076,62 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: bytes == null
-                            ? null
-                            : () => _openDocument(bytes),
-                        icon: const Icon(Icons.open_in_new_outlined),
-                        label: const Text('Open with...'),
-                      ),
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: bytes == null
+                                ? null
+                                : () => _openDocument(bytes),
+                            icon: const Icon(Icons.open_in_new_outlined),
+                            label: const Text('Open with app'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: bytes == null
+                                ? null
+                                : () => _shareDecryptedDocument(bytes),
+                            icon: const Icon(Icons.share_outlined),
+                            label: const Text('Share decrypted file'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: bytes == null
+                                    ? null
+                                    : () => widget.onShareEncryptedDocument(
+                                        widget.item,
+                                        bytes,
+                                      ),
+                                icon: const Icon(
+                                  Icons.enhanced_encryption_outlined,
+                                ),
+                                label: const Text('Share encrypted'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: bytes == null
+                                    ? null
+                                    : () => widget.onExportEncryptedDocument(
+                                        widget.item,
+                                        bytes,
+                                      ),
+                                icon: const Icon(Icons.file_download_outlined),
+                                label: const Text('Export encrypted'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -4898,6 +6226,15 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
       );
       await _shareDocumentFallback(bytes, fileName, mimeType);
     }
+  }
+
+  Future<void> _shareDecryptedDocument(List<int> bytes) async {
+    final fileName = _documentFileName(widget.item);
+    await _shareDocumentFallback(
+      bytes,
+      fileName,
+      _mimeTypeForExtension(_documentExtension(widget.item)),
+    );
   }
 
   Future<void> _shareDocumentFallback(
@@ -5052,6 +6389,29 @@ String _documentFileName(Map<String, dynamic> item) {
   final title = item['title']?.toString().trim();
   if (title != null && title.isNotEmpty) return title;
   return 'document';
+}
+
+String _documentSuggestedBaseName(Map<String, dynamic> item) {
+  final fileName = _documentFileName(item);
+  final dot = fileName.lastIndexOf('.');
+  final base = dot <= 0 ? fileName : fileName.substring(0, dot);
+  return base.trim().isEmpty ? 'document' : base.trim();
+}
+
+String _documentEncryptedPayload(Map<String, dynamic> item, List<int> bytes) {
+  return jsonEncode(<String, dynamic>{
+    'kind': 'document',
+    'title': item['title']?.toString() ?? 'Document',
+    'fileName': _documentFileName(item),
+    'extension': _documentExtension(item),
+    'mimeType': _mimeTypeForExtension(_documentExtension(item)),
+    'sizeBytes': bytes.length,
+    'createdAt': item['createdAt']?.toString(),
+    'updatedAt': item['updatedAt']?.toString(),
+    'deviceId': item['deviceId']?.toString(),
+    'updatedByDevice': item['updatedByDevice']?.toString(),
+    'bytesBase64': base64Encode(bytes),
+  });
 }
 
 String _formatDocumentSize(Map<String, dynamic> item) {
@@ -5298,6 +6658,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
     final primarySecret = _extractPrimarySecret(fields);
     final typeIcon = _iconForItemType(itemType);
     final typeColor = _colorForItemType(itemType);
+    final idPhotos = _identityPhotos(widget.item);
 
     return PopScope(
       canPop: false,
@@ -5472,6 +6833,10 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                         }),
                       ),
                     ),
+                    if (idPhotos.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      _IdentityPhotosSection(photos: idPhotos),
+                    ],
                     const SizedBox(height: 14),
                     _metadataRow('Category', itemType),
                     const SizedBox(height: 8),
@@ -5533,6 +6898,18 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
     return fallback.isEmpty ? null : fallback;
   }
 
+  List<Map<String, dynamic>> _identityPhotos(Map<String, dynamic> item) {
+    final type = item['type']?.toString().trim().toLowerCase() ?? '';
+    if (type != 'identity') return const <Map<String, dynamic>>[];
+    return (item['idPhotos'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .where(
+          (entry) => (entry['bytesBase64']?.toString() ?? '').trim().isNotEmpty,
+        )
+        .toList();
+  }
+
   Widget _metadataRow(String label, String value) {
     final colorScheme = Theme.of(context).colorScheme;
     return Row(
@@ -5577,6 +6954,228 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
       context,
     ).pop(<String, dynamic>{...widget.item, 'pinned': _isFavorite});
   }
+}
+
+class _IdentityPhotosSection extends StatelessWidget {
+  const _IdentityPhotosSection({required this.photos});
+
+  final List<Map<String, dynamic>> photos;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'ID photos',
+            style: TextStyle(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...photos.asMap().entries.map((entry) {
+            final index = entry.key;
+            final photo = entry.value;
+            return Padding(
+              padding: EdgeInsets.only(top: index == 0 ? 0 : 10),
+              child: InkWell(
+                key: ValueKey('identity-photo-row-$index'),
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => _showPhotoPicker(context, initialIndex: index),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: _IdentityPhotoPreview(photo: photo),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              photo['name']?.toString() ??
+                                  'ID photo ${index + 1}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: colorScheme.onSurface,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _formatIdentityPhotoSize(photo['sizeBytes']),
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.open_in_full,
+                        size: 18,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showPhotoPicker(
+    BuildContext context, {
+    required int initialIndex,
+  }) async {
+    final selectedIndex = await showModalBottomSheet<int>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              title: Text(
+                'Choose photo',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            ...photos.asMap().entries.map((entry) {
+              final index = entry.key;
+              final photo = entry.value;
+              return ListTile(
+                key: ValueKey('identity-photo-picker-$index'),
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: _IdentityPhotoPreview(photo: photo, size: 44),
+                ),
+                title: Text(
+                  photo['name']?.toString() ?? 'ID photo ${index + 1}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(_formatIdentityPhotoSize(photo['sizeBytes'])),
+                selected: index == initialIndex,
+                onTap: () => Navigator.of(context).pop(index),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+    if (selectedIndex == null || !context.mounted) return;
+    await _showFullPhotoViewer(context, photos[selectedIndex], selectedIndex);
+  }
+
+  Future<void> _showFullPhotoViewer(
+    BuildContext context,
+    Map<String, dynamic> photo,
+    int index,
+  ) async {
+    final name = photo['name']?.toString() ?? 'ID photo ${index + 1}';
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Scaffold(
+            appBar: AppBar(title: Text(name)),
+            backgroundColor: colorScheme.surface,
+            body: SafeArea(
+              child: Center(
+                child: InteractiveViewer(
+                  minScale: 0.75,
+                  maxScale: 5,
+                  child: _IdentityFullPhoto(photo: photo),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _IdentityFullPhoto extends StatelessWidget {
+  const _IdentityFullPhoto({required this.photo});
+
+  final Map<String, dynamic> photo;
+
+  @override
+  Widget build(BuildContext context) {
+    try {
+      final bytes = base64Decode(photo['bytesBase64']?.toString() ?? '');
+      return Image.memory(bytes, fit: BoxFit.contain);
+    } catch (_) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.broken_image_outlined,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Unable to display photo.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      );
+    }
+  }
+}
+
+class _IdentityPhotoPreview extends StatelessWidget {
+  const _IdentityPhotoPreview({required this.photo, this.size = 64});
+
+  final Map<String, dynamic> photo;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    try {
+      final bytes = base64Decode(photo['bytesBase64']?.toString() ?? '');
+      return Image.memory(bytes, width: size, height: size, fit: BoxFit.cover);
+    } catch (_) {
+      return Container(
+        width: size,
+        height: size,
+        color: Theme.of(context).colorScheme.surface,
+        child: const Icon(Icons.broken_image_outlined),
+      );
+    }
+  }
+}
+
+String _formatIdentityPhotoSize(Object? raw) {
+  final bytes = raw is int ? raw : int.tryParse(raw?.toString() ?? '') ?? 0;
+  if (bytes <= 0) return 'Image';
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
+  final mb = kb / 1024;
+  return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
 }
 
 class _EmptyState extends StatelessWidget {
@@ -6169,16 +7768,12 @@ class _SelectionActionBar extends StatelessWidget {
 
 class _AllItemsSelectionActionBar extends StatelessWidget {
   const _AllItemsSelectionActionBar({
-    required this.onShare,
-    required this.onMove,
-    required this.onLock,
+    required this.onFavorite,
     required this.onDelete,
     required this.onMore,
   });
 
-  final VoidCallback onShare;
-  final VoidCallback onMove;
-  final VoidCallback onLock;
+  final VoidCallback onFavorite;
   final VoidCallback onDelete;
   final VoidCallback onMore;
 
@@ -6193,22 +7788,10 @@ class _AllItemsSelectionActionBar extends StatelessWidget {
       child: Row(
         children: [
           _SelectionActionNavItem(
-            key: const ValueKey('selection-action-share'),
-            icon: Icons.ios_share_outlined,
-            label: 'Share',
-            onTap: onShare,
-          ),
-          _SelectionActionNavItem(
-            key: const ValueKey('selection-action-move'),
-            icon: Icons.drive_file_move_outline,
-            label: 'Move',
-            onTap: onMove,
-          ),
-          _SelectionActionNavItem(
-            key: const ValueKey('selection-action-lock'),
-            icon: Icons.lock_outline,
-            label: 'Lock',
-            onTap: onLock,
+            key: const ValueKey('selection-action-favorite'),
+            icon: Icons.star_outline,
+            label: 'Favorite',
+            onTap: onFavorite,
           ),
           _SelectionActionNavItem(
             key: const ValueKey('selection-action-delete'),

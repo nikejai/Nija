@@ -1,9 +1,293 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nija/app/theme/app_theme.dart';
+import 'package:nija/features/vault/presentation/add_vault_item_screen.dart';
 import 'package:nija/features/vault/presentation/vault_app_shell.dart';
+import 'package:nija/features/vault/presentation/widgets/vault_entry_list.dart';
 
 void main() {
+  testWidgets('new item category list uses themed surfaces in dark mode', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
+        themeMode: ThemeMode.dark,
+        home: const NewItemCategoryScreen(customTypeDefinitions: []),
+      ),
+    );
+
+    final categoryTile = tester.widget<Material>(
+      find.byKey(const ValueKey('new-item-category-item-Login')),
+    );
+
+    expect(categoryTile.color, AppTheme.dark().colorScheme.surface);
+  });
+
+  testWidgets('custom password-only item does not expose value in subtitle', (
+    tester,
+  ) async {
+    Map<String, dynamic>? savedItem;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () async {
+              savedItem = await Navigator.of(context)
+                  .push<Map<String, dynamic>>(
+                    MaterialPageRoute(
+                      builder: (_) => const AddVaultItemScreen(
+                        fixedType: 'Door Code',
+                        customTypeDefinitions: [
+                          {
+                            'name': 'Door Code',
+                            'fields': [
+                              {'key': 'Code', 'valueType': 'password'},
+                            ],
+                          },
+                        ],
+                      ),
+                    ),
+                  );
+            },
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Title'), 'Garage');
+    await tester.enterText(find.widgetWithText(TextField, 'Code'), '123456');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(savedItem?['subtitle'], isEmpty);
+    expect(savedItem.toString(), isNot(contains("'subtitle': '123456'")));
+    final fields = savedItem?['fields'] as List<dynamic>;
+    expect(fields.single, containsPair('sensitive', true));
+  });
+
+  testWidgets('vault item list hides stored subtitle when it is sensitive', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultEntryList(
+          rows: const [
+            {
+              'kind': 'item',
+              'entry': {
+                'id': 'item-1',
+                'type': 'Custom',
+                'title': 'Server',
+                'subtitle': 'secret-first',
+                'updated': 'Now',
+                'fields': [
+                  {
+                    'label': 'Password',
+                    'value': 'secret-first',
+                    'sensitive': true,
+                  },
+                  {
+                    'label': 'URL',
+                    'value': 'admin.example.com',
+                    'sensitive': false,
+                  },
+                ],
+              },
+            },
+          ],
+          adapters: const [VaultItemListEntryAdapter()],
+          keyForRow: (row) =>
+              (row['entry'] as Map<String, dynamic>)['id'].toString(),
+          onTap: (_) {},
+          onLongPress: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.text('secret-first'), findsNothing);
+    expect(find.text('admin.example.com'), findsOneWidget);
+  });
+
+  testWidgets('dashboard filter only shows present categories', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [
+            {
+              'id': 'item-login',
+              'type': 'Login',
+              'title': 'Mail',
+              'subtitle': 'mail@example.com',
+              'updated': 'Now',
+              'fields': [],
+            },
+          ],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [
+            {
+              'name': 'Vehicle',
+              'fields': [
+                {'key': 'Plate number', 'valueType': 'text'},
+              ],
+            },
+          ],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('dashboard-filter-selector')));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(FilterChip, 'Login'), findsOneWidget);
+    expect(find.widgetWithText(FilterChip, 'Card'), findsNothing);
+    expect(find.widgetWithText(FilterChip, 'Vehicle'), findsNothing);
+    expect(find.widgetWithText(FilterChip, 'Notes'), findsOneWidget);
+  });
+
+  testWidgets('identity detail shows dynamic ID photos', (tester) async {
+    const onePixelPng =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [
+            {
+              'id': 'identity-1',
+              'type': 'Identity',
+              'title': 'Passport',
+              'subtitle': 'Ada Lovelace',
+              'updated': 'Now',
+              'fields': [
+                {'label': 'Full name', 'value': 'Ada Lovelace'},
+              ],
+              'idPhotos': [
+                {
+                  'name': 'front.png',
+                  'sizeBytes': 68,
+                  'bytesBase64': onePixelPng,
+                },
+                {
+                  'name': 'back.png',
+                  'sizeBytes': 68,
+                  'bytesBase64': onePixelPng,
+                },
+              ],
+            },
+          ],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.grid_view_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Passport'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('ID photos'), findsOneWidget);
+    expect(find.text('front.png'), findsOneWidget);
+    expect(find.text('back.png'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('identity-photo-row-0')));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose photo'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('identity-photo-picker-0')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('identity-photo-picker-0')));
+    await tester.pumpAndSettle();
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'front.png'), findsOneWidget);
+  });
+
   testWidgets('vault app shell shows primary tabs', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -1194,6 +1478,26 @@ void main() {
                 },
               ],
             },
+            {
+              'id': 'note-rich-2',
+              'title': 'Split attrs preview',
+              'preview': 'fallback split preview',
+              'updated': 'Now',
+              'pinned': false,
+              'tags': ['demo'],
+              'delta': [
+                {
+                  'insert': 'First task',
+                  'attributes': {'list': 'ordered'},
+                },
+                {'insert': '\n'},
+                {
+                  'insert': 'Second task',
+                  'attributes': {'list': 'ordered'},
+                },
+                {'insert': '\n'},
+              ],
+            },
           ],
           initialCustomTypeDefinitions: const [],
           languageMode: 'en',
@@ -1225,11 +1529,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Notes'));
+    await tester.tap(find.byIcon(Icons.grid_view_outlined));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('1. Buy milk'), findsOneWidget);
     expect(find.textContaining('2. Call mom'), findsOneWidget);
+    expect(find.textContaining('1. First task'), findsOneWidget);
+    expect(find.textContaining('2. Second task'), findsOneWidget);
   });
 
   testWidgets('sharing note copies rich-text formatted content', (
@@ -1542,6 +1848,147 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(changedTo, isTrue);
+  });
+
+  testWidgets('master password rotation shows password strength', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Master Password'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('master-password-strength-meter')),
+      findsOneWidget,
+    );
+    expect(find.text('Not started'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).at(1), 'short');
+    await tester.pumpAndSettle();
+    expect(find.text('Weak'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).at(1), 'NewStrongPass123!');
+    await tester.pumpAndSettle();
+    expect(find.text('Strong'), findsOneWidget);
+  });
+
+  testWidgets('auto lock setting updates seconds with slider', (tester) async {
+    int? changedSeconds;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          autoLockSeconds: 300,
+          onAutoLockSecondsChanged: (seconds) => changedSeconds = seconds,
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('settings-auto-lock-row')));
+    await tester.pumpAndSettle();
+
+    final slider = tester.widget<Slider>(
+      find.byKey(const ValueKey('auto-lock-seconds-slider')),
+    );
+    slider.onChanged!(120);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(changedSeconds, 120);
   });
 
   testWidgets('active vault name is visible in vault and settings tabs', (

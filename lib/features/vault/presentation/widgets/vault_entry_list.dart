@@ -55,7 +55,7 @@ class VaultItemListEntryAdapter extends VaultListEntryAdapter {
       kind: 'item',
       type: entry['type']?.toString() ?? 'Unknown',
       title: entry['title']?.toString() ?? '',
-      subtitle: entry['subtitle']?.toString() ?? '',
+      subtitle: _safeVaultItemSubtitle(entry),
       updated:
           row['updatedLabel']?.toString() ??
           entry['updated']?.toString() ??
@@ -65,6 +65,31 @@ class VaultItemListEntryAdapter extends VaultListEntryAdapter {
       color: colorForType?.call(entry['type']?.toString() ?? 'Unknown'),
     );
   }
+}
+
+String _safeVaultItemSubtitle(Map<String, dynamic> entry) {
+  final storedSubtitle = entry['subtitle']?.toString().trim() ?? '';
+  final fields = entry['fields'];
+  if (fields is! List) return storedSubtitle;
+
+  final sensitiveValues = <String>{};
+  final nonSensitiveValues = <String>[];
+  for (final rawField in fields) {
+    if (rawField is! Map) continue;
+    final field = Map<String, dynamic>.from(rawField);
+    final value = field['value']?.toString().trim() ?? '';
+    if (value.isEmpty) continue;
+    if (field['sensitive'] == true) {
+      sensitiveValues.add(value);
+    } else {
+      nonSensitiveValues.add(value);
+    }
+  }
+
+  if (storedSubtitle.isNotEmpty && !sensitiveValues.contains(storedSubtitle)) {
+    return storedSubtitle;
+  }
+  return nonSensitiveValues.isEmpty ? '' : nonSensitiveValues.first;
 }
 
 class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
@@ -81,7 +106,7 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
       kind: 'note',
       type: 'Notes',
       title: entry['title']?.toString() ?? '',
-      subtitle: entry['preview']?.toString() ?? '',
+      subtitle: _noteListPreviewText(entry),
       updated:
           row['updatedLabel']?.toString() ??
           entry['updated']?.toString() ??
@@ -91,6 +116,65 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
       color: const Color(0xFFA78BFA),
     );
   }
+}
+
+String _noteListPreviewText(Map<String, dynamic> note) {
+  final delta = note['delta'];
+  if (delta is! List) {
+    return note['preview']?.toString() ?? '';
+  }
+  try {
+    final lines = <String>[];
+    final currentLine = StringBuffer();
+    final segmentAttrs = <Map<String, dynamic>>[];
+    var orderedIndex = 0;
+    for (final raw in delta) {
+      final op = Map<String, dynamic>.from(raw as Map);
+      final insert = op['insert'];
+      if (insert is! String) continue;
+      final attrs = Map<String, dynamic>.from(
+        (op['attributes'] as Map?) ?? const <String, dynamic>{},
+      );
+      final parts = insert.split('\n');
+      for (var i = 0; i < parts.length; i++) {
+        final isLineBreak = i < parts.length - 1;
+        if (parts[i].isNotEmpty) {
+          currentLine.write(parts[i]);
+          segmentAttrs.add(attrs);
+        }
+        if (!isLineBreak) continue;
+        final lineText = currentLine.toString().trim();
+        currentLine.clear();
+        final baseAttrs = segmentAttrs.isNotEmpty
+            ? Map<String, dynamic>.from(segmentAttrs.last)
+            : <String, dynamic>{};
+        final lineAttrs = <String, dynamic>{...baseAttrs, ...attrs};
+        segmentAttrs.clear();
+        if (lineText.isEmpty) {
+          if (lineAttrs['list'] != 'ordered') orderedIndex = 0;
+          continue;
+        }
+        final listType = lineAttrs['list']?.toString();
+        if (listType == 'ordered') {
+          orderedIndex += 1;
+          lines.add('$orderedIndex. $lineText');
+        } else if (listType == 'bullet') {
+          orderedIndex = 0;
+          lines.add('• $lineText');
+        } else {
+          orderedIndex = 0;
+          lines.add(lineText);
+        }
+        if (lines.length >= 2) return lines.join(' ');
+      }
+    }
+    final trailing = currentLine.toString().trim();
+    if (trailing.isNotEmpty) lines.add(trailing);
+    if (lines.isNotEmpty) return lines.join(' ');
+  } catch (_) {
+    // Fallback below.
+  }
+  return note['preview']?.toString() ?? '';
 }
 
 class VaultDocumentListEntryAdapter extends VaultListEntryAdapter {

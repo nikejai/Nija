@@ -16,9 +16,12 @@ class NijaApp extends StatefulWidget {
 
 class _NijaAppState extends State<NijaApp> {
   static const _themeModePrefsKey = 'nija_theme_mode_v1';
+  static const _autoLockSecondsPrefsKey = 'nija_auto_lock_seconds_v1';
+  static const _defaultAutoLockSeconds = 300;
 
   String _languageMode = 'system';
   ThemeMode _themeMode = ThemeMode.system;
+  int _autoLockSeconds = _defaultAutoLockSeconds;
 
   Locale? get _forcedLocale => switch (_languageMode) {
     'en' => const Locale('en'),
@@ -30,6 +33,7 @@ class _NijaAppState extends State<NijaApp> {
   void initState() {
     super.initState();
     _restoreThemeMode();
+    _restoreAutoLockSeconds();
   }
 
   Future<void> _restoreThemeMode() async {
@@ -44,6 +48,20 @@ class _NijaAppState extends State<NijaApp> {
     setState(() => _themeMode = mode);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_themeModePrefsKey, mode.name);
+  }
+
+  Future<void> _restoreAutoLockSeconds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getInt(_autoLockSecondsPrefsKey);
+    if (stored == null || !mounted || stored == _autoLockSeconds) return;
+    setState(() => _autoLockSeconds = stored.clamp(0, 3600));
+  }
+
+  Future<void> _setAutoLockSeconds(int seconds) async {
+    final normalized = seconds.clamp(0, 3600);
+    setState(() => _autoLockSeconds = normalized);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_autoLockSecondsPrefsKey, normalized);
   }
 
   ThemeMode _themeModeFromName(String? name) => switch (name) {
@@ -88,6 +106,9 @@ class _NijaAppState extends State<NijaApp> {
         onLanguageModeChanged: (mode) => setState(() => _languageMode = mode),
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,
+        autoLockDelay: Duration(seconds: _autoLockSeconds),
+        autoLockSeconds: _autoLockSeconds,
+        onAutoLockSecondsChanged: _setAutoLockSeconds,
       ),
     );
   }

