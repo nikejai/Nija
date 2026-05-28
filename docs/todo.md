@@ -172,3 +172,20 @@ Work these items strictly one at a time. Each item should be fully implemented, 
     - Body containing the full shared text.
     - Timestamp metadata (shared/import time).
   - Route to vault selection when needed, then save into the chosen vault.
+
+## 13) Release Readiness Fixes
+
+- [x] Clean up `vault_app_shell.dart` analyzer issues.
+  - Goal: `flutter analyze` passes with zero issues.
+  - Scope: unused fields/methods, deprecated `WillPopScope`, unnecessary casts, and related analyzer warnings.
+- [ ] Fix onboarding create-vault/recovery widget tests.
+  - Goal: onboarding tests reliably reach `Recovery phrase` and `I saved my phrase`.
+  - Scope: update test helpers or UI flow assumptions around vault-name/password fields and async create flow.
+- [ ] Fix note editor widget test localization setup.
+  - Goal: note editor tests pass without `MissingFlutterQuillLocalizationException`.
+  - Scope: add `FlutterQuillLocalizations.delegate` to test app setup or shared test harness.
+- [ ] Update stale vault shell widget tests for current UI.
+  - Goal: `test/vault_shell_test.dart` passes against the current app navigation/actions.
+  - Scope: update tests expecting old `Custom templates`, `All types`, note action keys, selection/share actions, and related labels.
+- [ ] Re-run release readiness gates.
+  - Goal: `./scripts/release_hardening_gate.sh`, `flutter test`, and `flutter build apk --release` all pass.

@@ -143,17 +143,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
   final SecretSharePortabilityAdapter _secretSharePortability =
       SecretSharePortabilityAdapterImpl();
   int _tabIndex = 0;
-  String _query = '';
-  String _notesQuery = '';
   String _allItemsQuery = '';
   String _allItemsFilterSearch = '';
-  bool _notesFiltersExpanded = false;
   String _vaultSort = 'last_accessed';
   String _notesSort = 'last_accessed';
-  String _vaultFilterType = 'all';
-  String _notesFilterTag = 'all';
-  String _vaultPinFilter = 'all';
-  String _notesPinFilter = 'all';
   String _allItemsTypeFilter = 'all';
   Set<String> _allItemsFilterTypes = <String>{};
   bool _allItemsFilterFavoritesOnly = false;
@@ -164,11 +157,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   String _cloudBackupFrequency = 'daily';
   int _cloudBackupLastAtEpochMs = 0;
   String _cloudBackupAccountLabel = 'Not connected';
-  bool _vaultSelectionMode = false;
-  bool _notesSelectionMode = false;
   bool _allItemsSelectionMode = false;
-  final Set<String> _selectedVaultItemIds = <String>{};
-  final Set<String> _selectedNoteIds = <String>{};
   final Set<String> _selectedAllItemsKeys = <String>{};
   late final List<Map<String, dynamic>> _customTypeDefinitions;
   late final List<Map<String, dynamic>> _items;
@@ -225,7 +214,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ..addAll(
           widget.initialItems.map((entry) => Map<String, dynamic>.from(entry)),
         );
-      _selectedVaultItemIds.clear();
       _selectedAllItemsKeys.removeWhere((key) => key.startsWith('item:'));
     }
     if (!listEquals(oldWidget.initialNotes, widget.initialNotes)) {
@@ -234,7 +222,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ..addAll(
           widget.initialNotes.map((entry) => Map<String, dynamic>.from(entry)),
         );
-      _selectedNoteIds.clear();
       _selectedAllItemsKeys.removeWhere((key) => key.startsWith('note:'));
     }
     if (!listEquals(
@@ -299,42 +286,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
       if (kDebugMode) _buildDebugInternalsTab(context),
     ];
 
-    return WillPopScope(
-      onWillPop: () async {
-        if (_allItemsSelectionMode) {
-          _clearAllItemsSelection();
-          return false;
-        }
-        if (_notesSelectionMode) {
-          _clearNotesSelection();
-          return false;
-        }
-        if (_vaultSelectionMode) {
-          _clearVaultSelection();
-          return false;
-        }
-        if (_tabIndex != 0) {
-          setState(() => _tabIndex = 0);
-          _lastBackOnDashboardAt = null;
-          return false;
-        }
-
-        final now = DateTime.now();
-        final shouldExit =
-            _lastBackOnDashboardAt != null &&
-            now.difference(_lastBackOnDashboardAt!) <
-                const Duration(seconds: 2);
-        if (shouldExit) {
-          _lastBackOnDashboardAt = null;
-          await SystemNavigator.pop();
-          return false;
-        }
-
-        _lastBackOnDashboardAt = now;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Press back again to exit.')),
-        );
-        return false;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        unawaited(_handleBackNavigation());
       },
       child: Scaffold(
         body: SafeArea(child: pages[_tabIndex]),
@@ -406,6 +362,34 @@ class _VaultAppShellState extends State<VaultAppShell> {
         floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       ),
     );
+  }
+
+  Future<void> _handleBackNavigation() async {
+    if (_allItemsSelectionMode) {
+      _clearAllItemsSelection();
+      return;
+    }
+    if (_tabIndex != 0) {
+      setState(() => _tabIndex = 0);
+      _lastBackOnDashboardAt = null;
+      return;
+    }
+
+    final now = DateTime.now();
+    final shouldExit =
+        _lastBackOnDashboardAt != null &&
+        now.difference(_lastBackOnDashboardAt!) < const Duration(seconds: 2);
+    if (shouldExit) {
+      _lastBackOnDashboardAt = null;
+      await SystemNavigator.pop();
+      return;
+    }
+
+    _lastBackOnDashboardAt = now;
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Press back again to exit.')));
   }
 
   Widget _buildVaultTab(BuildContext context) {
@@ -509,7 +493,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       contentPadding: const EdgeInsets.symmetric(vertical: 0),
                     ),
                     textInputAction: TextInputAction.search,
-                    onChanged: (value) => setState(() => _query = value),
                     onSubmitted: _applyDashboardSearchToAllItems,
                   ),
                 ),
@@ -611,7 +594,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       adapters: _vaultListEntryAdapters,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 8),
                       iconAlpha: 0.2,
                       rowPadding: const EdgeInsets.all(12),
                       trailingMode: VaultEntryTrailingMode.chevron,
@@ -625,353 +609,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildNotesTab(BuildContext context) {
-    final tagOptions = _notesTagFilterOptions();
-    final filtered = _notes.where((note) {
-      final query = _notesQuery.trim().toLowerCase();
-      final title = note['title']?.toString().toLowerCase() ?? '';
-      final preview = note['preview']?.toString().toLowerCase() ?? '';
-      final tags = (note['tags'] as List<dynamic>? ?? const <dynamic>[])
-          .map((entry) => entry.toString().toLowerCase())
-          .toList();
-      final matchesTags = tags.any((tag) => tag.contains(query));
-      final matchesQuery =
-          query.isEmpty ||
-          title.contains(query) ||
-          preview.contains(query) ||
-          matchesTags;
-      final matchesTagFilter =
-          _notesFilterTag == 'all' || tags.contains(_notesFilterTag);
-      final pinned = note['pinned'] == true;
-      final matchesPinned =
-          _notesPinFilter == 'all' ||
-          (_notesPinFilter == 'pinned' && pinned) ||
-          (_notesPinFilter == 'unpinned' && !pinned);
-      return matchesQuery && matchesPinned && matchesTagFilter;
-    }).toList()..sort(_compareNotes);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          AppStrings.tabNotes,
-                          style: vaultPageHeadingStyle(context),
-                        ),
-                        const SizedBox(width: 6),
-                        InkWell(
-                          key: const ValueKey('notes-info-icon'),
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () => _showNotesInfoDialog(context),
-                          child: Padding(
-                            padding: const EdgeInsets.all(2),
-                            child: Icon(
-                              Icons.info_outline,
-                              size: 18,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      AppStrings.notesSubtitle,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ],
-                ),
-              ),
-              _CountPill(label: '${filtered.length} notes'),
-            ],
-          ),
-          if (_notesSelectionMode) ...[
-            const SizedBox(height: 10),
-            _SelectionActionBar(
-              selectedCount: _selectedNoteIds.length,
-              onClear: _clearNotesSelection,
-              onPin: _togglePinSelectedNotes,
-              onDelete: _deleteSelectedNotes,
-            ),
-          ],
-          const SizedBox(height: 12),
-          SearchBar(
-            hintText: AppStrings.searchNotes,
-            leading: const Icon(Icons.search),
-            onChanged: (value) => setState(() => _notesQuery = value),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _SortSelector(
-                  key: const ValueKey('notes-sort-selector'),
-                  label: 'Sort by',
-                  icon: Icons.sort,
-                  selectedLabel: _selectorLabelForValue(_notesSort, const [
-                    _SelectorOption(
-                      value: 'last_accessed',
-                      label: 'Last accessed',
-                    ),
-                    _SelectorOption(value: 'title', label: 'Title'),
-                    _SelectorOption(value: 'tags', label: 'Tags'),
-                  ]),
-                  onTap: () => _openSelectorSheet(
-                    title: 'Sort notes by',
-                    value: _notesSort,
-                    options: const [
-                      _SelectorOption(
-                        value: 'last_accessed',
-                        label: 'Last accessed',
-                      ),
-                      _SelectorOption(value: 'title', label: 'Title'),
-                      _SelectorOption(value: 'tags', label: 'Tags'),
-                    ],
-                    onSelected: _setNotesSort,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _SortSelector(
-                  key: const ValueKey('notes-filter-selector'),
-                  label: 'Filter by',
-                  icon: Icons.filter_alt_outlined,
-                  selectedLabel: _selectorLabelForValue(
-                    _notesFilterTag,
-                    tagOptions
-                        .map(
-                          (tag) => _SelectorOption(
-                            value: tag,
-                            label: tag == 'all' ? 'All tags' : '#$tag',
-                          ),
-                        )
-                        .toList(),
-                  ),
-                  onTap: () => _openSelectorSheet(
-                    title: 'Filter notes by tag',
-                    value: _notesFilterTag,
-                    options: tagOptions
-                        .map(
-                          (tag) => _SelectorOption(
-                            value: tag,
-                            label: tag == 'all' ? 'All tags' : '#$tag',
-                          ),
-                        )
-                        .toList(),
-                    onSelected: (value) =>
-                        setState(() => _notesFilterTag = value),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              ChoiceChip(
-                label: const Text('All'),
-                selected: _notesPinFilter == 'all',
-                onSelected: (_) => setState(() => _notesPinFilter = 'all'),
-              ),
-              ChoiceChip(
-                label: const Text('Pinned'),
-                selected: _notesPinFilter == 'pinned',
-                onSelected: (_) => setState(() => _notesPinFilter = 'pinned'),
-              ),
-              ChoiceChip(
-                label: const Text('Unpinned'),
-                selected: _notesPinFilter == 'unpinned',
-                onSelected: (_) => setState(() => _notesPinFilter = 'unpinned'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: ExpansionTile(
-              initiallyExpanded: _notesFiltersExpanded,
-              onExpansionChanged: (expanded) =>
-                  setState(() => _notesFiltersExpanded = expanded),
-              leading: const Icon(Icons.tune),
-              title: const Text('Notes filters'),
-              childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              children: [
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      FilterChip(
-                        label: Text(AppStrings.pinned),
-                        selected: _notesPinFilter == 'pinned',
-                        onSelected: (selected) => setState(
-                          () => _notesPinFilter = selected ? 'pinned' : 'all',
-                        ),
-                      ),
-                      ActionChip(
-                        avatar: const Icon(Icons.sort, size: 16),
-                        label: Text(AppStrings.pinnedFirst),
-                        onPressed: () {},
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (filtered.isEmpty)
-            Expanded(
-              child: _EmptyState(
-                title: AppStrings.noNotesFound,
-                subtitle: AppStrings.noNotesFoundHint,
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.separated(
-                itemCount: filtered.length,
-                separatorBuilder: (context, index) => const Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: Color(0xFFE4E4E7),
-                ),
-                itemBuilder: (context, index) {
-                  final note = filtered[index];
-                  final tags =
-                      (note['tags'] as List<dynamic>? ?? const <dynamic>[])
-                          .cast<String>()
-                          .map((tag) => tag.trim())
-                          .where(
-                            (tag) =>
-                                tag.isNotEmpty && tag.toLowerCase() != 'note',
-                          )
-                          .toList();
-                  return Card(
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                      leading: _notesSelectionMode
-                          ? Checkbox(
-                              value: _selectedNoteIds.contains(
-                                note['id']?.toString() ?? '',
-                              ),
-                              onChanged: (_) => _toggleNoteSelection(note),
-                            )
-                          : InkWell(
-                              key: ValueKey('note-leading-${note['id']}'),
-                              borderRadius: BorderRadius.circular(24),
-                              onTap: () => _enterNotesSelectionMode(note),
-                              child: CircleAvatar(
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHighest,
-                                child: const Icon(
-                                  Icons.description_outlined,
-                                  size: 18,
-                                ),
-                              ),
-                            ),
-                      title: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              note['title'].toString(),
-                              style: Theme.of(context).textTheme.bodyLarge
-                                  ?.copyWith(fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          if (note['pinned'] == true)
-                            const Icon(
-                              Icons.star,
-                              size: 16,
-                              color: Color(0xFFF59E0B),
-                            ),
-                        ],
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(height: 2),
-                          Text(
-                            _noteListPreviewText(note),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${AppStrings.lastAccessed}: ${note['updated']?.toString() ?? 'Now'}',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                          ),
-                          if (tags.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: tags
-                                  .take(2)
-                                  .map((tag) => _TinyChip(label: '#$tag'))
-                                  .toList(),
-                            ),
-                          ],
-                        ],
-                      ),
-                      trailing: _notesSelectionMode
-                          ? null
-                          : const Icon(Icons.chevron_right),
-                      onTap: () => _notesSelectionMode
-                          ? _toggleNoteSelection(note)
-                          : _openNoteDetail(context, note),
-                      onLongPress: () => _notesSelectionMode
-                          ? _toggleNoteSelection(note)
-                          : _showNoteQuickActions(context, note),
-                    ),
-                  );
-                },
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showNotesInfoDialog(BuildContext context) async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Notes info'),
-        content: const Text(
-          'Notes are stored inside the same encrypted vault file. They are private by default and never synced as readable text.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
       ),
     );
   }
@@ -1377,12 +1014,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return _updatedRank(entry);
   }
 
-  int _lastAccessedSortValue(Map<String, dynamic> entry) {
-    final parsed = _lastAccessedAt(entry);
-    if (parsed != null) return parsed.millisecondsSinceEpoch;
-    return _updatedRank(entry);
-  }
-
   DateTime? _lastAccessedAt(Map<String, dynamic> entry) {
     return _parseEntryTimestamp(entry['lastAccessedAt']);
   }
@@ -1469,7 +1100,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final query = value.trim();
     if (query.isEmpty) return;
     setState(() {
-      _query = query;
       _allItemsQuery = query;
       _allItemsSearchController.text = query;
       _allItemsSearchController.selection = TextSelection.collapsed(
@@ -1510,15 +1140,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final applied = await Navigator.of(context).push<_AllItemsFilterState>(
       PageRouteBuilder(
         opaque: false,
-        pageBuilder: (_, __, ___) => _AllItemsFiltersOverlay(
-          initialState: _AllItemsFilterState(
-            search: _allItemsFilterSearch,
-            selectedTypes: _allItemsFilterTypes,
-            favoritesOnly: _allItemsFilterFavoritesOnly,
-            dateRange: _allItemsFilterDateRange,
-          ),
-          typeOptions: typeOptions,
-        ),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            _AllItemsFiltersOverlay(
+              initialState: _AllItemsFilterState(
+                search: _allItemsFilterSearch,
+                selectedTypes: _allItemsFilterTypes,
+                favoritesOnly: _allItemsFilterFavoritesOnly,
+                dateRange: _allItemsFilterDateRange,
+              ),
+              typeOptions: typeOptions,
+            ),
       ),
     );
     if (applied == null) return;
@@ -2401,31 +2032,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return true;
   }
 
-  Future<void> _openCreateCustomTypeScreen(BuildContext context) async {
-    final createdType = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(builder: (_) => const CreateCustomTypeScreen()),
-    );
-    if (createdType == null) return;
-
-    final name = createdType['name']?.toString() ?? '';
-    if (name.isEmpty) return;
-
-    final exists = _customTypeDefinitions.any(
-      (definition) =>
-          definition['name']?.toString().toLowerCase() == name.toLowerCase(),
-    );
-    if (exists) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(AppStrings.customTypeExists)));
-      return;
-    }
-
-    setState(() => _customTypeDefinitions.add(createdType));
-    await _persistVaultData();
-  }
-
   Future<void> _showCustomTemplateManager(BuildContext context) async {
     final updated = await Navigator.of(context)
         .push<List<Map<String, dynamic>>>(
@@ -2494,17 +2100,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }
   }
 
-  Future<void> _showAddNoteSheet(BuildContext context) async {
-    final created = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        builder: (_) => NoteEditorScreen(onAutoSave: _upsertNoteAndPersist),
-      ),
-    );
-    if (created == null) return;
-    setState(() => _notes.insert(0, created));
-    await _persistVaultData();
-  }
-
   void _upsertNoteAndPersist(Map<String, dynamic> note) {
     final id = note['id']?.toString();
     if (id == null || id.isEmpty) return;
@@ -2515,36 +2110,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
       setState(() => _notes[idx] = note);
     }
     unawaited(_persistVaultData());
-  }
-
-  Future<void> _openTypeItemsScreen(BuildContext context, String type) async {
-    final items = type == AppStrings.secureNotes
-        ? _notes
-        : _items.where((entry) => entry['type']?.toString() == type).toList();
-
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => _TypeItemsScreen(
-          type: type,
-          items: items,
-          onOpenItem: type == AppStrings.secureNotes
-              ? null
-              : (item) => _openItemDetail(context, item),
-          onOpenNote: type == AppStrings.secureNotes
-              ? (note) => _openNoteDetail(context, note)
-              : null,
-          onItemActions: type == AppStrings.secureNotes
-              ? null
-              : (item) => _showItemQuickActions(context, item),
-          onNoteActions: type == AppStrings.secureNotes
-              ? (note) => _showNoteQuickActions(context, note)
-              : null,
-        ),
-      ),
-    );
-    if (mounted) {
-      setState(() {});
-    }
   }
 
   Future<void> _persistVaultData() async {
@@ -2562,51 +2127,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ),
       );
     }
-  }
-
-  int _compareVaultItems(Map<String, dynamic> a, Map<String, dynamic> b) {
-    final aPinned = a['pinned'] == true ? 1 : 0;
-    final bPinned = b['pinned'] == true ? 1 : 0;
-    final pinCmp = bPinned.compareTo(aPinned);
-    if (pinCmp != 0) return pinCmp;
-    if (_vaultSort == 'title') {
-      final titleCmp = (a['title']?.toString() ?? '').toLowerCase().compareTo(
-        (b['title']?.toString() ?? '').toLowerCase(),
-      );
-      if (titleCmp != 0) return titleCmp;
-    }
-    return _updatedRank(b).compareTo(_updatedRank(a));
-  }
-
-  int _compareNotes(Map<String, dynamic> a, Map<String, dynamic> b) {
-    final aPinned = a['pinned'] == true ? 1 : 0;
-    final bPinned = b['pinned'] == true ? 1 : 0;
-    final pinCmp = bPinned.compareTo(aPinned);
-    if (pinCmp != 0) return pinCmp;
-    if (_notesSort == 'title') {
-      final titleCmp = (a['title']?.toString() ?? '').toLowerCase().compareTo(
-        (b['title']?.toString() ?? '').toLowerCase(),
-      );
-      if (titleCmp != 0) return titleCmp;
-    }
-    if (_notesSort == 'tags') {
-      final aTag = _firstTag(a);
-      final bTag = _firstTag(b);
-      final tagCmp = aTag.compareTo(bTag);
-      if (tagCmp != 0) return tagCmp;
-    }
-    return _updatedRank(b).compareTo(_updatedRank(a));
-  }
-
-  String _firstTag(Map<String, dynamic> note) {
-    final tags =
-        (note['tags'] as List<dynamic>? ?? const <dynamic>[])
-            .map((entry) => entry.toString().trim().toLowerCase())
-            .where((entry) => entry.isNotEmpty)
-            .toList()
-          ..sort();
-    if (tags.isEmpty) return 'zzzz';
-    return tags.first;
   }
 
   int _updatedRank(Map<String, dynamic> entry) {
@@ -2865,106 +2385,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     } else {
       await _setVaultSort(selected);
     }
-  }
-
-  String _selectorLabelForValue(String value, List<_SelectorOption> options) {
-    for (final option in options) {
-      if (option.value == value) return option.label;
-    }
-    return options.isEmpty ? '' : options.first.label;
-  }
-
-  Future<void> _openSelectorSheet({
-    required String title,
-    required String value,
-    required List<_SelectorOption> options,
-    required ValueChanged<String> onSelected,
-  }) async {
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(title: Text(title)),
-            ...options.map(
-              (option) => ListTile(
-                title: Text(option.label),
-                trailing: option.value == value
-                    ? const Icon(Icons.check)
-                    : null,
-                onTap: () => Navigator.of(context).pop(option.value),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (selected == null || selected == value) return;
-    onSelected(selected);
-  }
-
-  void _enterVaultSelectionMode(Map<String, dynamic> item) {
-    final id = item['id']?.toString();
-    if (id == null || id.isEmpty) return;
-    setState(() {
-      _vaultSelectionMode = true;
-      _selectedVaultItemIds.add(id);
-    });
-  }
-
-  void _enterNotesSelectionMode(Map<String, dynamic> note) {
-    final id = note['id']?.toString();
-    if (id == null || id.isEmpty) return;
-    setState(() {
-      _notesSelectionMode = true;
-      _selectedNoteIds.add(id);
-    });
-  }
-
-  void _toggleVaultItemSelection(Map<String, dynamic> item) {
-    final id = item['id']?.toString();
-    if (id == null || id.isEmpty) return;
-    setState(() {
-      if (_selectedVaultItemIds.contains(id)) {
-        _selectedVaultItemIds.remove(id);
-      } else {
-        _selectedVaultItemIds.add(id);
-      }
-      if (_selectedVaultItemIds.isEmpty) {
-        _vaultSelectionMode = false;
-      }
-    });
-  }
-
-  void _toggleNoteSelection(Map<String, dynamic> note) {
-    final id = note['id']?.toString();
-    if (id == null || id.isEmpty) return;
-    setState(() {
-      if (_selectedNoteIds.contains(id)) {
-        _selectedNoteIds.remove(id);
-      } else {
-        _selectedNoteIds.add(id);
-      }
-      if (_selectedNoteIds.isEmpty) {
-        _notesSelectionMode = false;
-      }
-    });
-  }
-
-  void _clearVaultSelection() {
-    setState(() {
-      _vaultSelectionMode = false;
-      _selectedVaultItemIds.clear();
-    });
-  }
-
-  void _clearNotesSelection() {
-    setState(() {
-      _notesSelectionMode = false;
-      _selectedNoteIds.clear();
-    });
   }
 
   String _allItemsSelectionKey(Map<String, dynamic> row) {
@@ -3315,14 +2735,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
           _lastDeletedAllItems.where((entry) => entry.kind == 'item').toList()
             ..sort((a, b) => a.index.compareTo(b.index));
       for (final snapshot in itemSnapshots) {
-        final insertAt = snapshot.index.clamp(0, _items.length) as int;
+        final insertAt = snapshot.index.clamp(0, _items.length);
         _items.insert(insertAt, _deepCopyEntry(snapshot.entry));
       }
       final noteSnapshots =
           _lastDeletedAllItems.where((entry) => entry.kind == 'note').toList()
             ..sort((a, b) => a.index.compareTo(b.index));
       for (final snapshot in noteSnapshots) {
-        final insertAt = snapshot.index.clamp(0, _notes.length) as int;
+        final insertAt = snapshot.index.clamp(0, _notes.length);
         _notes.insert(insertAt, _deepCopyEntry(snapshot.entry));
       }
       _lastDeletedAllItems = <_IndexedEntry>[];
@@ -3355,71 +2775,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return Map<String, dynamic>.from(jsonDecode(jsonEncode(entry)) as Map);
   }
 
-  Future<void> _deleteSelectedVaultItems() async {
-    if (_selectedVaultItemIds.isEmpty) return;
-    setState(() {
-      _items.removeWhere(
-        (item) => _selectedVaultItemIds.contains(item['id']?.toString() ?? ''),
-      );
-      _vaultSelectionMode = false;
-      _selectedVaultItemIds.clear();
-    });
-    await _persistVaultData();
-  }
-
-  Future<void> _deleteSelectedNotes() async {
-    if (_selectedNoteIds.isEmpty) return;
-    setState(() {
-      _notes.removeWhere(
-        (note) => _selectedNoteIds.contains(note['id']?.toString() ?? ''),
-      );
-      _notesSelectionMode = false;
-      _selectedNoteIds.clear();
-    });
-    await _persistVaultData();
-  }
-
-  Future<void> _togglePinSelectedVaultItems() async {
-    if (_selectedVaultItemIds.isEmpty) return;
-    final selectedItems = _items
-        .where(
-          (item) =>
-              _selectedVaultItemIds.contains(item['id']?.toString() ?? ''),
-        )
-        .toList();
-    if (selectedItems.isEmpty) return;
-    final shouldPin = selectedItems.any((item) => item['pinned'] != true);
-    setState(() {
-      for (final item in _items) {
-        final id = item['id']?.toString() ?? '';
-        if (_selectedVaultItemIds.contains(id)) {
-          item['pinned'] = shouldPin;
-        }
-      }
-    });
-    await _persistVaultData();
-  }
-
-  Future<void> _togglePinSelectedNotes() async {
-    if (_selectedNoteIds.isEmpty) return;
-    final selectedNotes = _notes
-        .where(
-          (note) => _selectedNoteIds.contains(note['id']?.toString() ?? ''),
-        )
-        .toList();
-    if (selectedNotes.isEmpty) return;
-    final shouldPin = selectedNotes.any((note) => note['pinned'] != true);
-    setState(() {
-      for (final note in _notes) {
-        final id = note['id']?.toString() ?? '';
-        if (_selectedNoteIds.contains(id)) {
-          note['pinned'] = shouldPin;
-        }
-      }
-    });
-    await _persistVaultData();
-  }
-
   String _itemPlainText(Map<String, dynamic> item) {
     final buffer = StringBuffer();
     buffer.writeln(item['title']?.toString() ?? 'Untitled');
@@ -3444,69 +2799,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
       buffer.writeln(fullText);
     }
     return buffer.toString().trim();
-  }
-
-  String _noteListPreviewText(Map<String, dynamic> note) {
-    final delta = note['delta'];
-    if (delta is! List) {
-      return note['preview']?.toString() ?? '';
-    }
-    try {
-      final lines = <String>[];
-      final currentLine = StringBuffer();
-      final segmentAttrs = <Map<String, dynamic>>[];
-      var orderedIndex = 0;
-      for (final raw in delta) {
-        final op = Map<String, dynamic>.from(raw as Map);
-        final insert = op['insert'];
-        if (insert is! String) continue;
-        final attrs = Map<String, dynamic>.from(
-          (op['attributes'] as Map?) ?? const <String, dynamic>{},
-        );
-        final parts = insert.split('\n');
-        for (var i = 0; i < parts.length; i++) {
-          final isLineBreak = i < parts.length - 1;
-          if (parts[i].isNotEmpty) {
-            currentLine.write(parts[i]);
-            segmentAttrs.add(attrs);
-          }
-          if (!isLineBreak) continue;
-          final lineText = currentLine.toString().trim();
-          currentLine.clear();
-          final baseAttrs = segmentAttrs.isNotEmpty
-              ? Map<String, dynamic>.from(segmentAttrs.last)
-              : <String, dynamic>{};
-          final lineAttrs = <String, dynamic>{...baseAttrs, ...attrs};
-          segmentAttrs.clear();
-          if (lineText.isEmpty) {
-            if (lineAttrs['list'] != 'ordered') orderedIndex = 0;
-            continue;
-          }
-          final listType = lineAttrs['list']?.toString();
-          if (listType == 'ordered') {
-            orderedIndex += 1;
-            lines.add('$orderedIndex. $lineText');
-          } else if (listType == 'bullet') {
-            orderedIndex = 0;
-            lines.add('• $lineText');
-          } else {
-            orderedIndex = 0;
-            lines.add(lineText);
-          }
-          if (lines.length >= 2) {
-            return lines.join(' ');
-          }
-        }
-      }
-      final trailing = currentLine.toString().trim();
-      if (trailing.isNotEmpty) {
-        lines.add(trailing);
-      }
-      if (lines.isNotEmpty) return lines.join(' ');
-    } catch (_) {
-      // Fallback below.
-    }
-    return note['preview']?.toString() ?? '';
   }
 
   String _extractNoteBodyShareText(Map<String, dynamic> note) {
@@ -3603,32 +2895,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
       }
     }
     return note['preview']?.toString().trim() ?? '';
-  }
-
-  List<String> _vaultTypeFilterOptions() {
-    final types =
-        _items
-            .map((entry) => entry['type']?.toString().trim() ?? '')
-            .where((entry) => entry.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    return ['all', ...types];
-  }
-
-  List<String> _notesTagFilterOptions() {
-    final tags = <String>{};
-    for (final note in _notes) {
-      final raw = (note['tags'] as List<dynamic>? ?? const <dynamic>[]);
-      for (final entry in raw) {
-        final cleaned = entry.toString().trim().toLowerCase();
-        if (cleaned.isNotEmpty) {
-          tags.add(cleaned);
-        }
-      }
-    }
-    final sorted = tags.toList()..sort();
-    return ['all', ...sorted];
   }
 
   Future<void> _showNoteQuickActions(
@@ -5112,56 +4378,6 @@ String _formatAutoLockSeconds(int seconds) {
   return '$seconds sec';
 }
 
-class _SortSelector extends StatelessWidget {
-  const _SortSelector({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.selectedLabel,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final String selectedLabel;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
-        const SizedBox(width: 8),
-        Text(label, style: Theme.of(context).textTheme.bodyMedium),
-        const SizedBox(width: 8),
-        Expanded(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-              child: Row(
-                children: [
-                  Expanded(child: Text(selectedLabel)),
-                  const Icon(Icons.arrow_drop_down),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _SelectorOption {
-  const _SelectorOption({required this.value, required this.label});
-
-  final String value;
-  final String label;
-}
-
 class _CustomTemplateManagerScreen extends StatefulWidget {
   const _CustomTemplateManagerScreen({
     required this.initialDefinitions,
@@ -5444,127 +4660,6 @@ class _CustomTemplateManagerScreenState
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(AppStrings.customTypeExists)));
-  }
-}
-
-class _ItemCard extends StatelessWidget {
-  const _ItemCard({
-    required this.item,
-    required this.onTap,
-    required this.onLongPress,
-    required this.selectionMode,
-    required this.selected,
-    required this.onLeadingTap,
-  });
-
-  final Map<String, dynamic> item;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
-  final bool selectionMode;
-  final bool selected;
-  final VoidCallback onLeadingTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final tags = (item['tags'] as List<dynamic>? ?? const <dynamic>[])
-        .map((entry) => entry.toString().trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList();
-    return Card(
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        leading: selectionMode
-            ? Checkbox(value: selected, onChanged: (_) => onTap())
-            : InkWell(
-                key: ValueKey('vault-leading-${item['id']}'),
-                borderRadius: BorderRadius.circular(10),
-                onTap: onLeadingTap,
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(_iconForType(item['type'].toString()), size: 18),
-                ),
-              ),
-        title: Text(
-          item['title'].toString(),
-          style: Theme.of(
-            context,
-          ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 2),
-            Text(item['subtitle'].toString()),
-            const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                item['type']?.toString() ?? 'Item',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            if (tags.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: tags
-                    .take(2)
-                    .map((tag) => _TinyChip(label: '#$tag'))
-                    .toList(),
-              ),
-            ],
-          ],
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              '${AppStrings.lastAccessed}: ${item['updated']?.toString() ?? 'Now'}',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            if (item['pinned'] == true)
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: Icon(Icons.star, size: 14, color: Color(0xFFF59E0B)),
-              ),
-          ],
-        ),
-        onTap: onTap,
-        onLongPress: onLongPress,
-      ),
-    );
-  }
-
-  IconData _iconForType(String type) {
-    switch (type) {
-      case 'Card':
-        return Icons.credit_card;
-      case 'Identity':
-        return Icons.badge_outlined;
-      default:
-        return Icons.key_outlined;
-    }
   }
 }
 
@@ -7588,184 +6683,6 @@ class _HomeTypeCard extends StatelessWidget {
   }
 }
 
-class _TypeItemsScreen extends StatelessWidget {
-  const _TypeItemsScreen({
-    required this.type,
-    required this.items,
-    this.onOpenItem,
-    this.onOpenNote,
-    this.onItemActions,
-    this.onNoteActions,
-  });
-
-  final String type;
-  final List<Map<String, dynamic>> items;
-  final ValueChanged<Map<String, dynamic>>? onOpenItem;
-  final ValueChanged<Map<String, dynamic>>? onOpenNote;
-  final ValueChanged<Map<String, dynamic>>? onItemActions;
-  final ValueChanged<Map<String, dynamic>>? onNoteActions;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(type)),
-      body: items.isEmpty
-          ? _EmptyState(
-              title: AppStrings.noItemsYet,
-              subtitle: AppStrings.noItemsYetHint,
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: items.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 10),
-              itemBuilder: (context, index) {
-                final item = items[index];
-                final title = item['title']?.toString() ?? 'Untitled';
-                final subtitle =
-                    item['subtitle']?.toString() ??
-                    item['preview']?.toString() ??
-                    '';
-                final updated = item['updated']?.toString() ?? '';
-
-                return Card(
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
-                    ),
-                    title: Text(
-                      title,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    subtitle: subtitle.isEmpty
-                        ? null
-                        : Text(
-                            subtitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (updated.isNotEmpty)
-                          Text(
-                            updated,
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyMedium?.copyWith(fontSize: 11),
-                          ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          tooltip: 'More actions',
-                          icon: const Icon(Icons.more_vert),
-                          onPressed: () {
-                            if (onNoteActions != null) {
-                              onNoteActions!(item);
-                              return;
-                            }
-                            onItemActions?.call(item);
-                          },
-                        ),
-                        const Icon(Icons.chevron_right),
-                      ],
-                    ),
-                    onLongPress: () {
-                      if (onNoteActions != null) {
-                        onNoteActions!(item);
-                        return;
-                      }
-                      onItemActions?.call(item);
-                    },
-                    onTap: () {
-                      if (onOpenNote != null) {
-                        onOpenNote!(item);
-                        return;
-                      }
-                      if (onOpenItem != null) {
-                        onOpenItem!(item);
-                      }
-                    },
-                  ),
-                );
-              },
-            ),
-    );
-  }
-}
-
-class _CountPill extends StatelessWidget {
-  const _CountPill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: colorScheme.onSurfaceVariant,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _SelectionActionBar extends StatelessWidget {
-  const _SelectionActionBar({
-    required this.selectedCount,
-    required this.onClear,
-    required this.onPin,
-    required this.onDelete,
-  });
-
-  final int selectedCount;
-  final VoidCallback onClear;
-  final VoidCallback onPin;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        IconButton(
-          key: const ValueKey('selection-clear'),
-          onPressed: onClear,
-          icon: const Icon(Icons.arrow_back),
-        ),
-        Text(
-          '$selectedCount',
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const Spacer(),
-        IconButton(
-          key: const ValueKey('selection-pin'),
-          onPressed: onPin,
-          icon: const Icon(Icons.star_outline),
-          tooltip: AppStrings.pin,
-        ),
-        IconButton(
-          key: const ValueKey('selection-delete'),
-          onPressed: onDelete,
-          icon: const Icon(Icons.delete_outline),
-          tooltip: AppStrings.deleteSelected,
-        ),
-      ],
-    );
-  }
-}
-
 class _AllItemsSelectionActionBar extends StatelessWidget {
   const _AllItemsSelectionActionBar({
     required this.onFavorite,
@@ -8097,7 +7014,7 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-          if (trailing != null) trailing,
+          ?trailing,
         ],
       ),
     );
