@@ -368,7 +368,6 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     if (Platform.isAndroid) {
       try {
         final googleSignIn = _googleSignInClient();
-        await googleSignIn.signOut();
         final account = await googleSignIn.signIn();
         return account != null;
       } catch (_) {

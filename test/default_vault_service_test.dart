@@ -473,6 +473,10 @@ void main() {
       'document-sections-id',
       documentSection,
     );
+    final chunkBytes = await privateStore.readSection(
+      'document-sections-id',
+      'document_doc-1_chunk_000000.enc',
+    );
     final sizeWithDocument = await service.readVaultSizeBytes(
       filePath: 'document-sections.nija',
     );
@@ -482,7 +486,7 @@ void main() {
       sectionName: documentSection,
     );
 
-    expect(documentSection, 'document_doc-1.enc');
+    expect(documentSection, 'document_doc-1.manifest.enc');
     expect(
       utf8.decode(itemsBytes, allowMalformed: true),
       isNot(contains('plain document bytes')),
@@ -491,7 +495,14 @@ void main() {
       utf8.decode(documentBytes, allowMalformed: true),
       isNot(contains('plain document bytes')),
     );
-    expect(sizeWithDocument, greaterThan(documentBytes.length));
+    expect(
+      utf8.decode(chunkBytes, allowMalformed: true),
+      isNot(contains('plain document bytes')),
+    );
+    expect(
+      sizeWithDocument,
+      greaterThan(documentBytes.length + chunkBytes.length),
+    );
     expect(utf8.decode(decryptedDocument), 'plain document bytes');
   });
 

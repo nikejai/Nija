@@ -184,12 +184,13 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       <String, TextEditingController>{};
   final Set<String> _revealedSensitiveFields = <String>{};
   final List<Map<String, dynamic>> _idPhotos = <Map<String, dynamic>>[];
-  late final TextEditingController _tagsController;
+  late final TextEditingController _tagDraftController;
+  final List<String> _tags = <String>[];
 
   @override
   void initState() {
     super.initState();
-    _tagsController = TextEditingController();
+    _tagDraftController = TextEditingController();
     _type =
         widget.initialItem?['type']?.toString() ??
         widget.fixedType ??
@@ -203,7 +204,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
     for (final controller in _controllers.values) {
       controller.dispose();
     }
-    _tagsController.dispose();
+    _tagDraftController.dispose();
     super.dispose();
   }
 
@@ -300,7 +301,9 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
         .map((entry) => entry.toString().trim())
         .where((entry) => entry.isNotEmpty)
         .toList();
-    _tagsController.text = tags.join(', ');
+    _tags
+      ..clear()
+      ..addAll(tags);
     _idPhotos
       ..clear()
       ..addAll(
@@ -398,7 +401,9 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                             _syncControllers();
                           });
                         },
-                        decoration: const InputDecoration(hintText: 'Category'),
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                        ),
                       ),
                       const SizedBox(height: 10),
                     ],
@@ -443,7 +448,8 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                 }
                               : null,
                           decoration: InputDecoration(
-                            hintText: hint,
+                            labelText: field.label,
+                            hintText: hint == field.label ? null : hint,
                             suffixIcon: field.sensitive && !isLong
                                 ? SizedBox(
                                     width: 56,
@@ -502,11 +508,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                         ),
                       );
                     }),
-                    TextField(
-                      controller: _tagsController,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(hintText: 'Add tags'),
-                    ),
+                    _buildTagsEditor(context),
                     if (_supportsIdPhotos) ...[
                       const SizedBox(height: 12),
                       _buildIdPhotosSection(context),
@@ -542,6 +544,71 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
     return label;
   }
 
+  Widget _buildTagsEditor(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _tagDraftController,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _commitTagDraft(),
+                decoration: const InputDecoration(
+                  labelText: 'Tags',
+                  hintText: 'Add tag',
+                  helperText: 'Press add after each tag',
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: IconButton.filledTonal(
+                onPressed: _commitTagDraft,
+                icon: const Icon(Icons.add),
+                tooltip: 'Add tag',
+              ),
+            ),
+          ],
+        ),
+        if (_tags.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: _tags.map((tag) {
+              return InputChip(
+                label: Text(tag),
+                backgroundColor: colorScheme.surfaceContainerHighest,
+                onDeleted: () => setState(() => _tags.remove(tag)),
+              );
+            }).toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  void _commitTagDraft() {
+    final parts = _tagDraftController.text
+        .split(',')
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty);
+    var changed = false;
+    for (final part in parts) {
+      if (_tags.contains(part)) continue;
+      _tags.add(part);
+      changed = true;
+    }
+    if (!changed && _tagDraftController.text.trim().isEmpty) return;
+    _tagDraftController.clear();
+    setState(() {});
+  }
+
   void _save() {
     final title = _controllers['Title']!.text.trim();
 
@@ -565,11 +632,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
           },
         )
         .toList();
-    final tags = _tagsController.text
-        .split(',')
-        .map((entry) => entry.trim())
-        .where((entry) => entry.isNotEmpty)
-        .toList();
+    _commitTagDraft();
 
     final item = {
       ...Map<String, dynamic>.from(widget.initialItem ?? const {}),
@@ -581,7 +644,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       'subtitle': subtitle,
       'updated': 'Now',
       'pinned': widget.initialItem?['pinned'] == true,
-      'tags': tags,
+      'tags': List<String>.from(_tags),
       'fields': fields,
     };
     if (_idPhotos.isNotEmpty) {

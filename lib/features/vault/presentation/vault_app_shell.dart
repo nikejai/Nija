@@ -4,10 +4,12 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/config/app_features.dart';
+import '../../../core/config/vault_limits.dart';
 import '../../../core/localization/app_strings.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/secure_clipboard.dart';
@@ -22,6 +24,10 @@ import 'widgets/vault_entry_list.dart';
 import 'widgets/vault_page_heading.dart';
 
 part 'widgets/encrypted_import_widgets.dart';
+part 'custom_template_manager_screen.dart';
+part 'document_detail_screen.dart';
+part 'item_detail_screen.dart';
+part 'widgets/vault_settings_widgets.dart';
 
 typedef BiometricChanged = void Function(bool enabled);
 typedef LanguageModeChanged = void Function(String mode);
@@ -45,6 +51,12 @@ typedef PersistVaultDocument =
     Future<String> Function({
       required String documentId,
       required List<int> bytes,
+    });
+typedef PersistVaultDocumentStream =
+    Future<String> Function({
+      required String documentId,
+      required Stream<List<int>> chunks,
+      required int sizeBytes,
     });
 typedef ReadVaultDocument =
     Future<List<int>> Function({required String sectionName});
@@ -75,6 +87,7 @@ class VaultAppShell extends StatefulWidget {
     required this.onBiometricChanged,
     required this.onPersistVaultData,
     this.onPersistVaultDocument,
+    this.onPersistVaultDocumentStream,
     this.onReadVaultDocument,
     this.onLifecycleLockSuppressed,
     required this.onRotateMasterPassword,
@@ -106,6 +119,7 @@ class VaultAppShell extends StatefulWidget {
   final BiometricChanged onBiometricChanged;
   final PersistVaultData onPersistVaultData;
   final PersistVaultDocument? onPersistVaultDocument;
+  final PersistVaultDocumentStream? onPersistVaultDocumentStream;
   final ReadVaultDocument? onReadVaultDocument;
   final LifecycleLockSuppressed? onLifecycleLockSuppressed;
   final RotateMasterPassword onRotateMasterPassword;
@@ -129,14 +143,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     'nija/document_open',
   );
   static const String _encryptedShareExtension = '.nijas';
-  static const String _prefsKeyVaultSort = 'nija_pref_vault_sort_v1';
-  static const String _prefsKeyNotesSort = 'nija_pref_notes_sort_v1';
   static const String _prefsKeyCloudBackupEnabled =
       'nija_pref_cloud_backup_enabled_v1';
-  static const String _prefsKeyCloudBackupAuto =
-      'nija_pref_cloud_backup_auto_v1';
-  static const String _prefsKeyCloudBackupFrequency =
-      'nija_pref_cloud_backup_frequency_v1';
   static const String _prefsKeyCloudBackupLastAt =
       'nija_pref_cloud_backup_last_at_v1';
   final _clipboard = SecureClipboard();
@@ -147,16 +155,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
   int _tabIndex = 0;
   String _allItemsQuery = '';
   String _allItemsFilterSearch = '';
-  String _vaultSort = 'last_accessed';
-  String _notesSort = 'last_accessed';
   String _allItemsTypeFilter = 'all';
   Set<String> _allItemsFilterTypes = <String>{};
   bool _allItemsFilterFavoritesOnly = false;
   String _allItemsFilterDateRange = 'any';
   bool _cloudBackupEnabled = false;
-  bool _cloudBackupAutoEnabled = false;
   bool _importingEncryptedSecret = false;
-  String _cloudBackupFrequency = 'daily';
+  String _importBusyMessage = 'Importing data...';
+  int _storedDocumentBytesThisSession = 0;
   int _cloudBackupLastAtEpochMs = 0;
   String _cloudBackupAccountLabel = 'Not connected';
   bool _allItemsSelectionMode = false;
@@ -199,7 +205,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
         _persistVaultData();
       });
     }
-    unawaited(_restoreSortPreferences());
     unawaited(_restoreCloudBackupPreference());
     unawaited(_refreshCloudBackupAccountLabel());
   }
@@ -207,6 +212,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
   @override
   void didUpdateWidget(covariant VaultAppShell oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.vaultSizeBytes != widget.vaultSizeBytes) {
+      _storedDocumentBytesThisSession = 0;
+    }
     if (oldWidget.activeVaultName != widget.activeVaultName) {
       _activeVaultName = widget.activeVaultName;
     }
@@ -280,13 +288,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final pages = [
-      _buildVaultTab(context),
-      _buildTypesTab(context),
-      _buildFavoritesTab(context),
-      _buildSettingsTab(context),
-      if (kDebugMode) _buildDebugInternalsTab(context),
-    ];
 
     return PopScope(
       canPop: false,
@@ -295,7 +296,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
         unawaited(_handleBackNavigation());
       },
       child: Scaffold(
-        body: SafeArea(child: pages[_tabIndex]),
+        body: Stack(
+          children: [
+            SafeArea(
+              child: KeyedSubtree(
+                key: ValueKey<int>(_tabIndex),
+                child: _buildActiveTab(context),
+              ),
+            ),
+            if (_importingEncryptedSecret) _buildBusyOverlay(context),
+          ],
+        ),
         bottomNavigationBar: NavigationBarTheme(
           data: NavigationBarThemeData(
             backgroundColor: colorScheme.surface,
@@ -352,7 +363,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   label: 'Debug',
                 ),
             ],
-            onDestinationSelected: (value) => setState(() => _tabIndex = value),
+            onDestinationSelected: (value) {
+              if (value == _tabIndex) return;
+              setState(() => _tabIndex = value);
+            },
           ),
         ),
         floatingActionButton: _tabIndex == 0 || _tabIndex == 1
@@ -362,6 +376,60 @@ class _VaultAppShellState extends State<VaultAppShell> {
               )
             : null,
         floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      ),
+    );
+  }
+
+  Widget _buildActiveTab(BuildContext context) {
+    return switch (_tabIndex) {
+      0 => _buildVaultTab(context),
+      1 => _buildTypesTab(context),
+      2 => _buildFavoritesTab(context),
+      3 => _buildSettingsTab(context),
+      4 when kDebugMode => _buildDebugInternalsTab(context),
+      _ => _buildVaultTab(context),
+    };
+  }
+
+  Widget _buildBusyOverlay(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.25),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox.square(
+                      dimension: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2.6),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      _importBusyMessage,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Large encrypted files may take a moment.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -383,7 +451,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         now.difference(_lastBackOnDashboardAt!) < const Duration(seconds: 2);
     if (shouldExit) {
       _lastBackOnDashboardAt = null;
-      await SystemNavigator.pop();
+      widget.onLockNow();
       return;
     }
 
@@ -391,7 +459,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Press back again to exit.')));
+    ).showSnackBar(const SnackBar(content: Text('Press back again to lock.')));
   }
 
   Widget _buildVaultTab(BuildContext context) {
@@ -1192,13 +1260,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _ => AppStrings.systemDefault,
     };
 
-    final defaultViewLabel = _vaultSort == 'title' ? 'Title' : 'All Items';
     final themeLabel = switch (widget.themeMode) {
       ThemeMode.light => 'Light',
       ThemeMode.dark => 'Dark',
       ThemeMode.system => 'System',
     };
     final autoLockLabel = _formatAutoLockSeconds(widget.autoLockSeconds);
+    final effectiveVaultSizeBytes = _effectiveVaultSizeBytes;
+    final vaultLimitBytes = VaultLimits.maxVaultBytes;
+    final vaultUsageLabel =
+        '${VaultLimits.formatBytes(effectiveVaultSizeBytes)} of ${VaultLimits.formatBytes(vaultLimitBytes)}';
     final backupSubtitle = AppFeatures.isPaidBuild
         ? (_cloudBackupEnabled
               ? _cloudBackupLastAtEpochMs <= 0
@@ -1280,21 +1351,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
               ),
               if (AppFeatures.isPaidBuild && _cloudBackupEnabled) ...[
                 _SettingsRow(
-                  key: const ValueKey('settings-cloud-backup-auto-switch'),
-                  icon: Icons.schedule_outlined,
-                  title: 'Auto backup',
-                  subtitle: _cloudBackupFrequency == 'weekly'
-                      ? 'Weekly'
-                      : _cloudBackupFrequency == 'monthly'
-                      ? 'Monthly'
-                      : 'Daily',
-                  trailing: Switch(
-                    value: _cloudBackupAutoEnabled,
-                    onChanged: _setCloudBackupAutoEnabled,
-                  ),
-                  onTap: _showCloudBackupFrequencyPicker,
-                ),
-                _SettingsRow(
                   icon: Icons.account_circle_outlined,
                   title: 'Backup account',
                   subtitle: _cloudBackupAccountLabel,
@@ -1348,7 +1404,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
               _SettingsRow(
                 icon: Icons.sd_storage_outlined,
                 title: 'Vault size',
-                subtitle: _formatBytes(widget.vaultSizeBytes),
+                subtitle: vaultUsageLabel,
               ),
               _SettingsRow(
                 icon: Icons.delete_outline,
@@ -1375,39 +1431,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 onTap: () => _showThemePicker(context),
               ),
               _SettingsRow(
-                key: const ValueKey('settings-default-vault-filter'),
-                icon: Icons.grid_view_outlined,
-                title: 'Default View',
-                subtitle: 'Choose your default start view',
-                value: defaultViewLabel,
-                onTap: () => _showSortDefaultsDialog(context, isNotes: false),
-              ),
-              _SettingsRow(
-                key: const ValueKey('settings-default-notes-filter'),
-                icon: Icons.filter_alt_outlined,
-                title: 'Default notes sort',
-                subtitle: _notesSort == 'title'
-                    ? 'Title'
-                    : _notesSort == 'tags'
-                    ? 'Tags'
-                    : 'Last accessed',
-                onTap: () => _showSortDefaultsDialog(context, isNotes: true),
-              ),
-              _SettingsRow(
                 icon: Icons.folder_outlined,
                 title: 'Categories',
                 subtitle: '${_customTypeDefinitions.length} custom templates',
                 onTap: () => _showCustomTemplateManager(context),
-              ),
-              _SettingsRow(
-                icon: Icons.notifications_none_outlined,
-                title: 'Notifications',
-                subtitle: 'Manage reminders and alerts',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(AppStrings.settingComingSoon)),
-                  );
-                },
               ),
               _SettingsRow(
                 icon: Icons.language_outlined,
@@ -1424,41 +1451,34 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 icon: Icons.info_outline,
                 title: 'About Nija',
                 subtitle: 'Version 1.0.0',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Nija version 1.0.0')),
-                  );
-                },
-              ),
-              _SettingsRow(
-                icon: Icons.help_outline,
-                title: 'Help & Support',
-                subtitle: 'Get help and contact support',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(AppStrings.settingComingSoon)),
-                  );
-                },
+                onTap: () => _showInfoSheet(
+                  context,
+                  title: 'About Nija',
+                  icon: Icons.info_outline,
+                  sections: _aboutNijaSections(),
+                ),
               ),
               _SettingsRow(
                 icon: Icons.verified_user_outlined,
                 title: 'Privacy Policy',
                 subtitle: 'Read our privacy policy',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(AppStrings.settingComingSoon)),
-                  );
-                },
+                onTap: () => _showInfoSheet(
+                  context,
+                  title: 'Privacy Policy',
+                  icon: Icons.verified_user_outlined,
+                  sections: _privacyPolicySections(),
+                ),
               ),
               _SettingsRow(
                 icon: Icons.description_outlined,
                 title: 'Terms of Use',
                 subtitle: 'Read our terms and conditions',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(AppStrings.settingComingSoon)),
-                  );
-                },
+                onTap: () => _showInfoSheet(
+                  context,
+                  title: 'Terms of Use',
+                  icon: Icons.description_outlined,
+                  sections: _termsOfUseSections(),
+                ),
               ),
             ],
           ),
@@ -1542,6 +1562,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   title: 'Working folder',
                   rows: _workingFolderRows(data['workingStore']),
                 ),
+                const SizedBox(height: 10),
+                _DebugFileTreeCard(store: data['workingStore']),
                 const SizedBox(height: 10),
                 _DebugInfoCard(
                   title: 'Working files',
@@ -1627,86 +1649,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _showRotateMasterPasswordDialog(BuildContext context) async {
-    final currentController = TextEditingController();
-    final nextController = TextEditingController();
-    final confirmController = TextEditingController();
-    try {
-      final values = await showDialog<(String, String)>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setLocalState) {
-            final nextPassword = nextController.text.trim();
-            final canSubmit =
-                currentController.text.trim().isNotEmpty &&
-                nextPassword.isNotEmpty &&
-                nextController.text == confirmController.text;
-            return AlertDialog(
-              title: const Text('Rotate master password'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: currentController,
-                    obscureText: true,
-                    onChanged: (_) => setLocalState(() {}),
-                    decoration: const InputDecoration(
-                      labelText: 'Current master password',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: nextController,
-                    obscureText: true,
-                    onChanged: (_) => setLocalState(() {}),
-                    decoration: const InputDecoration(
-                      labelText: 'New master password',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _PasswordStrengthMeter(password: nextPassword),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: confirmController,
-                    obscureText: true,
-                    onChanged: (_) => setLocalState(() {}),
-                    decoration: InputDecoration(
-                      labelText: 'Confirm new master password',
-                      helperText: confirmController.text.isEmpty || canSubmit
-                          ? null
-                          : 'Passwords do not match',
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: canSubmit
-                      ? () => Navigator.of(context).pop((
-                          currentController.text.trim(),
-                          nextController.text.trim(),
-                        ))
-                      : null,
-                  child: const Text('Rotate'),
-                ),
-              ],
-            );
-          },
-        ),
-      );
-      if (values == null) return;
-      await widget.onRotateMasterPassword(
-        currentPassword: values.$1,
-        newPassword: values.$2,
-      );
-    } finally {
-      currentController.dispose();
-      nextController.dispose();
-      confirmController.dispose();
-    }
+    final values = await showDialog<(String, String)>(
+      context: context,
+      builder: (context) => const _RotateMasterPasswordDialog(),
+    );
+    if (values == null) return;
+    await widget.onRotateMasterPassword(
+      currentPassword: values.$1,
+      newPassword: values.$2,
+    );
   }
 
   Future<void> _showLanguagePicker(BuildContext context) async {
@@ -1781,6 +1732,90 @@ class _VaultAppShellState extends State<VaultAppShell> {
       trailing: selected ? const Icon(Icons.check) : null,
       onTap: () => Navigator.of(context).pop(mode),
     );
+  }
+
+  Future<void> _showInfoSheet(
+    BuildContext context, {
+    required String title,
+    required IconData icon,
+    required List<_InfoSectionData> sections,
+  }) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) =>
+          _InfoDetailSheet(title: title, icon: icon, sections: sections),
+    );
+  }
+
+  List<_InfoSectionData> _aboutNijaSections() {
+    return const <_InfoSectionData>[
+      _InfoSectionData(
+        title: 'Nija',
+        body:
+            'Version 1.0.0\nNija is a private vault for passwords, notes, documents, identities, and custom secure records.',
+      ),
+      _InfoSectionData(
+        title: 'Security model',
+        body:
+            'Vault data is encrypted before it is stored. Your master password is used to unlock the vault, and recovery data should be kept offline and private.',
+      ),
+      _InfoSectionData(
+        title: 'Your responsibility',
+        body:
+            'Nija cannot recover a forgotten master password or recovery phrase. Export or back up important vaults before replacing devices or clearing app data.',
+      ),
+    ];
+  }
+
+  List<_InfoSectionData> _privacyPolicySections() {
+    return const <_InfoSectionData>[
+      _InfoSectionData(
+        title: 'Local-first storage',
+        body:
+            'Nija is designed to keep vault contents on your device unless you explicitly export, share, import, or back up a vault.',
+      ),
+      _InfoSectionData(
+        title: 'Cloud backup',
+        body:
+            'If you choose cloud backup, encrypted vault backup files are stored in the cloud account you select. Nija does not upload decrypted vault contents.',
+      ),
+      _InfoSectionData(
+        title: 'Sensitive data',
+        body:
+            'Passwords, notes, documents, identity photos, and custom fields are treated as vault data. Do not share exported encrypted files or their passwords with untrusted people.',
+      ),
+      _InfoSectionData(
+        title: 'Device permissions',
+        body:
+            'File picker, sharing, biometrics, and document open actions are used only when you choose those workflows.',
+      ),
+    ];
+  }
+
+  List<_InfoSectionData> _termsOfUseSections() {
+    return const <_InfoSectionData>[
+      _InfoSectionData(
+        title: 'Use at your discretion',
+        body:
+            'You are responsible for the data you store, export, share, import, and back up with Nija.',
+      ),
+      _InfoSectionData(
+        title: 'No password recovery guarantee',
+        body:
+            'If you lose your master password, recovery phrase, vault file, or backup access, your vault data may be unrecoverable.',
+      ),
+      _InfoSectionData(
+        title: 'Backups',
+        body:
+            'Keep independent backups of important vaults. Verify that backups can be restored before relying on them.',
+      ),
+      _InfoSectionData(
+        title: 'No warranty',
+        body:
+            'Nija is provided as-is. You should confirm that it meets your security, legal, and operational requirements before relying on it for critical data.',
+      ),
+    ];
   }
 
   Future<void> _showAutoLockPicker(BuildContext context) async {
@@ -1980,6 +2015,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
             return Navigator.of(context).push<Map<String, dynamic>>(
               MaterialPageRoute(
                 builder: (_) => DocumentUploadScreen(
+                  currentVaultSizeBytes: _effectiveVaultSizeBytes,
+                  maxVaultBytes: VaultLimits.maxVaultBytes,
+                  maxDocumentBytes: VaultLimits.maxDocumentBytes,
                   onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
                 ),
               ),
@@ -2015,23 +2053,66 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<bool> _isPendingDocumentStored(Map<String, dynamic> item) async {
+    final rawStream = item.remove('__documentReadStream__');
     final rawBytes = item.remove('__documentBytes__');
-    if (rawBytes == null) return true;
-    if (widget.onPersistVaultDocument == null) {
+    if (rawStream == null && rawBytes == null) return true;
+    if (widget.onPersistVaultDocument == null &&
+        widget.onPersistVaultDocumentStream == null) {
       item['documentStorage'] = 'inline-unavailable';
+      return true;
+    }
+    final sizeBytes = _documentMetadataSizeBytes(item);
+    if (rawStream != null) {
+      if (widget.onPersistVaultDocumentStream == null) {
+        item['documentStorage'] = 'inline-unavailable';
+        return true;
+      }
+      if (!_canStoreDocumentBytes(sizeBytes)) return false;
+      final stream = rawStream as Stream<List<int>>;
+      final sectionName = await widget.onPersistVaultDocumentStream!(
+        documentId: item['id']?.toString() ?? '',
+        chunks: stream,
+        sizeBytes: sizeBytes,
+      );
+      _storedDocumentBytesThisSession += sizeBytes;
+      item['documentStorage'] = 'private-section';
+      item['documentSection'] = sectionName;
       return true;
     }
     final bytes = rawBytes is Uint8List
         ? rawBytes
         : Uint8List.fromList(List<int>.from(rawBytes as List));
-    final documentId = item['id']?.toString() ?? '';
-    final sectionName = await widget.onPersistVaultDocument!(
-      documentId: documentId,
-      bytes: bytes,
+    final storedSizeBytes = _documentMetadataSizeBytes(
+      item,
+      fallbackBytes: bytes.length,
     );
+    if (!_canStoreDocumentBytes(storedSizeBytes)) return false;
+    final documentId = item['id']?.toString() ?? '';
+    final sectionName = widget.onPersistVaultDocumentStream != null
+        ? await widget.onPersistVaultDocumentStream!(
+            documentId: documentId,
+            chunks: Stream<List<int>>.value(bytes),
+            sizeBytes: storedSizeBytes,
+          )
+        : await widget.onPersistVaultDocument!(
+            documentId: documentId,
+            bytes: bytes,
+          );
+    _storedDocumentBytesThisSession += storedSizeBytes;
     item['documentStorage'] = 'private-section';
     item['documentSection'] = sectionName;
     return true;
+  }
+
+  int _documentMetadataSizeBytes(
+    Map<String, dynamic> item, {
+    int fallbackBytes = 0,
+  }) {
+    final raw = item['documentSizeBytes'];
+    if (raw is int && raw >= 0) return raw;
+    final parsed = int.tryParse(raw?.toString() ?? '');
+    if (parsed != null && parsed >= 0) return parsed;
+    return fallbackBytes;
   }
 
   Future<void> _showCustomTemplateManager(BuildContext context) async {
@@ -2137,42 +2218,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return 0;
   }
 
-  Future<void> _restoreSortPreferences() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final vault = prefs.getString(_prefsKeyVaultSort);
-      final notes = prefs.getString(_prefsKeyNotesSort);
-      if (!mounted) return;
-      setState(() {
-        _vaultSort = (vault == 'title' || vault == 'last_accessed')
-            ? vault!
-            : _vaultSort;
-        _notesSort =
-            (notes == 'title' || notes == 'last_accessed' || notes == 'tags')
-            ? notes!
-            : _notesSort;
-      });
-    } catch (_) {
-      // Ignore preference read failures.
-    }
-  }
-
   Future<void> _restoreCloudBackupPreference() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final enabled = prefs.getBool(_prefsKeyCloudBackupEnabled) ?? false;
-      final auto = prefs.getBool(_prefsKeyCloudBackupAuto) ?? false;
-      final frequency =
-          prefs.getString(_prefsKeyCloudBackupFrequency) ?? 'daily';
       final lastAt = prefs.getInt(_prefsKeyCloudBackupLastAt) ?? 0;
       if (!mounted) return;
       setState(() {
         _cloudBackupEnabled = enabled && AppFeatures.isPaidBuild;
-        _cloudBackupAutoEnabled = auto && AppFeatures.isPaidBuild;
-        _cloudBackupFrequency =
-            (frequency == 'weekly' || frequency == 'monthly')
-            ? frequency
-            : 'daily';
         _cloudBackupLastAtEpochMs = lastAt;
       });
     } catch (_) {
@@ -2187,63 +2240,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefsKeyCloudBackupEnabled, enabled);
     } catch (_) {}
-  }
-
-  Future<void> _setCloudBackupAutoEnabled(bool enabled) async {
-    if (!AppFeatures.isPaidBuild) return;
-    setState(() => _cloudBackupAutoEnabled = enabled);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_prefsKeyCloudBackupAuto, enabled);
-    } catch (_) {}
-  }
-
-  Future<void> _setCloudBackupFrequency(String value) async {
-    if (!AppFeatures.isPaidBuild) return;
-    if (value != 'daily' && value != 'weekly' && value != 'monthly') return;
-    setState(() => _cloudBackupFrequency = value);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefsKeyCloudBackupFrequency, value);
-    } catch (_) {}
-  }
-
-  Future<void> _showCloudBackupFrequencyPicker() async {
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(title: Text('Backup frequency')),
-            ListTile(
-              title: const Text('Daily'),
-              trailing: _cloudBackupFrequency == 'daily'
-                  ? const Icon(Icons.check)
-                  : null,
-              onTap: () => Navigator.of(context).pop('daily'),
-            ),
-            ListTile(
-              title: const Text('Weekly'),
-              trailing: _cloudBackupFrequency == 'weekly'
-                  ? const Icon(Icons.check)
-                  : null,
-              onTap: () => Navigator.of(context).pop('weekly'),
-            ),
-            ListTile(
-              title: const Text('Monthly'),
-              trailing: _cloudBackupFrequency == 'monthly'
-                  ? const Icon(Icons.check)
-                  : null,
-              onTap: () => Navigator.of(context).pop('monthly'),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (selected == null) return;
-    await _setCloudBackupFrequency(selected);
   }
 
   Future<void> _handleCloudBackupNow() async {
@@ -2268,12 +2264,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Future<void> _handleChangeCloudBackupAccount() async {
     final ok = await widget.onChangeCloudBackupAccount();
-    await _refreshCloudBackupAccountLabel();
     if (!mounted) return;
+    if (ok) {
+      await _refreshCloudBackupAccountLabel();
+      if (!mounted) return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          ok ? 'Backup account updated.' : 'Unable to change backup account.',
+          ok ? 'Backup account updated.' : 'Backup account unchanged.',
         ),
       ),
     );
@@ -2305,88 +2304,34 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   String _formatBytes(int bytes) {
-    if (bytes <= 0) return '0 B';
-    const units = <String>['B', 'KB', 'MB', 'GB'];
-    var value = bytes.toDouble();
-    var unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-      value /= 1024;
-      unit += 1;
-    }
-    final decimals = value >= 100
-        ? 0
-        : value >= 10
-        ? 1
-        : 2;
-    return '${value.toStringAsFixed(decimals)} ${units[unit]}';
+    return VaultLimits.formatBytes(bytes);
   }
 
-  Future<void> _setVaultSort(String value) async {
-    if (value != 'title' && value != 'last_accessed') return;
-    setState(() => _vaultSort = value);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefsKeyVaultSort, value);
-    } catch (_) {}
+  int get _effectiveVaultSizeBytes =>
+      widget.vaultSizeBytes + _storedDocumentBytesThisSession;
+
+  bool _canStoreDocumentBytes(int bytes) {
+    if (bytes > VaultLimits.maxDocumentBytes) {
+      _showVaultLimitMessage(
+        'Document must be ${_formatBytes(VaultLimits.maxDocumentBytes)} or smaller.',
+      );
+      return false;
+    }
+    final projected = _effectiveVaultSizeBytes + bytes;
+    if (projected > VaultLimits.maxVaultBytes) {
+      _showVaultLimitMessage(
+        'Not enough vault space. Limit is ${_formatBytes(VaultLimits.maxVaultBytes)}.',
+      );
+      return false;
+    }
+    return true;
   }
 
-  Future<void> _setNotesSort(String value) async {
-    if (value != 'title' && value != 'last_accessed' && value != 'tags') {
-      return;
-    }
-    setState(() => _notesSort = value);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefsKeyNotesSort, value);
-    } catch (_) {}
-  }
-
-  Future<void> _showSortDefaultsDialog(
-    BuildContext context, {
-    required bool isNotes,
-  }) async {
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(
-                isNotes ? 'Default sort for notes' : 'Default sort for keys',
-              ),
-            ),
-            ListTile(
-              title: const Text('Last accessed'),
-              trailing: (isNotes ? _notesSort : _vaultSort) == 'last_accessed'
-                  ? const Icon(Icons.check)
-                  : null,
-              onTap: () => Navigator.of(context).pop('last_accessed'),
-            ),
-            ListTile(
-              title: const Text('Title'),
-              trailing: (isNotes ? _notesSort : _vaultSort) == 'title'
-                  ? const Icon(Icons.check)
-                  : null,
-              onTap: () => Navigator.of(context).pop('title'),
-            ),
-            if (isNotes)
-              ListTile(
-                title: const Text('Tags'),
-                trailing: _notesSort == 'tags' ? const Icon(Icons.check) : null,
-                onTap: () => Navigator.of(context).pop('tags'),
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (selected == null) return;
-    if (isNotes) {
-      await _setNotesSort(selected);
-    } else {
-      await _setVaultSort(selected);
-    }
+  void _showVaultLimitMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   String _allItemsSelectionKey(Map<String, dynamic> row) {
@@ -3291,22 +3236,30 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Future<void> _importEncryptedSecret() async {
     if (_importingEncryptedSecret) return;
-    setState(() => _importingEncryptedSecret = true);
+    setState(() {
+      _importingEncryptedSecret = true;
+      _importBusyMessage = 'Selecting import file...';
+    });
     try {
       final imported = await _secretSharePortability.importEncryptedFile();
       if (imported == null || !mounted) return;
+      setState(() => _importBusyMessage = 'Waiting for import password...');
       final password = await _promptSecretImportPassword(context);
       if (password == null || password.trim().isEmpty || !mounted) return;
+      setState(() => _importBusyMessage = 'Decrypting imported file...');
       await _waitForOverlayTeardown();
       final decoded = await _encryptedShareCodec.decode(
         encoded: imported.content,
         password: password.trim(),
       );
+      if (!mounted) return;
+      setState(() => _importBusyMessage = 'Preparing import preview...');
       if (decoded.contentType.trim().toLowerCase() == 'vault_bundle') {
         final entries = _encryptedImportEntriesFromBundle(decoded.plainText);
         if (entries.isNotEmpty) {
           if (!mounted) return;
           if (entries.length > 1) {
+            setState(() => _importingEncryptedSecret = false);
             final importedAny = await Navigator.of(context).push<bool>(
               MaterialPageRoute(
                 builder: (_) => _EncryptedImportBundleScreen(
@@ -3323,6 +3276,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
             );
             return;
           }
+          setState(() => _importingEncryptedSecret = false);
           final importedSingle = await Navigator.of(context).push<bool>(
             MaterialPageRoute(
               builder: (_) => _EncryptedImportEntryPreviewScreen(
@@ -3340,6 +3294,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           return;
         }
       }
+      setState(() => _importBusyMessage = 'Importing into vault...');
       final applied = await _applyImportedSecret(decoded);
       if (!applied) {
         if (!mounted) return;
@@ -3360,9 +3315,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
       );
     } finally {
       if (mounted) {
-        setState(() => _importingEncryptedSecret = false);
+        setState(() {
+          _importingEncryptedSecret = false;
+          _importBusyMessage = 'Importing data...';
+        });
       } else {
         _importingEncryptedSecret = false;
+        _importBusyMessage = 'Importing data...';
       }
     }
   }
@@ -3665,13 +3624,23 @@ class _VaultAppShellState extends State<VaultAppShell> {
   ) async {
     final rawBytes = bundleEntry['bytesBase64']?.toString();
     if (rawBytes == null || rawBytes.isEmpty) return null;
-    final bytes = base64Decode(rawBytes);
+    final Uint8List bytes;
+    try {
+      bytes = Uint8List.fromList(base64Decode(rawBytes));
+    } on FormatException {
+      return null;
+    }
     final rawEntry = bundleEntry['entry'];
     final item = rawEntry is Map
         ? Map<String, dynamic>.from(rawEntry)
         : <String, dynamic>{};
     final fileName = bundleEntry['fileName']?.toString().trim();
     final extension = bundleEntry['extension']?.toString().trim();
+    final sizeBytes = _bundleDocumentMetadataSizeBytes(
+      bundleEntry,
+      item,
+      fallbackBytes: bytes.length,
+    );
     item
       ..remove('documentSection')
       ..remove('documentStorage')
@@ -3689,10 +3658,26 @@ class _VaultAppShellState extends State<VaultAppShell> {
           fileName ?? item['documentFileName'] ?? 'document'
       ..['documentExtension'] =
           extension ?? item['documentExtension'] ?? _documentExtension(item)
-      ..['documentSizeBytes'] = bytes.length
-      ..['__documentBytes__'] = Uint8List.fromList(bytes);
+      ..['documentSizeBytes'] = sizeBytes
+      ..['__documentBytes__'] = bytes;
     final stored = await _isPendingDocumentStored(item);
     return stored ? item : null;
+  }
+
+  int _bundleDocumentMetadataSizeBytes(
+    Map<String, dynamic> bundleEntry,
+    Map<String, dynamic> item, {
+    required int fallbackBytes,
+  }) {
+    for (final raw in <dynamic>[
+      bundleEntry['sizeBytes'],
+      item['documentSizeBytes'],
+    ]) {
+      if (raw is int && raw >= 0) return raw;
+      final parsed = int.tryParse(raw?.toString() ?? '');
+      if (parsed != null && parsed >= 0) return parsed;
+    }
+    return fallbackBytes;
   }
 
   void _markImportedEntryVisible(
@@ -3765,1213 +3750,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
       'pinned': false,
       'fields': fields,
     };
-  }
-}
-
-String _formatAutoLockSeconds(int seconds) {
-  if (seconds <= 0) return 'Off';
-  if (seconds == 1) return '1 sec';
-  if (seconds < 60) return '$seconds sec';
-  if (seconds % 60 == 0) {
-    final minutes = seconds ~/ 60;
-    return minutes == 1 ? '60 sec' : '$seconds sec';
-  }
-  return '$seconds sec';
-}
-
-class _CustomTemplateManagerScreen extends StatefulWidget {
-  const _CustomTemplateManagerScreen({
-    required this.initialDefinitions,
-    required this.onCommit,
-  });
-
-  final List<Map<String, dynamic>> initialDefinitions;
-  final Future<void> Function(List<Map<String, dynamic>> definitions) onCommit;
-
-  @override
-  State<_CustomTemplateManagerScreen> createState() =>
-      _CustomTemplateManagerScreenState();
-}
-
-class _CustomTemplateManagerScreenState
-    extends State<_CustomTemplateManagerScreen> {
-  late final List<Map<String, dynamic>> _workingDefinitions;
-
-  @override
-  void initState() {
-    super.initState();
-    _workingDefinitions = widget.initialDefinitions
-        .map((entry) => Map<String, dynamic>.from(entry))
-        .toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Custom templates'),
-        actions: [
-          IconButton(
-            key: const ValueKey('custom-template-add'),
-            tooltip: 'Add custom template',
-            onPressed: _addTemplate,
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Custom templates', style: vaultPageHeadingStyle(context)),
-                const SizedBox(height: 4),
-                Text(
-                  'Create reusable item types with your own fields.',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: _workingDefinitions.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'No custom templates yet.',
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          FilledButton.icon(
-                            onPressed: _addTemplate,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Add template'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                    itemCount: _workingDefinitions.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final definition = _workingDefinitions[index];
-                      final iconKey = definition['iconKey']?.toString();
-                      final colorKey = definition['colorKey']?.toString();
-                      final accent = _colorForCustomTemplateColorKey(colorKey);
-                      final name = definition['name']?.toString() ?? 'Custom';
-                      final fields =
-                          (definition['fields'] as List<dynamic>? ??
-                                  const <dynamic>[])
-                              .length;
-                      final colorScheme = Theme.of(context).colorScheme;
-                      return Material(
-                        color: colorScheme.surface,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(color: colorScheme.outlineVariant),
-                        ),
-                        child: ListTile(
-                          onTap: () => _editTemplate(index),
-                          contentPadding: const EdgeInsets.fromLTRB(
-                            12,
-                            8,
-                            8,
-                            8,
-                          ),
-                          leading: Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              color: accent.withValues(alpha: 0.16),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              _iconForCustomTemplateKey(iconKey),
-                              color: accent,
-                              size: 20,
-                            ),
-                          ),
-                          title: Text(
-                            name,
-                            style: TextStyle(
-                              color: colorScheme.onSurface,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          subtitle: Text(
-                            '$fields fields',
-                            style: TextStyle(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined),
-                                onPressed: () => _editTemplate(index),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline),
-                                onPressed: () => _confirmDeleteTemplate(index),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _addTemplate() async {
-    final createdType = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(builder: (_) => const CreateCustomTypeScreen()),
-    );
-    if (!mounted || createdType == null) return;
-    final name = createdType['name']?.toString().trim() ?? '';
-    if (name.isEmpty) return;
-    if (_hasTemplateNamed(name)) {
-      _showDuplicateTemplateMessage();
-      return;
-    }
-    setState(() => _workingDefinitions.add(createdType));
-    await widget.onCommit(_snapshotDefinitions());
-  }
-
-  Future<void> _editTemplate(int index) async {
-    final edited = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        builder: (_) =>
-            CreateCustomTypeScreen(initialTemplate: _workingDefinitions[index]),
-      ),
-    );
-    if (!mounted || edited == null) return;
-    final editedName = edited['name']?.toString().trim() ?? '';
-    if (editedName.isEmpty) return;
-    if (_hasTemplateNamed(editedName, exceptIndex: index)) {
-      _showDuplicateTemplateMessage();
-      return;
-    }
-    setState(() => _workingDefinitions[index] = edited);
-    await widget.onCommit(_snapshotDefinitions());
-  }
-
-  Future<void> _confirmDeleteTemplate(int index) async {
-    final definition = _workingDefinitions[index];
-    final name = definition['name']?.toString() ?? 'Custom';
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(sheetContext).colorScheme.surface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(22),
-              ),
-            ),
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.delete_outline,
-                  size: 34,
-                  color: Color(0xFFEF4444),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Move to Trash?',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '"$name" will be moved to trash.\nThis action can be undone.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFEF4444),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: () => Navigator.of(sheetContext).pop(true),
-                    child: const Text('Move to Trash'),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(sheetContext).pop(false),
-                  child: const Text('Cancel'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-    if (!mounted || confirmed != true) return;
-    setState(() => _workingDefinitions.removeAt(index));
-    await widget.onCommit(_snapshotDefinitions());
-  }
-
-  List<Map<String, dynamic>> _snapshotDefinitions() {
-    return _workingDefinitions
-        .map((entry) => Map<String, dynamic>.from(entry))
-        .toList();
-  }
-
-  bool _hasTemplateNamed(String name, {int? exceptIndex}) {
-    final normalized = name.toLowerCase();
-    return _workingDefinitions.asMap().entries.any((entry) {
-      if (entry.key == exceptIndex) return false;
-      return (entry.value['name']?.toString().toLowerCase() ?? '') ==
-          normalized;
-    });
-  }
-
-  void _showDuplicateTemplateMessage() {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(AppStrings.customTypeExists)));
-  }
-}
-
-IconData _iconForSetting(String section) {
-  if (section == AppStrings.settingsSecurity) return Icons.security_outlined;
-  if (section == AppStrings.settingsVaultBackup) return Icons.backup_outlined;
-  if (section == AppStrings.settingsBiometricUnlock) return Icons.fingerprint;
-  if (section == AppStrings.settingsRecoveryPhrase) return Icons.key_outlined;
-  if (section == AppStrings.settingsAutoLock) return Icons.lock_clock_outlined;
-  if (section == AppStrings.settingsExportVault) {
-    return Icons.file_upload_outlined;
-  }
-  if (section == AppStrings.settingsDangerZone) {
-    return Icons.warning_amber_outlined;
-  }
-  return Icons.settings_outlined;
-}
-
-class _PasswordStrengthMeter extends StatelessWidget {
-  const _PasswordStrengthMeter({required this.password});
-
-  final String password;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final score = _passwordStrengthScore(password);
-    final label = _passwordStrengthLabel(score);
-    final color = _passwordStrengthColor(theme, score);
-    final guidance = VaultValidators.isStrongEnoughMasterPassword(password)
-        ? 'Meets recommended minimum'
-        : 'Use 10+ characters with letters and numbers';
-
-    return Semantics(
-      label: 'Password strength $label',
-      child: Column(
-        key: const ValueKey('master-password-strength-meter'),
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    minHeight: 6,
-                    value: score / 4,
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                    color: color,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                label,
-                key: const ValueKey('master-password-strength-label'),
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            guidance,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-int _passwordStrengthScore(String password) {
-  if (password.isEmpty) return 0;
-  var score = 0;
-  if (password.length >= 10) score++;
-  if (password.contains(RegExp(r'[A-Za-z]'))) score++;
-  if (password.contains(RegExp(r'\d'))) score++;
-  if (password.contains(RegExp(r'[^A-Za-z0-9]')) || password.length >= 16) {
-    score++;
-  }
-  return score.clamp(1, 4);
-}
-
-String _passwordStrengthLabel(int score) {
-  return switch (score) {
-    0 => 'Not started',
-    1 => 'Weak',
-    2 => 'Fair',
-    3 => 'Good',
-    _ => 'Strong',
-  };
-}
-
-Color _passwordStrengthColor(ThemeData theme, int score) {
-  return switch (score) {
-    0 => theme.colorScheme.outline,
-    1 => theme.colorScheme.error,
-    2 => const Color(0xFFB45309),
-    3 => const Color(0xFF2563EB),
-    _ => const Color(0xFF15803D),
-  };
-}
-
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({required this.title, required this.children});
-
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.cardTheme.color ?? theme.colorScheme.surface,
-                border: Border.all(color: theme.colorScheme.outlineVariant),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(children: children),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({
-    super.key,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    this.value,
-    this.trailing,
-    this.onTap,
-    this.iconColor,
-    this.danger = false,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final String? value;
-  final Widget? trailing;
-  final VoidCallback? onTap;
-  final Color? iconColor;
-  final bool danger;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final effectiveIconColor = iconColor ?? theme.colorScheme.primary;
-    final effectiveTitleColor = danger
-        ? theme.colorScheme.error
-        : theme.colorScheme.onSurface;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 78),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: theme.colorScheme.outlineVariant,
-                width: 0.6,
-              ),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: effectiveIconColor.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: effectiveIconColor, size: 24),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: effectiveTitleColor,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        height: 1.25,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              if (trailing != null)
-                trailing!
-              else ...[
-                if (value != null)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: Text(
-                      value!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: theme.colorScheme.primary,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                if (onTap != null)
-                  Icon(
-                    Icons.chevron_right,
-                    color: theme.colorScheme.onSurfaceVariant,
-                    size: 24,
-                  ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AutoLockSecondsSheet extends StatefulWidget {
-  const _AutoLockSecondsSheet({required this.initialSeconds});
-
-  final int initialSeconds;
-
-  @override
-  State<_AutoLockSecondsSheet> createState() => _AutoLockSecondsSheetState();
-}
-
-class _AutoLockSecondsSheetState extends State<_AutoLockSecondsSheet> {
-  late double _seconds;
-
-  @override
-  void initState() {
-    super.initState();
-    _seconds = widget.initialSeconds.clamp(0, 3600).toDouble();
-  }
-
-  int get _roundedSeconds => _seconds.round();
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Auto Lock',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(_roundedSeconds),
-                  child: const Text('Done'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(
-                _formatAutoLockSeconds(_roundedSeconds),
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            Slider(
-              key: const ValueKey('auto-lock-seconds-slider'),
-              value: _seconds,
-              min: 0,
-              max: 3600,
-              divisions: 360,
-              label: _formatAutoLockSeconds(_roundedSeconds),
-              onChanged: (value) => setState(() => _seconds = value),
-            ),
-            Row(
-              children: [
-                Text(
-                  'Off',
-                  style: TextStyle(color: colorScheme.onSurfaceVariant),
-                ),
-                const Spacer(),
-                Text(
-                  '3600 sec',
-                  style: TextStyle(color: colorScheme.onSurfaceVariant),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsActionRow extends StatelessWidget {
-  const _SettingsActionRow({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 10, 18, 12),
-      child: Row(
-        children: [
-          for (final child in children) ...[
-            Expanded(
-              child: Theme(
-                data: Theme.of(context).copyWith(
-                  outlinedButtonTheme: OutlinedButtonThemeData(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.onSurface,
-                      side: BorderSide(
-                        color: Theme.of(context).colorScheme.outlineVariant,
-                      ),
-                      minimumSize: const Size.fromHeight(44),
-                    ),
-                  ),
-                ),
-                child: child,
-              ),
-            ),
-            if (child != children.last) const SizedBox(width: 10),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _DocumentDetailScreen extends StatefulWidget {
-  const _DocumentDetailScreen({
-    required this.item,
-    required this.onReadDocument,
-    required this.onShareEncryptedDocument,
-    required this.onExportEncryptedDocument,
-    this.showDeleteAction = false,
-  });
-
-  final Map<String, dynamic> item;
-  final ReadVaultDocument? onReadDocument;
-  final Future<void> Function(Map<String, dynamic> item, List<int> bytes)
-  onShareEncryptedDocument;
-  final Future<void> Function(Map<String, dynamic> item, List<int> bytes)
-  onExportEncryptedDocument;
-  final bool showDeleteAction;
-
-  @override
-  State<_DocumentDetailScreen> createState() => _DocumentDetailScreenState();
-}
-
-class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
-  late Future<List<int>> _documentFuture;
-  late bool _isFavorite;
-
-  @override
-  void initState() {
-    super.initState();
-    _isFavorite = widget.item['pinned'] == true;
-    _documentFuture = _loadDocument();
-  }
-
-  Future<List<int>> _loadDocument() async {
-    final sectionName = widget.item['documentSection']?.toString().trim() ?? '';
-    if (sectionName.isEmpty) {
-      throw StateError('Document section is missing.');
-    }
-    final reader = widget.onReadDocument;
-    if (reader == null) {
-      throw StateError(
-        'Document preview is unavailable in this vault session.',
-      );
-    }
-    return reader(sectionName: sectionName);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final title = widget.item['title']?.toString() ?? 'Document';
-    final extension = _documentExtension(widget.item);
-    final fileName = _documentFileName(widget.item);
-    final size = _formatDocumentSize(widget.item);
-
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        _closeWithUpdates();
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          leading: IconButton(
-            onPressed: _closeWithUpdates,
-            icon: const Icon(Icons.arrow_back),
-          ),
-          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          actions: [
-            IconButton(
-              onPressed: () => setState(() => _isFavorite = !_isFavorite),
-              icon: Icon(_isFavorite ? Icons.star : Icons.star_border),
-              tooltip: 'Favorite',
-            ),
-            if (widget.showDeleteAction)
-              IconButton(
-                onPressed: () => Navigator.of(
-                  context,
-                ).pop(<String, dynamic>{'__delete__': true}),
-                icon: const Icon(Icons.delete_outline),
-                tooltip: AppStrings.delete,
-              ),
-          ],
-        ),
-        body: SafeArea(
-          child: FutureBuilder<List<int>>(
-            future: _documentFuture,
-            builder: (context, snapshot) {
-              final bytes = snapshot.data;
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                    child: Column(
-                      children: [
-                        _DocumentHeader(
-                          title: title,
-                          fileName: fileName,
-                          extension: extension,
-                          size: size,
-                        ),
-                        const SizedBox(height: 10),
-                        _EntryMetadataPanel(entry: widget.item),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: colorScheme.outlineVariant),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: _buildPreview(context, snapshot, extension),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: bytes == null
-                                ? null
-                                : () => _openDocument(bytes),
-                            icon: const Icon(Icons.open_in_new_outlined),
-                            label: const Text('Open with app'),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: bytes == null
-                                ? null
-                                : () => _shareDecryptedDocument(bytes),
-                            icon: const Icon(Icons.share_outlined),
-                            label: const Text('Share decrypted file'),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: bytes == null
-                                    ? null
-                                    : () => widget.onShareEncryptedDocument(
-                                        widget.item,
-                                        bytes,
-                                      ),
-                                icon: const Icon(
-                                  Icons.enhanced_encryption_outlined,
-                                ),
-                                label: const Text('Share encrypted'),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: bytes == null
-                                    ? null
-                                    : () => widget.onExportEncryptedDocument(
-                                        widget.item,
-                                        bytes,
-                                      ),
-                                icon: const Icon(Icons.file_download_outlined),
-                                label: const Text('Export encrypted'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPreview(
-    BuildContext context,
-    AsyncSnapshot<List<int>> snapshot,
-    String extension,
-  ) {
-    if (snapshot.connectionState == ConnectionState.waiting) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (snapshot.hasError) {
-      return _DocumentPreviewMessage(
-        icon: Icons.error_outline,
-        title: 'Unable to preview document',
-        subtitle: snapshot.error.toString(),
-      );
-    }
-    final bytes = snapshot.data ?? const <int>[];
-    if (bytes.isEmpty) {
-      return const _DocumentPreviewMessage(
-        icon: Icons.insert_drive_file_outlined,
-        title: 'Empty document',
-        subtitle: 'There is no content to preview.',
-      );
-    }
-    if (_isImageExtension(extension)) {
-      return InteractiveViewer(
-        minScale: 0.5,
-        maxScale: 4,
-        child: Center(
-          child: Image.memory(
-            Uint8List.fromList(bytes),
-            fit: BoxFit.contain,
-            errorBuilder: (context, error, stackTrace) =>
-                const _DocumentPreviewMessage(
-                  icon: Icons.broken_image_outlined,
-                  title: 'Image preview failed',
-                  subtitle: 'Use Open with... to view this document.',
-                ),
-          ),
-        ),
-      );
-    }
-    if (_isTextExtension(extension)) {
-      final text = utf8.decode(bytes, allowMalformed: true);
-      return Scrollbar(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(14),
-          child: SelectableText(
-            text,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-          ),
-        ),
-      );
-    }
-    return _DocumentPreviewMessage(
-      icon: extension == 'PDF'
-          ? Icons.picture_as_pdf_outlined
-          : Icons.insert_drive_file_outlined,
-      title: '$extension preview unavailable',
-      subtitle: 'Use Open with... to view this document in another app.',
-    );
-  }
-
-  Future<void> _openDocument(List<int> bytes) async {
-    final fileName = _documentFileName(widget.item);
-    final mimeType = _mimeTypeForExtension(_documentExtension(widget.item));
-    try {
-      await _VaultAppShellState._documentOpenChannel.invokeMethod<bool>(
-        'openDocument',
-        <String, Object>{
-          'fileName': fileName,
-          'mimeType': mimeType,
-          'bytes': Uint8List.fromList(bytes),
-        },
-      );
-    } on MissingPluginException {
-      await _shareDocumentFallback(bytes, fileName, mimeType);
-    } on PlatformException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message ?? 'No app can open this file.')),
-      );
-      await _shareDocumentFallback(bytes, fileName, mimeType);
-    }
-  }
-
-  Future<void> _shareDecryptedDocument(List<int> bytes) async {
-    final fileName = _documentFileName(widget.item);
-    await _shareDocumentFallback(
-      bytes,
-      fileName,
-      _mimeTypeForExtension(_documentExtension(widget.item)),
-    );
-  }
-
-  Future<void> _shareDocumentFallback(
-    List<int> bytes,
-    String fileName,
-    String mimeType,
-  ) async {
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [
-          XFile.fromData(
-            Uint8List.fromList(bytes),
-            name: fileName,
-            mimeType: mimeType,
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _closeWithUpdates() {
-    final pinnedWas = widget.item['pinned'] == true;
-    if (pinnedWas == _isFavorite) {
-      Navigator.of(context).pop();
-      return;
-    }
-    Navigator.of(
-      context,
-    ).pop(<String, dynamic>{...widget.item, 'pinned': _isFavorite});
-  }
-}
-
-class _DocumentHeader extends StatelessWidget {
-  const _DocumentHeader({
-    required this.title,
-    required this.fileName,
-    required this.extension,
-    required this.size,
-  });
-
-  final String title;
-  final String fileName;
-  final String extension;
-  final String size;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: const Color(0xFFFB7185).withValues(alpha: 0.16),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(
-            Icons.insert_drive_file_outlined,
-            color: Color(0xFFFB7185),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: colorScheme.onSurface,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '$extension · $size · $fileName',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _DocumentPreviewMessage extends StatelessWidget {
-  const _DocumentPreviewMessage({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: colorScheme.onSurfaceVariant, size: 42),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: colorScheme.onSurface,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-String _documentExtension(Map<String, dynamic> item) {
-  final extension = item['documentExtension']?.toString().trim();
-  if (extension != null && extension.isNotEmpty) {
-    return extension.toUpperCase();
-  }
-  final fileName = _documentFileName(item);
-  final dot = fileName.lastIndexOf('.');
-  if (dot == -1 || dot == fileName.length - 1) return 'FILE';
-  return fileName.substring(dot + 1).toUpperCase();
-}
-
-String _documentFileName(Map<String, dynamic> item) {
-  final fileName = item['documentFileName']?.toString().trim();
-  if (fileName != null && fileName.isNotEmpty) return fileName;
-  final title = item['title']?.toString().trim();
-  if (title != null && title.isNotEmpty) return title;
-  return 'document';
-}
-
-String _documentSuggestedBaseName(Map<String, dynamic> item) {
-  final fileName = _documentFileName(item);
-  final dot = fileName.lastIndexOf('.');
-  final base = dot <= 0 ? fileName : fileName.substring(0, dot);
-  return base.trim().isEmpty ? 'document' : base.trim();
-}
-
-String _documentEncryptedPayload(Map<String, dynamic> item, List<int> bytes) {
-  return jsonEncode(<String, dynamic>{
-    'kind': 'document',
-    'title': item['title']?.toString() ?? 'Document',
-    'fileName': _documentFileName(item),
-    'extension': _documentExtension(item),
-    'mimeType': _mimeTypeForExtension(_documentExtension(item)),
-    'sizeBytes': bytes.length,
-    'createdAt': item['createdAt']?.toString(),
-    'updatedAt': item['updatedAt']?.toString(),
-    'deviceId': item['deviceId']?.toString(),
-    'updatedByDevice': item['updatedByDevice']?.toString(),
-    'bytesBase64': base64Encode(bytes),
-  });
-}
-
-String _formatDocumentSize(Map<String, dynamic> item) {
-  final raw = item['documentSizeBytes'];
-  final bytes = raw is int ? raw : int.tryParse(raw?.toString() ?? '') ?? 0;
-  if (bytes <= 0) return '0 B';
-  if (bytes < 1024) return '$bytes B';
-  final kb = bytes / 1024;
-  if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
-  final mb = kb / 1024;
-  return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
-}
-
-bool _isImageExtension(String extension) {
-  return const <String>{
-    'PNG',
-    'JPG',
-    'JPEG',
-    'GIF',
-    'WEBP',
-    'BMP',
-  }.contains(extension.toUpperCase());
-}
-
-bool _isTextExtension(String extension) {
-  return const <String>{
-    'TXT',
-    'MD',
-    'JSON',
-    'CSV',
-    'LOG',
-    'XML',
-    'YAML',
-    'YML',
-  }.contains(extension.toUpperCase());
-}
-
-String _mimeTypeForExtension(String extension) {
-  switch (extension.toUpperCase()) {
-    case 'PNG':
-      return 'image/png';
-    case 'JPG':
-    case 'JPEG':
-      return 'image/jpeg';
-    case 'GIF':
-      return 'image/gif';
-    case 'WEBP':
-      return 'image/webp';
-    case 'PDF':
-      return 'application/pdf';
-    case 'JSON':
-      return 'application/json';
-    case 'CSV':
-      return 'text/csv';
-    case 'TXT':
-    case 'MD':
-    case 'LOG':
-    case 'YAML':
-    case 'YML':
-      return 'text/plain';
-    case 'XML':
-      return 'application/xml';
-    default:
-      return 'application/octet-stream';
   }
 }
 
@@ -5084,596 +3862,6 @@ String _formatEntryTimestamp(Object? raw, {required String fallback}) {
       '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
 }
 
-class _ItemDetailScreen extends StatefulWidget {
-  const _ItemDetailScreen({
-    required this.item,
-    required this.onCopy,
-    required this.onShareSecurely,
-    required this.customTypeDefinitions,
-    this.showDeleteAction = false,
-  });
-
-  final Map<String, dynamic> item;
-  final ValueChanged<String> onCopy;
-  final Future<void> Function() onShareSecurely;
-  final List<Map<String, dynamic>> customTypeDefinitions;
-  final bool showDeleteAction;
-
-  @override
-  State<_ItemDetailScreen> createState() => _ItemDetailScreenState();
-}
-
-class _ItemDetailScreenState extends State<_ItemDetailScreen> {
-  final Set<int> _revealedIndexes = <int>{};
-  late bool _isFavorite;
-
-  @override
-  void initState() {
-    super.initState();
-    _isFavorite = widget.item['pinned'] == true;
-  }
-
-  Map<String, dynamic>? _customTypeDefinitionForType(String type) {
-    final normalized = type.trim().toLowerCase();
-    if (normalized.isEmpty) return null;
-    for (final definition in widget.customTypeDefinitions) {
-      final name = definition['name']?.toString().trim().toLowerCase();
-      if (name == normalized) return definition;
-    }
-    return null;
-  }
-
-  IconData _iconForItemType(String type) {
-    final iconKey = _customTypeDefinitionForType(type)?['iconKey']?.toString();
-    if (iconKey != null) return _iconForCustomTemplateKey(iconKey);
-    return _iconForHomeType(type);
-  }
-
-  Color _colorForItemType(String type) {
-    final colorKey = _customTypeDefinitionForType(
-      type,
-    )?['colorKey']?.toString();
-    if (colorKey != null) return _colorForCustomTemplateColorKey(colorKey);
-    return _colorForHomeType(type);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final fields = (widget.item['fields'] as List<dynamic>? ?? const [])
-        .map((entry) => Map<String, dynamic>.from(entry as Map))
-        .toList();
-    final itemType = widget.item['type']?.toString() ?? 'Item';
-    final title = widget.item['title']?.toString() ?? 'Untitled';
-    final created = _entryCreatedLabel(widget.item);
-    final modified = _entryModifiedLabel(widget.item);
-    final device = _entryDeviceLabel(widget.item);
-    final lastAccessed = _formatLastAccessedAt(
-      widget.item['lastAccessedAt']?.toString(),
-    );
-    final primarySecret = _extractPrimarySecret(fields);
-    final typeIcon = _iconForItemType(itemType);
-    final typeColor = _colorForItemType(itemType);
-    final idPhotos = _identityPhotos(widget.item);
-
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        _closeWithUpdates();
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          leading: IconButton(
-            onPressed: _closeWithUpdates,
-            icon: const Icon(Icons.arrow_back),
-          ),
-          title: Text(itemType, maxLines: 1, overflow: TextOverflow.ellipsis),
-          titleSpacing: 0,
-          actions: [
-            IconButton(
-              onPressed: () => setState(() => _isFavorite = !_isFavorite),
-              icon: Icon(_isFavorite ? Icons.star : Icons.star_border),
-              tooltip: 'Favorite',
-            ),
-            IconButton(
-              onPressed: () async {
-                final updated = await Navigator.of(context)
-                    .push<Map<String, dynamic>>(
-                      MaterialPageRoute(
-                        builder: (_) => AddVaultItemScreen(
-                          customTypeDefinitions: widget.customTypeDefinitions,
-                          initialItem: widget.item,
-                        ),
-                      ),
-                    );
-                if (updated == null || !context.mounted) return;
-                if (_isFavorite != (widget.item['pinned'] == true)) {
-                  updated['pinned'] = _isFavorite;
-                }
-                Navigator.of(context).pop(updated);
-              },
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: AppStrings.edit,
-            ),
-            if (widget.showDeleteAction)
-              IconButton(
-                onPressed: () => Navigator.of(
-                  context,
-                ).pop(<String, dynamic>{'__delete__': true}),
-                icon: const Icon(Icons.delete_outline),
-                tooltip: AppStrings.delete,
-              ),
-          ],
-        ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: typeColor.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Icon(typeIcon, color: typeColor, size: 30),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Center(
-                      child: Text(
-                        itemType,
-                        textAlign: TextAlign.center,
-                        style: vaultPageHeadingStyle(context),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Center(
-                      child: Text(
-                        title,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: colorScheme.onSurface,
-                          fontWeight: FontWeight.w400,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: colorScheme.outlineVariant),
-                      ),
-                      child: Column(
-                        children: List.generate(fields.length, (index) {
-                          final field = fields[index];
-                          final sensitive = field['sensitive'] == true;
-                          final revealed = _revealedIndexes.contains(index);
-                          final value = field['value']?.toString() ?? '';
-                          final displayValue = sensitive && !revealed
-                              ? '••••••••••'
-                              : value;
-                          return Column(
-                            children: [
-                              if (index > 0)
-                                const Divider(height: 16, thickness: 0.5),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          field['label']?.toString() ?? 'Field',
-                                          style: TextStyle(
-                                            color: colorScheme.onSurfaceVariant,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          displayValue,
-                                          style: TextStyle(
-                                            color: colorScheme.onSurface,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  if (sensitive)
-                                    IconButton(
-                                      icon: Icon(
-                                        revealed
-                                            ? Icons.visibility_off
-                                            : Icons.visibility,
-                                        size: 18,
-                                      ),
-                                      onPressed: () {
-                                        setState(() {
-                                          if (revealed) {
-                                            _revealedIndexes.remove(index);
-                                          } else {
-                                            _revealedIndexes.add(index);
-                                          }
-                                        });
-                                      },
-                                    ),
-                                  IconButton(
-                                    icon: const Icon(Icons.copy, size: 18),
-                                    onPressed: value.isEmpty
-                                        ? null
-                                        : () => widget.onCopy(value),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          );
-                        }),
-                      ),
-                    ),
-                    if (idPhotos.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      _IdentityPhotosSection(photos: idPhotos),
-                    ],
-                    const SizedBox(height: 14),
-                    _metadataRow('Category', itemType),
-                    const SizedBox(height: 8),
-                    _metadataRow('Created', created),
-                    const SizedBox(height: 8),
-                    _metadataRow('Modified', modified),
-                    const SizedBox(height: 8),
-                    _metadataRow('Device', device),
-                    const SizedBox(height: 8),
-                    _metadataRow('Last accessed', lastAccessed),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: primarySecret == null
-                            ? null
-                            : () => widget.onCopy(primarySecret),
-                        child: const Text('Copy Password'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => widget.onShareSecurely(),
-                        child: const Text('Share Securely'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String? _extractPrimarySecret(List<Map<String, dynamic>> fields) {
-    if (fields.isEmpty) return null;
-    for (final field in fields) {
-      final label = field['label']?.toString().toLowerCase() ?? '';
-      if (label.contains('password') || label.contains('passcode')) {
-        final value = field['value']?.toString() ?? '';
-        if (value.isNotEmpty) return value;
-      }
-    }
-    for (final field in fields) {
-      if (field['sensitive'] == true) {
-        final value = field['value']?.toString() ?? '';
-        if (value.isNotEmpty) return value;
-      }
-    }
-    final fallback = fields.first['value']?.toString() ?? '';
-    return fallback.isEmpty ? null : fallback;
-  }
-
-  List<Map<String, dynamic>> _identityPhotos(Map<String, dynamic> item) {
-    final type = item['type']?.toString().trim().toLowerCase() ?? '';
-    if (type != 'identity') return const <Map<String, dynamic>>[];
-    return (item['idPhotos'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map>()
-        .map((entry) => Map<String, dynamic>.from(entry))
-        .where(
-          (entry) => (entry['bytesBase64']?.toString() ?? '').trim().isNotEmpty,
-        )
-        .toList();
-  }
-
-  Widget _metadataRow(String label, String value) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        SizedBox(
-          width: 104,
-          child: Text(
-            label,
-            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _formatLastAccessedAt(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Never';
-    final parsed = DateTime.tryParse(value);
-    if (parsed == null) return value;
-    final local = parsed.toLocal();
-    String twoDigits(int number) => number.toString().padLeft(2, '0');
-    return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} '
-        '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
-  }
-
-  void _closeWithUpdates() {
-    final pinnedWas = widget.item['pinned'] == true;
-    if (pinnedWas == _isFavorite) {
-      Navigator.of(context).pop();
-      return;
-    }
-    Navigator.of(
-      context,
-    ).pop(<String, dynamic>{...widget.item, 'pinned': _isFavorite});
-  }
-}
-
-class _IdentityPhotosSection extends StatelessWidget {
-  const _IdentityPhotosSection({required this.photos});
-
-  final List<Map<String, dynamic>> photos;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'ID photos',
-            style: TextStyle(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 10),
-          ...photos.asMap().entries.map((entry) {
-            final index = entry.key;
-            final photo = entry.value;
-            return Padding(
-              padding: EdgeInsets.only(top: index == 0 ? 0 : 10),
-              child: InkWell(
-                key: ValueKey('identity-photo-row-$index'),
-                borderRadius: BorderRadius.circular(10),
-                onTap: () => _showPhotoPicker(context, initialIndex: index),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: _IdentityPhotoPreview(photo: photo),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              photo['name']?.toString() ??
-                                  'ID photo ${index + 1}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: colorScheme.onSurface,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              _formatIdentityPhotoSize(photo['sizeBytes']),
-                              style: TextStyle(
-                                color: colorScheme.onSurfaceVariant,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(
-                        Icons.open_in_full,
-                        size: 18,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showPhotoPicker(
-    BuildContext context, {
-    required int initialIndex,
-  }) async {
-    final selectedIndex = await showModalBottomSheet<int>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text(
-                'Choose photo',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-            ...photos.asMap().entries.map((entry) {
-              final index = entry.key;
-              final photo = entry.value;
-              return ListTile(
-                key: ValueKey('identity-photo-picker-$index'),
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _IdentityPhotoPreview(photo: photo, size: 44),
-                ),
-                title: Text(
-                  photo['name']?.toString() ?? 'ID photo ${index + 1}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(_formatIdentityPhotoSize(photo['sizeBytes'])),
-                selected: index == initialIndex,
-                onTap: () => Navigator.of(context).pop(index),
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-    if (selectedIndex == null || !context.mounted) return;
-    await _showFullPhotoViewer(context, photos[selectedIndex], selectedIndex);
-  }
-
-  Future<void> _showFullPhotoViewer(
-    BuildContext context,
-    Map<String, dynamic> photo,
-    int index,
-  ) async {
-    final name = photo['name']?.toString() ?? 'ID photo ${index + 1}';
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (context) {
-          final colorScheme = Theme.of(context).colorScheme;
-          return Scaffold(
-            appBar: AppBar(title: Text(name)),
-            backgroundColor: colorScheme.surface,
-            body: SafeArea(
-              child: Center(
-                child: InteractiveViewer(
-                  minScale: 0.75,
-                  maxScale: 5,
-                  child: _IdentityFullPhoto(photo: photo),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _IdentityFullPhoto extends StatelessWidget {
-  const _IdentityFullPhoto({required this.photo});
-
-  final Map<String, dynamic> photo;
-
-  @override
-  Widget build(BuildContext context) {
-    try {
-      final bytes = base64Decode(photo['bytesBase64']?.toString() ?? '');
-      return Image.memory(bytes, fit: BoxFit.contain);
-    } catch (_) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.broken_image_outlined,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Unable to display photo.',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      );
-    }
-  }
-}
-
-class _IdentityPhotoPreview extends StatelessWidget {
-  const _IdentityPhotoPreview({required this.photo, this.size = 64});
-
-  final Map<String, dynamic> photo;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    try {
-      final bytes = base64Decode(photo['bytesBase64']?.toString() ?? '');
-      return Image.memory(bytes, width: size, height: size, fit: BoxFit.cover);
-    } catch (_) {
-      return Container(
-        width: size,
-        height: size,
-        color: Theme.of(context).colorScheme.surface,
-        child: const Icon(Icons.broken_image_outlined),
-      );
-    }
-  }
-}
-
-String _formatIdentityPhotoSize(Object? raw) {
-  final bytes = raw is int ? raw : int.tryParse(raw?.toString() ?? '') ?? 0;
-  if (bytes <= 0) return 'Image';
-  if (bytes < 1024) return '$bytes B';
-  final kb = bytes / 1024;
-  if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
-  final mb = kb / 1024;
-  return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
-}
-
 class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.title, required this.subtitle});
 
@@ -5694,66 +3882,6 @@ class _EmptyState extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _RenameVaultDialog extends StatefulWidget {
-  const _RenameVaultDialog({required this.initialName});
-
-  final String initialName;
-
-  @override
-  State<_RenameVaultDialog> createState() => _RenameVaultDialogState();
-}
-
-class _RenameVaultDialogState extends State<_RenameVaultDialog> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialName);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    if (_formKey.currentState?.validate() != true) return;
-    Navigator.of(context).pop(_controller.text.trim());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Rename vault'),
-      content: Form(
-        key: _formKey,
-        child: TextFormField(
-          controller: _controller,
-          autofocus: true,
-          textInputAction: TextInputAction.done,
-          decoration: InputDecoration(labelText: AppStrings.vaultName),
-          validator: (value) {
-            final trimmed = value?.trim() ?? '';
-            if (trimmed.isEmpty) return 'Enter a vault name';
-            return null;
-          },
-          onFieldSubmitted: (_) => _submit(),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('Rename')),
-      ],
     );
   }
 }
@@ -5865,6 +3993,205 @@ class _DebugInfoCard extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _DebugFileTreeCard extends StatelessWidget {
+  const _DebugFileTreeCard({required this.store});
+
+  final dynamic store;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final tree = _buildTree();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Vault file tree',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            if (tree.isEmpty)
+              Text(
+                'No files',
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
+              )
+            else
+              ...tree.map((line) => _DebugTreeLine(line: line)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<_DebugTreeLineData> _buildTree() {
+    if (store is! Map) return const <_DebugTreeLineData>[];
+    final root = (store as Map)['root']?.toString() ?? 'vault';
+    final files = (store as Map)['files'];
+    if (files is! Map) return const <_DebugTreeLineData>[];
+    final entries =
+        files.entries
+            .map(
+              (entry) => MapEntry<String, int>(
+                entry.key.toString(),
+                int.tryParse(entry.value.toString()) ?? 0,
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
+
+    final core = <MapEntry<String, int>>[];
+    final documents = <String, List<MapEntry<String, int>>>{};
+    final other = <MapEntry<String, int>>[];
+    for (final entry in entries) {
+      final docId = _documentTreeId(entry.key);
+      if (_isCoreDebugFile(entry.key)) {
+        core.add(entry);
+      } else if (docId != null) {
+        documents
+            .putIfAbsent(docId, () => <MapEntry<String, int>>[])
+            .add(entry);
+      } else {
+        other.add(entry);
+      }
+    }
+
+    final lines = <_DebugTreeLineData>[
+      _DebugTreeLineData(depth: 0, label: _rootLabel(root), folder: true),
+    ];
+    if (core.isNotEmpty) {
+      lines.add(
+        const _DebugTreeLineData(depth: 1, label: 'core', folder: true),
+      );
+      lines.addAll(core.map((entry) => _fileLine(entry, depth: 2)));
+    }
+    if (documents.isNotEmpty) {
+      lines.add(
+        const _DebugTreeLineData(depth: 1, label: 'documents', folder: true),
+      );
+      for (final docId in documents.keys.toList()..sort()) {
+        final docFiles = documents[docId]!
+          ..sort((a, b) => a.key.compareTo(b.key));
+        lines.add(_DebugTreeLineData(depth: 2, label: docId, folder: true));
+        lines.addAll(docFiles.map((entry) => _fileLine(entry, depth: 3)));
+      }
+    }
+    if (other.isNotEmpty) {
+      lines.add(
+        const _DebugTreeLineData(depth: 1, label: 'other', folder: true),
+      );
+      lines.addAll(other.map((entry) => _fileLine(entry, depth: 2)));
+    }
+    return lines;
+  }
+
+  static _DebugTreeLineData _fileLine(
+    MapEntry<String, int> entry, {
+    required int depth,
+  }) {
+    return _DebugTreeLineData(
+      depth: depth,
+      label: entry.key,
+      detail: '${entry.value} bytes',
+    );
+  }
+
+  static String _rootLabel(String root) {
+    final normalized = root.replaceAll('\\', '/');
+    final parts = normalized.split('/').where((part) => part.isNotEmpty);
+    return parts.isEmpty ? root : parts.last;
+  }
+
+  static bool _isCoreDebugFile(String name) {
+    return const <String>{
+      'header.json',
+      'manifest.enc',
+      'items.enc',
+      'notes.enc',
+      'settings.enc',
+      'tags.enc',
+    }.contains(name);
+  }
+
+  static String? _documentTreeId(String name) {
+    final manifest = RegExp(r'^document_(.+)\.manifest\.enc$').firstMatch(name);
+    if (manifest != null) return manifest.group(1);
+    final chunk = RegExp(r'^document_(.+)_chunk_\d+\.enc$').firstMatch(name);
+    return chunk?.group(1);
+  }
+}
+
+class _DebugTreeLineData {
+  const _DebugTreeLineData({
+    required this.depth,
+    required this.label,
+    this.detail,
+    this.folder = false,
+  });
+
+  final int depth;
+  final String label;
+  final String? detail;
+  final bool folder;
+}
+
+class _DebugTreeLine extends StatelessWidget {
+  const _DebugTreeLine({required this.line});
+
+  final _DebugTreeLineData line;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: EdgeInsets.only(left: line.depth * 14.0, top: 2, bottom: 2),
+      child: Row(
+        children: [
+          Icon(
+            line.folder
+                ? Icons.folder_outlined
+                : Icons.insert_drive_file_outlined,
+            size: 15,
+            color: line.folder
+                ? colorScheme.primary
+                : colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: SelectableText(
+              line.label,
+              style: TextStyle(
+                color: colorScheme.onSurface,
+                fontSize: 12,
+                fontFamily: 'monospace',
+                fontWeight: line.folder ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
+          if (line.detail != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              line.detail!,
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 11,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

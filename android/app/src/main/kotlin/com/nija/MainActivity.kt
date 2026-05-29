@@ -13,7 +13,7 @@ import java.io.File
 class MainActivity : FlutterFragmentActivity() {
     private val secretIntentChannelName = "nija/secret_intent"
     private val documentOpenChannelName = "nija/document_open"
-    private var pendingSecretContent: String? = null
+    private var pendingSecretUri: Uri? = null
     private var pendingSecretLabel: String? = null
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -35,19 +35,29 @@ class MainActivity : FlutterFragmentActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "consumePendingSecret" -> {
-                    val content = pendingSecretContent
-                    if (content == null) {
+                    val uri = pendingSecretUri
+                    val label = pendingSecretLabel ?: "secret.nijas"
+                    if (uri == null) {
                         result.success(null)
-                    } else {
-                        result.success(
-                            mapOf(
-                                "label" to (pendingSecretLabel ?: "secret.nijas"),
-                                "content" to content
-                            )
-                        )
-                        pendingSecretContent = null
-                        pendingSecretLabel = null
+                        return@setMethodCallHandler
                     }
+                    pendingSecretUri = null
+                    pendingSecretLabel = null
+                    Thread {
+                        val content = readTextFromUri(uri)
+                        runOnUiThread {
+                            if (content == null) {
+                                result.success(null)
+                            } else {
+                                result.success(
+                                    mapOf(
+                                        "label" to label,
+                                        "content" to content
+                                    )
+                                )
+                            }
+                        }
+                    }.start()
                 }
                 else -> result.notImplemented()
             }
@@ -115,9 +125,8 @@ class MainActivity : FlutterFragmentActivity() {
             mime == "application/octet-stream" ||
             mime == "text/plain"
         if (!looksLikeEncryptedSecret) return
-        val content = readTextFromUri(uri) ?: return
         pendingSecretLabel = if (normalizedLabel.endsWith(".nijas")) label else "secret.nijas"
-        pendingSecretContent = content
+        pendingSecretUri = uri
     }
 
     private fun extractFileName(uri: Uri): String {

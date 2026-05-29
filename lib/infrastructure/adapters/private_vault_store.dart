@@ -9,6 +9,12 @@ abstract class PrivateVaultStore {
   Future<bool> vaultExists(String vaultStoreId);
   Future<VaultFile> readHeader(String vaultStoreId);
   Future<Uint8List> readSection(String vaultStoreId, String fileName);
+  Future<void> writeHeader(String vaultStoreId, VaultFile header);
+  Future<void> writeSection(
+    String vaultStoreId,
+    String fileName,
+    Uint8List bytes,
+  );
   Future<void> commitVault({
     required String vaultStoreId,
     required VaultFile header,
@@ -60,6 +66,30 @@ class InMemoryPrivateVaultStore implements PrivateVaultStore {
       throw StateError('Working vault section not found: $fileName');
     }
     return Uint8List.fromList(raw);
+  }
+
+  @override
+  Future<void> writeHeader(String vaultStoreId, VaultFile header) async {
+    final vault = _vaults.putIfAbsent(
+      vaultStoreId,
+      () => <String, Uint8List>{},
+    );
+    vault['header.json'] = Uint8List.fromList(
+      utf8.encode(jsonEncode(header.toJson())),
+    );
+  }
+
+  @override
+  Future<void> writeSection(
+    String vaultStoreId,
+    String fileName,
+    Uint8List bytes,
+  ) async {
+    final vault = _vaults.putIfAbsent(
+      vaultStoreId,
+      () => <String, Uint8List>{},
+    );
+    vault[fileName] = Uint8List.fromList(bytes);
   }
 
   @override
@@ -163,6 +193,30 @@ class FilePrivateVaultStore implements PrivateVaultStore {
       throw StateError('Working vault section not found: $fileName');
     }
     return file.readAsBytes();
+  }
+
+  @override
+  Future<void> writeHeader(String vaultStoreId, VaultFile header) async {
+    final dir = _dir(vaultStoreId);
+    await dir.create(recursive: true);
+    await _atomicWriteBytes(
+      File('${dir.path}${Platform.pathSeparator}header.json'),
+      Uint8List.fromList(utf8.encode(jsonEncode(header.toJson()))),
+    );
+  }
+
+  @override
+  Future<void> writeSection(
+    String vaultStoreId,
+    String fileName,
+    Uint8List bytes,
+  ) async {
+    final dir = _dir(vaultStoreId);
+    await dir.create(recursive: true);
+    await _atomicWriteBytes(
+      File('${dir.path}${Platform.pathSeparator}$fileName'),
+      bytes,
+    );
   }
 
   @override
