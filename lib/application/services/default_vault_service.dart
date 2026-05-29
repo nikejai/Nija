@@ -33,6 +33,7 @@ class DefaultVaultService implements VaultService {
   static const _settingsFile = 'settings.enc';
   static const _tagsFile = 'tags.enc';
   static const _headerFile = 'header.json';
+  static const _documentChunkBytes = 1024 * 1024;
 
   final VaultStorageAdapter _storageAdapter;
   final CryptoAdapter _cryptoAdapter;
@@ -494,6 +495,25 @@ class DefaultVaultService implements VaultService {
     required String documentId,
     VaultProgressCallback? onProgress,
   }) async {
+    return persistVaultDocumentStream(
+      filePath: filePath,
+      password: password,
+      chunks: Stream<List<int>>.value(bytes),
+      sizeBytes: bytes.length,
+      documentId: documentId,
+      onProgress: onProgress,
+    );
+  }
+
+  @override
+  Future<String> persistVaultDocumentStream({
+    required String filePath,
+    required String password,
+    required Stream<List<int>> chunks,
+    required int sizeBytes,
+    required String documentId,
+    VaultProgressCallback? onProgress,
+  }) async {
     final file = await _readMigratedVaultFile(filePath: filePath);
     final passwordKey = await _deriveKey(password, file.kdf);
     final vaultKey = await _cryptoAdapter.decrypt(
@@ -501,20 +521,66 @@ class DefaultVaultService implements VaultService {
       key: passwordKey,
     );
     final storeId = _storeIdFor(filePath, file);
-    final sections = await _readExistingWorkingSections(storeId);
     final sectionName = _documentSectionFile(documentId);
-    sections[sectionName] = Uint8List.fromList(
-      await _cryptoAdapter.encrypt(plain: bytes, key: vaultKey),
+    final chunkNames = <String>[];
+    var pending = <int>[];
+    var written = 0;
+    var index = 0;
+
+    Future<void> writePlainChunk(List<int> plainChunk) async {
+      final chunkName = _documentChunkSectionFile(documentId, index);
+      final encryptedChunk = await _cryptoAdapter.encrypt(
+        plain: plainChunk,
+        key: vaultKey,
+      );
+      await _privateVaultStore.writeSection(
+        storeId,
+        chunkName,
+        Uint8List.fromList(encryptedChunk),
+      );
+      chunkNames.add(chunkName);
+      written += plainChunk.length;
+      index += 1;
+      onProgress?.call(
+        VaultOperationProgress(
+          value: sizeBytes <= 0 ? 0.8 : (written / sizeBytes) * 0.8,
+          message: 'Encrypting document chunks...',
+        ),
+      );
+    }
+
+    await for (final chunk in chunks) {
+      if (chunk.isEmpty) continue;
+      pending.addAll(chunk);
+      while (pending.length >= _documentChunkBytes) {
+        final plainChunk = pending.sublist(0, _documentChunkBytes);
+        pending = pending.sublist(_documentChunkBytes);
+        await writePlainChunk(plainChunk);
+      }
+    }
+    if (pending.isNotEmpty) {
+      await writePlainChunk(pending);
+    }
+
+    final manifest = <String, dynamic>{
+      'format': 'nija_document_chunks_v1',
+      'sizeBytes': sizeBytes,
+      'chunkBytes': _documentChunkBytes,
+      'chunks': chunkNames,
+    };
+    final encryptedManifest = await _cryptoAdapter.encrypt(
+      plain: utf8.encode(jsonEncode(manifest)),
+      key: vaultKey,
+    );
+    await _privateVaultStore.writeSection(
+      storeId,
+      sectionName,
+      Uint8List.fromList(encryptedManifest),
     );
     final nextHeader = _nextMutationHeader(file);
-    await _privateVaultStore.commitVault(
-      vaultStoreId: storeId,
-      header: nextHeader,
-      sections: sections,
-    );
+    await _privateVaultStore.writeHeader(storeId, nextHeader);
     await _rememberRegistry(nextHeader, label: _displayLabel(nextHeader));
     _handleToVaultStoreId[filePath] = nextHeader.vaultId;
-    await _writeSnapshotToHandle(filePath, nextHeader.vaultId);
     onProgress?.call(
       const VaultOperationProgress(
         value: 1.0,
@@ -540,6 +606,28 @@ class DefaultVaultService implements VaultService {
     final storeId = _storeIdFor(filePath, file);
     final cipher = await _privateVaultStore.readSection(storeId, sectionName);
     final plain = await _cryptoAdapter.decrypt(cipher: cipher, key: vaultKey);
+    final chunkNames = _documentChunkNamesFromManifest(plain);
+    if (chunkNames != null) {
+      final out = BytesBuilder(copy: false);
+      for (var i = 0; i < chunkNames.length; i++) {
+        final chunkCipher = await _privateVaultStore.readSection(
+          storeId,
+          chunkNames[i],
+        );
+        final chunk = await _cryptoAdapter.decrypt(
+          cipher: chunkCipher,
+          key: vaultKey,
+        );
+        out.add(chunk);
+        onProgress?.call(
+          VaultOperationProgress(
+            value: chunkNames.isEmpty ? 1.0 : (i + 1) / chunkNames.length,
+            message: 'Decrypting document chunks...',
+          ),
+        );
+      }
+      return out.takeBytes();
+    }
     onProgress?.call(
       const VaultOperationProgress(value: 1.0, message: 'Document decrypted.'),
     );
@@ -1205,7 +1293,29 @@ class DefaultVaultService implements VaultService {
 
   String _documentSectionFile(String documentId) {
     final cleaned = documentId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-    return 'document_$cleaned.enc';
+    return 'document_$cleaned.manifest.enc';
+  }
+
+  String _documentChunkSectionFile(String documentId, int index) {
+    final cleaned = documentId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    return 'document_${cleaned}_chunk_${index.toString().padLeft(6, '0')}.enc';
+  }
+
+  List<String>? _documentChunkNamesFromManifest(List<int> plain) {
+    try {
+      final decoded = jsonDecode(utf8.decode(plain));
+      if (decoded is! Map) return null;
+      final manifest = Map<String, dynamic>.from(decoded);
+      if (manifest['format'] != 'nija_document_chunks_v1') return null;
+      final chunks = manifest['chunks'];
+      if (chunks is! List) return const <String>[];
+      return chunks
+          .map((entry) => entry.toString())
+          .where((entry) => entry.trim().isNotEmpty)
+          .toList();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<List<int>> _unwrapVaultKey(VaultFile file, String password) async {

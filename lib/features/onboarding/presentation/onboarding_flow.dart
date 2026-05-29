@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,6 +16,7 @@ import '../../../application/services/vault_merge_helper.dart';
 import '../../../core/config/guardian_profiles.dart';
 import '../../../core/config/recovery_phrase_dictionary.dart';
 import '../../../core/config/recovery_phrase_generator.dart';
+import '../../../core/config/vault_limits.dart';
 import '../../../core/localization/app_strings.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/biometric_auth_service.dart';
@@ -129,6 +131,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   String _deviceLabel = 'unknown';
   DateTime? _lastUnlockBackPressAt;
   bool _setupOpenedFromUnlock = false;
+  bool _consumingPendingSecretIntent = false;
+  bool _handlingRootPop = false;
 
   @override
   void initState() {
@@ -258,6 +262,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onBiometricChanged: _onBiometricPreferenceChanged,
         onPersistVaultData: _persistVaultData,
         onPersistVaultDocument: _persistVaultDocument,
+        onPersistVaultDocumentStream: _persistVaultDocumentStream,
         onReadVaultDocument: _readVaultDocument,
         onLifecycleLockSuppressed: _setLifecycleLockSuppressed,
         onRotateMasterPassword: _rotateMasterPassword,
@@ -344,10 +349,6 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<bool> _handleRootBackPress() async {
     if (_step == OnboardingStep.app) {
-      _clearSensitiveSessionState();
-      if (mounted) {
-        setState(() => _step = OnboardingStep.unlock);
-      }
       return false;
     }
     if (_step == OnboardingStep.setup) {
@@ -387,9 +388,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _handleRootPopInvoked() async {
-    final allowPop = await _handleRootBackPress();
-    if (!allowPop || !mounted) return;
-    unawaited(Navigator.of(context).maybePop());
+    if (_handlingRootPop) return;
+    _handlingRootPop = true;
+    try {
+      final allowPop = await _handleRootBackPress();
+      if (!allowPop || !mounted) return;
+      await SystemNavigator.pop();
+    } finally {
+      _handlingRootPop = false;
+    }
   }
 
   void _handleUnlock() {
@@ -678,25 +685,43 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _consumePendingSecretIntent() async {
-    final imported = await _secretIntentBridge.consumePendingSecret();
-    if (imported == null || !mounted) return;
-    await _openImportedEncryptedSecret(imported);
+    if (_consumingPendingSecretIntent) return;
+    _consumingPendingSecretIntent = true;
+    try {
+      final imported = await _secretIntentBridge.consumePendingSecret();
+      if (imported == null || !mounted) return;
+      await _openImportedEncryptedSecret(imported);
+    } finally {
+      _consumingPendingSecretIntent = false;
+    }
   }
 
   Future<void> _openImportedEncryptedSecret(ImportedSecretFile imported) async {
     final password = await _promptSecretPassword();
     if (password == null || password.trim().isEmpty || !mounted) return;
+    var busyStarted = false;
     try {
+      _startBusy(
+        'Decrypting imported file...',
+        timeout: const Duration(minutes: 1),
+        timeoutMessage:
+            'Import is taking longer than expected. Large files may need more time.',
+      );
+      busyStarted = true;
+      await _waitForOverlayTeardown();
       final decoded = await _encryptedShareCodec.decode(
         encoded: imported.content,
         password: password.trim(),
       );
       if (!mounted) return;
+      _updateBusyStep('Preparing import preview...', 0.65);
       final normalizedType = decoded.contentType.trim().toLowerCase();
       if (normalizedType == 'vault_bundle') {
         final entries = _encryptedImportEntriesFromBundle(decoded.plainText);
         if (entries.isNotEmpty) {
           if (entries.length > 1) {
+            _stopBusy();
+            busyStarted = false;
             final importedAny = await Navigator.of(context).push<bool>(
               MaterialPageRoute<bool>(
                 builder: (context) => _EncryptedImportBundleScreen(
@@ -713,6 +738,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             }
             return;
           }
+          _stopBusy();
+          busyStarted = false;
           final importedSingle = await Navigator.of(context).push<bool>(
             MaterialPageRoute<bool>(
               builder: (context) => _EncryptedImportEntryPreviewScreen(
@@ -731,7 +758,38 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           return;
         }
       }
+      if (normalizedType == 'document') {
+        final entry = _encryptedImportEntryFromDocument(decoded.plainText);
+        if (entry == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppStrings.encryptedSecretImportFailed)),
+          );
+          return;
+        }
+        _stopBusy();
+        busyStarted = false;
+        final importedSingle = await Navigator.of(context).push<bool>(
+          MaterialPageRoute<bool>(
+            builder: (context) => _EncryptedImportEntryPreviewScreen(
+              entry: entry,
+              alreadyImported: false,
+              onImport: () => _importDecodedSecretToVaultWithResult(
+                decoded,
+                actionLabel: 'Import document',
+              ),
+            ),
+          ),
+        );
+        if (importedSingle == true && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(AppStrings.encryptedSecretImported)),
+          );
+        }
+        return;
+      }
       final fields = _parseEncryptedSecretFields(decoded.plainText);
+      _stopBusy();
+      busyStarted = false;
       final shouldImport = await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
           builder: (context) => _EncryptedSecretViewerScreen(
@@ -745,10 +803,28 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         await _importDecodedSecretToVault(decoded);
       }
     } catch (_) {
+      if (busyStarted) _stopBusy();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.encryptedSecretImportFailed)),
       );
+    }
+  }
+
+  _EncryptedImportEntry? _encryptedImportEntryFromDocument(String plainText) {
+    try {
+      final decoded = jsonDecode(plainText);
+      if (decoded is! Map) return null;
+      final entry = Map<String, dynamic>.from(decoded);
+      return _EncryptedImportEntry(
+        index: 0,
+        kind: 'document',
+        bundleEntry: entry,
+        title: _bundleImportTitle(entry, 'document'),
+        subtitle: _bundleImportSubtitle(entry, 'document'),
+      );
+    } catch (_) {
+      return null;
     }
   }
 
@@ -801,19 +877,31 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<void> _importDecodedSecretToVault(
     DecryptedSharePayload payload,
   ) async {
+    final imported = await _importDecodedSecretToVaultWithResult(payload);
+    if (imported && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.encryptedSecretImported)),
+      );
+    }
+  }
+
+  Future<bool> _importDecodedSecretToVaultWithResult(
+    DecryptedSharePayload payload, {
+    String actionLabel = 'Import secret',
+  }) async {
     final authenticated = await _ensureAuthenticatedVaultSessionForAction(
-      actionLabel: 'Import secret',
+      actionLabel: actionLabel,
     );
     if (!authenticated) {
-      return;
+      return false;
     }
     final applied = await _applyImportedSecret(payload);
     if (!applied) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppStrings.encryptedSecretImportFailed)),
       );
-      return;
+      return false;
     }
     try {
       await _persistVaultData(
@@ -821,15 +909,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         notes: _vaultNotes,
         customTypeDefinitions: _customTypeDefinitions,
       );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.encryptedSecretImported)),
-      );
+      return true;
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to import secret into vault.')),
       );
+      return false;
     }
   }
 
@@ -1004,6 +1090,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (normalized == 'vault_item') {
       final item = _itemFromImported(payload.plainText);
       if (item == null) return false;
+      setState(() => _vaultItems.insert(0, item));
+      return true;
+    }
+    if (normalized == 'document') {
+      final item = await _documentFromImported(payload.plainText);
+      if (item == null) return false;
+      if (!mounted) return false;
       setState(() => _vaultItems.insert(0, item));
       return true;
     }
@@ -1252,6 +1345,16 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     return item;
   }
 
+  Future<Map<String, dynamic>?> _documentFromImported(String plainText) async {
+    final decoded = jsonDecode(plainText);
+    if (decoded is! Map) return null;
+    return _documentFromBundleEntry(
+      Map<String, dynamic>.from(decoded),
+      0,
+      DateTime.now().toUtc().toIso8601String(),
+    );
+  }
+
   Future<Map<String, dynamic>?> _documentFromBundleEntry(
     Map<String, dynamic> bundleEntry,
     int index,
@@ -1259,11 +1362,22 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   ) async {
     final rawBytes = bundleEntry['bytesBase64']?.toString();
     if (rawBytes == null || rawBytes.isEmpty) return null;
-    final bytes = base64Decode(rawBytes);
+    final Uint8List bytes;
+    try {
+      bytes = Uint8List.fromList(base64Decode(rawBytes));
+    } on FormatException {
+      return null;
+    }
     final rawEntry = bundleEntry['entry'];
     final item = rawEntry is Map
         ? Map<String, dynamic>.from(rawEntry)
         : <String, dynamic>{};
+    final sizeBytes = _bundleDocumentMetadataSizeBytes(
+      bundleEntry,
+      item,
+      fallbackBytes: bytes.length,
+    );
+    if (!_canStoreDocumentBytes(sizeBytes)) return null;
     final fileName = bundleEntry['fileName']?.toString().trim();
     final extension = bundleEntry['extension']?.toString().trim();
     item
@@ -1282,15 +1396,64 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       ..['documentFileName'] =
           fileName ?? item['documentFileName'] ?? 'document'
       ..['documentExtension'] =
-          extension ?? item['documentExtension'] ?? 'document'
-      ..['documentSizeBytes'] = bytes.length;
+          extension ?? item['documentExtension'] ?? _extensionFromFileName(item)
+      ..['documentSizeBytes'] = sizeBytes;
     final sectionName = await _persistVaultDocument(
       documentId: item['id']?.toString() ?? '',
       bytes: bytes,
+      sizeBytes: sizeBytes,
     );
     item['documentStorage'] = 'private-section';
     item['documentSection'] = sectionName;
     return item;
+  }
+
+  int _bundleDocumentMetadataSizeBytes(
+    Map<String, dynamic> bundleEntry,
+    Map<String, dynamic> item, {
+    required int fallbackBytes,
+  }) {
+    for (final raw in <dynamic>[
+      bundleEntry['sizeBytes'],
+      item['documentSizeBytes'],
+    ]) {
+      if (raw is int && raw >= 0) return raw;
+      final parsed = int.tryParse(raw?.toString() ?? '');
+      if (parsed != null && parsed >= 0) return parsed;
+    }
+    return fallbackBytes;
+  }
+
+  String _extensionFromFileName(Map<String, dynamic> item) {
+    final fileName = item['documentFileName']?.toString().trim();
+    if (fileName == null || fileName.isEmpty) return 'FILE';
+    final dot = fileName.lastIndexOf('.');
+    if (dot == -1 || dot == fileName.length - 1) return 'FILE';
+    return fileName.substring(dot + 1).toUpperCase();
+  }
+
+  bool _canStoreDocumentBytes(int bytes) {
+    if (bytes > VaultLimits.maxDocumentBytes) {
+      _showVaultLimitMessage(
+        'Document must be ${VaultLimits.formatBytes(VaultLimits.maxDocumentBytes)} or smaller.',
+      );
+      return false;
+    }
+    final projected = _activeVaultSizeBytes + bytes;
+    if (projected > VaultLimits.maxVaultBytes) {
+      _showVaultLimitMessage(
+        'Not enough vault space. Limit is ${VaultLimits.formatBytes(VaultLimits.maxVaultBytes)}.',
+      );
+      return false;
+    }
+    return true;
+  }
+
+  void _showVaultLimitMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _markImportedEntryVisible(
@@ -1484,16 +1647,30 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<String> _persistVaultDocument({
     required String documentId,
     required List<int> bytes,
+    int? sizeBytes,
+  }) async {
+    return _persistVaultDocumentStream(
+      documentId: documentId,
+      chunks: Stream<List<int>>.value(bytes),
+      sizeBytes: sizeBytes ?? bytes.length,
+    );
+  }
+
+  Future<String> _persistVaultDocumentStream({
+    required String documentId,
+    required Stream<List<int>> chunks,
+    required int sizeBytes,
   }) async {
     final password = _passwordController.text.trim();
     if (password.isEmpty) {
       throw StateError('Master password missing for document persistence.');
     }
-    final sectionName = await _vaultService.persistVaultDocument(
+    final sectionName = await _vaultService.persistVaultDocumentStream(
       filePath: _vaultFilePath,
       password: password,
       documentId: documentId,
-      bytes: bytes,
+      chunks: chunks,
+      sizeBytes: sizeBytes,
     );
     await _refreshVaultSize();
     return sectionName;
@@ -1874,6 +2051,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     } else {
       _scheduleInactivityLockIfNeeded();
     }
+  }
+
+  Future<void> _waitForOverlayTeardown() async {
+    await Future<void>.delayed(Duration.zero);
+    await WidgetsBinding.instance.endOfFrame;
   }
 
   void _logOperationError(
@@ -4044,11 +4226,18 @@ class _EncryptedImportBundleScreen extends StatefulWidget {
 class _EncryptedImportBundleScreenState
     extends State<_EncryptedImportBundleScreen> {
   final Set<int> _importedIndexes = <int>{};
+  final _scrollController = ScrollController();
   bool _importingAll = false;
 
   List<_EncryptedImportEntry> get _remainingEntries => widget.entries
       .where((entry) => !_importedIndexes.contains(entry.index))
       .toList();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4071,46 +4260,52 @@ class _EncryptedImportBundleScreenState
         ],
       ),
       body: SafeArea(
-        child: ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          itemCount: widget.entries.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final entry = widget.entries[index];
-            final imported = _importedIndexes.contains(entry.index);
-            return Material(
-              color: colorScheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: colorScheme.outlineVariant),
-              ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: _colorForImportEntry(
-                    entry,
-                  ).withValues(alpha: 0.16),
-                  child: Icon(
-                    _iconForImportEntry(entry),
-                    color: _colorForImportEntry(entry),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          interactive: true,
+          child: ListView.separated(
+            controller: _scrollController,
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            itemCount: widget.entries.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final entry = widget.entries[index];
+              final imported = _importedIndexes.contains(entry.index);
+              return Material(
+                color: colorScheme.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: colorScheme.outlineVariant),
+                ),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: _colorForImportEntry(
+                      entry,
+                    ).withValues(alpha: 0.16),
+                    child: Icon(
+                      _iconForImportEntry(entry),
+                      color: _colorForImportEntry(entry),
+                    ),
                   ),
+                  title: Text(
+                    entry.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    imported ? 'Imported' : entry.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: imported
+                      ? const Icon(Icons.check_circle, color: Color(0xFF22C55E))
+                      : const Icon(Icons.chevron_right),
+                  onTap: () => _openEntry(entry, imported: imported),
                 ),
-                title: Text(
-                  entry.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  imported ? 'Imported' : entry.subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: imported
-                    ? const Icon(Icons.check_circle, color: Color(0xFF22C55E))
-                    : const Icon(Icons.chevron_right),
-                onTap: () => _openEntry(entry, imported: imported),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -4337,7 +4532,14 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
     'nija/document_open',
   );
 
-  bool _openedExternalPreview = false;
+  final _textPreviewScrollController = ScrollController();
+  bool _autoOpenedExternalPreview = false;
+
+  @override
+  void dispose() {
+    _textPreviewScrollController.dispose();
+    super.dispose();
+  }
 
   String get _fileName =>
       widget.entry.bundleEntry['fileName']?.toString().trim().isNotEmpty == true
@@ -4380,10 +4582,10 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
                 title: widget.entry.title,
                 fileName: _fileName,
                 extension: _extension,
-                size: bytes == null
-                    ? size == null
-                          ? '-'
-                          : _formatDocumentByteCount(size)
+                size: size != null
+                    ? _formatDocumentByteCount(size)
+                    : bytes == null
+                    ? '-'
                     : _formatDocumentByteCount(bytes.length),
               ),
             ],
@@ -4436,10 +4638,11 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) {
               _openExternalPreviewOnce(bytes);
-              return const _DocumentPreviewMessage(
+              return _DocumentPreviewMessage(
                 icon: Icons.broken_image_outlined,
                 title: 'Image preview failed',
-                subtitle: 'Opening this document in another app.',
+                subtitle: 'Tap to choose an app that can open this file.',
+                onTap: () => _openDocument(bytes),
               );
             },
           ),
@@ -4449,7 +4652,11 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
     if (_isTextExtension(_extension)) {
       final text = utf8.decode(bytes, allowMalformed: true);
       return Scrollbar(
+        controller: _textPreviewScrollController,
+        thumbVisibility: true,
+        interactive: true,
         child: SingleChildScrollView(
+          controller: _textPreviewScrollController,
           padding: const EdgeInsets.all(14),
           child: SelectableText(
             text,
@@ -4458,19 +4665,27 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
         ),
       );
     }
+    if (_isPdfExtension(_extension)) {
+      return PdfViewer.data(
+        bytes,
+        sourceName: 'import-${widget.entry.index}-$_fileName-${bytes.length}',
+        params: _pdfViewerParams,
+      );
+    }
     _openExternalPreviewOnce(bytes);
     return _DocumentPreviewMessage(
       icon: _extension == 'PDF'
           ? Icons.picture_as_pdf_outlined
           : Icons.insert_drive_file_outlined,
       title: 'Opening $_extension document',
-      subtitle: 'Choose an app that can preview this file.',
+      subtitle: 'Tap to choose an app that can preview this file.',
+      onTap: () => _openDocument(bytes),
     );
   }
 
   void _openExternalPreviewOnce(Uint8List bytes) {
-    if (_openedExternalPreview) return;
-    _openedExternalPreview = true;
+    if (_autoOpenedExternalPreview) return;
+    _autoOpenedExternalPreview = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _openDocument(bytes);
@@ -4572,16 +4787,18 @@ class _DocumentPreviewMessage extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Center(
+    final content = Center(
       child: Padding(
         padding: const EdgeInsets.all(22),
         child: Column(
@@ -4604,6 +4821,104 @@ class _DocumentPreviewMessage extends StatelessWidget {
               style: TextStyle(color: colorScheme.onSurfaceVariant),
             ),
           ],
+        ),
+      ),
+    );
+    if (onTap == null) return content;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(onTap: onTap, child: content),
+    );
+  }
+}
+
+const PdfViewerParams _pdfViewerParams = PdfViewerParams(
+  loadingBannerBuilder: _buildPdfLoadingBanner,
+  errorBannerBuilder: _buildPdfErrorBanner,
+);
+
+Widget _buildPdfLoadingBanner(
+  BuildContext context,
+  int bytesDownloaded,
+  int? totalBytes,
+) {
+  final progress = totalBytes == null || totalBytes <= 0
+      ? null
+      : bytesDownloaded / totalBytes;
+  return _PdfStatusBanner(
+    icon: Icons.picture_as_pdf_outlined,
+    title: 'Loading PDF...',
+    subtitle: totalBytes == null
+        ? 'Preparing preview'
+        : '${_formatDocumentByteCount(bytesDownloaded)} of ${_formatDocumentByteCount(totalBytes)}',
+    progress: progress,
+  );
+}
+
+Widget _buildPdfErrorBanner(
+  BuildContext context,
+  Object error,
+  StackTrace? stackTrace,
+  PdfDocumentRef documentRef,
+) {
+  return const _PdfStatusBanner(
+    icon: Icons.error_outline,
+    title: 'PDF preview failed',
+    subtitle: 'Use Open with app to view this document.',
+  );
+}
+
+class _PdfStatusBanner extends StatelessWidget {
+  const _PdfStatusBanner({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.progress,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final double? progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 260),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colorScheme.surface.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: colorScheme.primary, size: 30),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(value: progress),
+                const SizedBox(height: 10),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -4759,6 +5074,10 @@ bool _isTextExtension(String extension) {
     'YAML',
     'YML',
   }.contains(extension.toUpperCase());
+}
+
+bool _isPdfExtension(String extension) {
+  return extension.toUpperCase() == 'PDF';
 }
 
 String _mimeTypeForExtension(String extension) {

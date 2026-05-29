@@ -85,6 +85,15 @@ abstract class VaultService {
     VaultProgressCallback? onProgress,
   });
 
+  Future<String> persistVaultDocumentStream({
+    required String filePath,
+    required String password,
+    required Stream<List<int>> chunks,
+    required int sizeBytes,
+    required String documentId,
+    VaultProgressCallback? onProgress,
+  });
+
   Future<List<int>> readVaultDocument({
     required String filePath,
     required String password,

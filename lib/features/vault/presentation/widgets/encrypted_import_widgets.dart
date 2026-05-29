@@ -145,11 +145,18 @@ class _EncryptedImportBundleScreen extends StatefulWidget {
 class _EncryptedImportBundleScreenState
     extends State<_EncryptedImportBundleScreen> {
   final Set<int> _importedIndexes = <int>{};
+  final _scrollController = ScrollController();
   bool _importingAll = false;
 
   List<_EncryptedImportEntry> get _remainingEntries => widget.entries
       .where((entry) => !_importedIndexes.contains(entry.index))
       .toList();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -172,46 +179,52 @@ class _EncryptedImportBundleScreenState
         ],
       ),
       body: SafeArea(
-        child: ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          itemCount: widget.entries.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final entry = widget.entries[index];
-            final imported = _importedIndexes.contains(entry.index);
-            return Material(
-              color: colorScheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: colorScheme.outlineVariant),
-              ),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: _colorForImportEntry(
-                    entry,
-                  ).withValues(alpha: 0.16),
-                  child: Icon(
-                    _iconForImportEntry(entry),
-                    color: _colorForImportEntry(entry),
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          interactive: true,
+          child: ListView.separated(
+            controller: _scrollController,
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            itemCount: widget.entries.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final entry = widget.entries[index];
+              final imported = _importedIndexes.contains(entry.index);
+              return Material(
+                color: colorScheme.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: colorScheme.outlineVariant),
+                ),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: _colorForImportEntry(
+                      entry,
+                    ).withValues(alpha: 0.16),
+                    child: Icon(
+                      _iconForImportEntry(entry),
+                      color: _colorForImportEntry(entry),
+                    ),
                   ),
+                  title: Text(
+                    entry.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    imported ? 'Imported' : entry.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: imported
+                      ? const Icon(Icons.check_circle, color: Color(0xFF22C55E))
+                      : const Icon(Icons.chevron_right),
+                  onTap: () => _openEntry(entry, imported: imported),
                 ),
-                title: Text(
-                  entry.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  imported ? 'Imported' : entry.subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: imported
-                    ? const Icon(Icons.check_circle, color: Color(0xFF22C55E))
-                    : const Icon(Icons.chevron_right),
-                onTap: () => _openEntry(entry, imported: imported),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );

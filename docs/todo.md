@@ -195,16 +195,16 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [x] Move encrypted import/share UI out of `vault_app_shell.dart`.
   - Goal: keep vault shell focused on orchestration, not import bundle screens.
   - Scope: move `_EncryptedShareChoice`, `_EncryptedImportEntry`, `_PreparedVaultImport`, `_EncryptedShareInputDialog`, `_EncryptedImportBundleScreen`, `_EncryptedImportEntryPreviewScreen`, `_ImportPreviewHeader`, `_ImportPreviewRow`, and import preview helpers into `lib/features/vault/presentation/widgets/encrypted_import_widgets.dart` or a dedicated `encrypted_import/` folder.
-- [ ] Move custom template manager into its own screen file.
+- [x] Move custom template manager into its own screen file.
   - Goal: isolate custom template CRUD from shell navigation.
   - Scope: move `_CustomTemplateManagerScreen` and related state into `lib/features/vault/presentation/custom_template_manager_screen.dart`.
-- [ ] Move settings widgets and dialogs into settings-focused files.
+- [x] Move settings widgets and dialogs into settings-focused files.
   - Goal: keep settings layout reusable and easier to test.
   - Scope: move `_SettingsSection`, `_SettingsRow`, `_SettingsActionRow`, `_AutoLockSecondsSheet`, `_RenameVaultDialog`, `_PasswordStrengthMeter`, and related formatting helpers into `lib/features/vault/presentation/widgets/vault_settings_widgets.dart`.
-- [ ] Move document detail UI into a dedicated screen file.
+- [x] Move document detail UI into a dedicated screen file.
   - Goal: separate document rendering/export logic from the shell.
   - Scope: move `_DocumentDetailScreen`, `_DocumentHeader`, `_DocumentPreviewMessage`, document filename/extension/size/mime helpers, and document payload helpers into `lib/features/vault/presentation/document_detail_screen.dart`.
-- [ ] Move item detail and identity photo UI into dedicated files.
+- [x] Move item detail and identity photo UI into dedicated files.
   - Goal: separate item viewing/editing and identity photo viewing from shell state.
   - Scope: move `_ItemDetailScreen`, `_IdentityPhotosSection`, `_IdentityFullPhoto`, `_IdentityPhotoPreview`, and identity photo size helpers into `lib/features/vault/presentation/item_detail_screen.dart` plus optional identity photo widget file.
 - [ ] Move shared small vault widgets into a common widget file.

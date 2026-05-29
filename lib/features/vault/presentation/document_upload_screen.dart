@@ -1,16 +1,23 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/config/vault_limits.dart';
 import 'widgets/vault_page_heading.dart';
 
 class DocumentUploadScreen extends StatefulWidget {
-  const DocumentUploadScreen({super.key, this.onLifecycleLockSuppressed});
+  const DocumentUploadScreen({
+    super.key,
+    required this.currentVaultSizeBytes,
+    required this.maxVaultBytes,
+    this.maxDocumentBytes = VaultLimits.maxDocumentBytes,
+    this.onLifecycleLockSuppressed,
+  });
 
-  static const int maxDocumentBytes = 5 * 1024 * 1024;
-
+  final int currentVaultSizeBytes;
+  final int maxVaultBytes;
+  final int maxDocumentBytes;
   final ValueChanged<bool>? onLifecycleLockSuppressed;
 
   @override
@@ -24,7 +31,6 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
   late final TextEditingController _tagsController;
   late final TextEditingController _descriptionController;
   PlatformFile? _selectedFile;
-  Uint8List? _selectedBytes;
   String? _errorText;
   bool _uploading = false;
   double _progress = 0;
@@ -49,7 +55,9 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
   }
 
   bool get _canUpload =>
-      !_uploading && _selectedFile != null && _selectedBytes != null;
+      !_uploading &&
+      _selectedFile != null &&
+      (_selectedFile!.readStream != null || _selectedFile!.bytes != null);
 
   @override
   Widget build(BuildContext context) {
@@ -129,7 +137,15 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Maximum file size: 5 MB',
+                                'Maximum file size: ${_formatBytes(widget.maxDocumentBytes)}',
+                                style: TextStyle(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Vault space: ${_formatBytes(widget.currentVaultSizeBytes)} of ${_formatBytes(widget.maxVaultBytes)} used',
                                 style: TextStyle(
                                   color: colorScheme.onSurfaceVariant,
                                   fontSize: 12,
@@ -241,33 +257,39 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     try {
       result = await FilePicker.platform.pickFiles(
         allowMultiple: false,
-        withData: true,
+        withData: false,
+        withReadStream: true,
       );
     } finally {
       widget.onLifecycleLockSuppressed?.call(false);
     }
     final file = result?.files.single;
     if (file == null) return;
-    if (file.size > DocumentUploadScreen.maxDocumentBytes) {
+    if (file.size > widget.maxDocumentBytes) {
       setState(() {
         _selectedFile = null;
-        _selectedBytes = null;
-        _errorText = 'Document must be 5 MB or smaller.';
+        _errorText =
+            'Document must be ${_formatBytes(widget.maxDocumentBytes)} or smaller.';
       });
       return;
     }
-    final bytes = file.bytes;
-    if (bytes == null) {
+    if (widget.currentVaultSizeBytes + file.size > widget.maxVaultBytes) {
       setState(() {
         _selectedFile = null;
-        _selectedBytes = null;
+        _errorText =
+            'Not enough vault space. Limit is ${_formatBytes(widget.maxVaultBytes)}.';
+      });
+      return;
+    }
+    if (file.readStream == null && file.bytes == null) {
+      setState(() {
+        _selectedFile = null;
         _errorText = 'Could not read the selected document.';
       });
       return;
     }
     setState(() {
       _selectedFile = file;
-      _selectedBytes = bytes;
       _errorText = null;
       if (_titleController.text.trim().isEmpty) {
         _titleController.text = _fileNameWithoutExtension(file.name);
@@ -277,8 +299,16 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
 
   Future<void> _uploadDocument() async {
     final file = _selectedFile;
-    final bytes = _selectedBytes;
-    if (file == null || bytes == null) return;
+    if (file == null) return;
+    if (file.size > widget.maxDocumentBytes ||
+        widget.currentVaultSizeBytes + file.size > widget.maxVaultBytes) {
+      setState(() {
+        _errorText = file.size > widget.maxDocumentBytes
+            ? 'Document must be ${_formatBytes(widget.maxDocumentBytes)} or smaller.'
+            : 'Not enough vault space. Limit is ${_formatBytes(widget.maxVaultBytes)}.';
+      });
+      return;
+    }
     setState(() {
       _uploading = true;
       _progress = 0.12;
@@ -323,7 +353,8 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
       'pinned': false,
       'tags': tags,
       'fields': fields,
-      '__documentBytes__': bytes,
+      if (file.readStream != null) '__documentReadStream__': file.readStream,
+      if (file.bytes != null) '__documentBytes__': file.bytes,
       'documentExtension': extension,
       'documentSizeBytes': file.size,
       'documentFileName': file.name,

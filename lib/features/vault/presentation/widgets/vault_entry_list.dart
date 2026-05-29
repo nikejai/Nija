@@ -11,6 +11,7 @@ class VaultListEntry {
     required this.subtitle,
     required this.updated,
     required this.pinned,
+    required this.tags,
     this.icon,
     this.color,
   });
@@ -22,6 +23,7 @@ class VaultListEntry {
   final String subtitle;
   final String updated;
   final bool pinned;
+  final List<String> tags;
   final IconData? icon;
   final Color? color;
 }
@@ -61,6 +63,7 @@ class VaultItemListEntryAdapter extends VaultListEntryAdapter {
           entry['updated']?.toString() ??
           'Now',
       pinned: entry['pinned'] == true,
+      tags: _entryTags(entry),
       icon: iconForType?.call(entry['type']?.toString() ?? 'Unknown'),
       color: colorForType?.call(entry['type']?.toString() ?? 'Unknown'),
     );
@@ -112,6 +115,7 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
           entry['updated']?.toString() ??
           'Now',
       pinned: entry['pinned'] == true,
+      tags: _entryTags(entry),
       icon: Icons.description_outlined,
       color: const Color(0xFFA78BFA),
     );
@@ -216,6 +220,7 @@ class VaultDocumentListEntryAdapter extends VaultListEntryAdapter {
       subtitle: entry['subtitle']?.toString() ?? '',
       updated: '$updated · ${_formatDocumentBytes(sizeBytes)}',
       pinned: entry['pinned'] == true,
+      tags: _entryTags(entry),
       icon: Icons.insert_drive_file_outlined,
       color: const Color(0xFFFB7185),
     );
@@ -231,7 +236,7 @@ class VaultDocumentListEntryAdapter extends VaultListEntryAdapter {
   }
 }
 
-class VaultEntryList extends StatelessWidget {
+class VaultEntryList extends StatefulWidget {
   const VaultEntryList({
     super.key,
     required this.rows,
@@ -268,35 +273,59 @@ class VaultEntryList extends StatelessWidget {
   final EdgeInsetsGeometry rowPadding;
 
   @override
+  State<VaultEntryList> createState() => _VaultEntryListState();
+}
+
+class _VaultEntryListState extends State<VaultEntryList> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListView.separated(
-      itemCount: rows.length,
-      shrinkWrap: shrinkWrap,
-      physics: physics,
+    final list = ListView.separated(
+      controller: widget.shrinkWrap ? null : _scrollController,
+      itemCount: widget.rows.length,
+      shrinkWrap: widget.shrinkWrap,
+      physics: widget.physics,
       separatorBuilder:
-          separatorBuilder ?? (context, index) => const SizedBox(height: 6),
+          widget.separatorBuilder ??
+          (context, index) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
-        final row = rows[index];
+        final row = widget.rows[index];
         final listEntry = _adapt(row);
-        final selected = selectedKeys.contains(keyForRow(row));
+        final selected = widget.selectedKeys.contains(widget.keyForRow(row));
         return _VaultEntryTile(
           entry: listEntry,
           selected: selected,
-          selectionMode: selectionMode,
-          trailingMode: trailingMode,
-          forceFavoriteIndicator: forceFavoriteIndicator,
-          iconAlpha: iconAlpha,
-          padding: rowPadding,
-          onTap: () => onTap(row),
-          onLongPress: () => onLongPress(row),
-          onMoreTap: onMoreTap == null ? null : () => onMoreTap!(row),
+          selectionMode: widget.selectionMode,
+          trailingMode: widget.trailingMode,
+          forceFavoriteIndicator: widget.forceFavoriteIndicator,
+          iconAlpha: widget.iconAlpha,
+          padding: widget.rowPadding,
+          onTap: () => widget.onTap(row),
+          onLongPress: () => widget.onLongPress(row),
+          onMoreTap: widget.onMoreTap == null
+              ? null
+              : () => widget.onMoreTap!(row),
         );
       },
+    );
+    if (widget.shrinkWrap) return list;
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
+      interactive: true,
+      child: list,
     );
   }
 
   VaultListEntry _adapt(Map<String, dynamic> row) {
-    for (final adapter in adapters) {
+    for (final adapter in widget.adapters) {
       if (adapter.canAdapt(row)) return adapter.adapt(row);
     }
     return const VaultItemListEntryAdapter().adapt(row);
@@ -396,6 +425,10 @@ class _VaultEntryTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                    if (entry.tags.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      _VaultEntryTagRow(tags: entry.tags),
+                    ],
                   ],
                 ),
               ),
@@ -435,6 +468,63 @@ class _VaultEntryTile extends StatelessWidget {
   }
 }
 
+class _VaultEntryTagRow extends StatelessWidget {
+  const _VaultEntryTagRow({required this.tags});
+
+  final List<String> tags;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final visible = tags.take(3).toList();
+    final hiddenCount = tags.length - visible.length;
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        ...visible.map(
+          (tag) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: colorScheme.outlineVariant),
+            ),
+            child: Text(
+              tag,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                height: 1.1,
+              ),
+            ),
+          ),
+        ),
+        if (hiddenCount > 0)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              '+$hiddenCount',
+              style: TextStyle(
+                color: colorScheme.onPrimaryContainer,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                height: 1.1,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 IconData _iconForVaultEntryType(String type) {
   final normalized = type.toLowerCase();
   if (normalized.contains('note')) return Icons.description_outlined;
@@ -463,6 +553,18 @@ Color _colorForVaultEntryType(String type) {
   if (normalized.contains('document')) return const Color(0xFFFB923C);
   if (normalized.contains('health')) return const Color(0xFFF472B6);
   return const Color(0xFF93C5FD);
+}
+
+List<String> _entryTags(Map<String, dynamic> entry) {
+  final tags = entry['tags'];
+  if (tags is! List) return const <String>[];
+  final result = <String>[];
+  for (final tag in tags) {
+    final value = tag?.toString().trim() ?? '';
+    if (value.isEmpty || result.contains(value)) continue;
+    result.add(value);
+  }
+  return result;
 }
 
 String _formatDocumentBytes(int bytes) {
