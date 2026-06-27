@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -53,6 +54,34 @@ class SecretSharePortabilityAdapterImpl
     );
     if (outputPath == null || outputPath.isEmpty) return false;
     await File(outputPath).writeAsString(content, flush: true);
+    return true;
+  }
+
+  @override
+  Future<bool> exportPlainFile({
+    required String suggestedName,
+    required Uint8List bytes,
+    required String mimeType,
+  }) async {
+    final sanitizedName = suggestedName.trim().isEmpty
+        ? 'document'
+        : suggestedName.trim();
+    if (Platform.isAndroid) {
+      final directoryPath = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Save document copy',
+      );
+      if (directoryPath == null || directoryPath.isEmpty) return false;
+      final outputPath = _joinPath(directoryPath, sanitizedName);
+      await File(outputPath).writeAsBytes(bytes, flush: true);
+      return true;
+    }
+
+    final outputPath = await FilePicker.platform.saveFile(
+      dialogTitle: 'Save document copy',
+      fileName: sanitizedName,
+    );
+    if (outputPath == null || outputPath.isEmpty) return false;
+    await File(outputPath).writeAsBytes(bytes, flush: true);
     return true;
   }
 

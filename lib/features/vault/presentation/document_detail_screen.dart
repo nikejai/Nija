@@ -6,6 +6,7 @@ class _DocumentDetailScreen extends StatefulWidget {
     required this.onReadDocument,
     required this.onShareEncryptedDocument,
     required this.onExportEncryptedDocument,
+    required this.onSaveDocumentCopy,
     this.showDeleteAction = false,
   });
 
@@ -15,6 +16,8 @@ class _DocumentDetailScreen extends StatefulWidget {
   onShareEncryptedDocument;
   final Future<void> Function(Map<String, dynamic> item, List<int> bytes)
   onExportEncryptedDocument;
+  final Future<bool> Function(Map<String, dynamic> item, List<int> bytes)
+  onSaveDocumentCopy;
   final bool showDeleteAction;
 
   @override
@@ -154,6 +157,22 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                                       : () => _openDocument(bytes),
                                   icon: const Icon(Icons.open_in_new_outlined),
                                   label: const Text('Open with app'),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  key: const ValueKey(
+                                    'document-detail-save-copy',
+                                  ),
+                                  onPressed: bytes == null
+                                      ? null
+                                      : () => _saveDocumentCopy(bytes),
+                                  icon: const Icon(
+                                    Icons.download_for_offline_outlined,
+                                  ),
+                                  label: const Text('Save copy'),
                                 ),
                               ),
                               const SizedBox(height: 8),
@@ -319,6 +338,25 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
       fileName,
       _mimeTypeForExtension(_documentExtension(widget.item)),
     );
+  }
+
+  Future<void> _saveDocumentCopy(List<int> bytes) async {
+    try {
+      final saved = await widget.onSaveDocumentCopy(widget.item, bytes);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            saved ? 'Document copy saved.' : 'Document save cancelled.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to save document copy.')),
+      );
+    }
   }
 
   Future<void> _shareDocumentFallback(

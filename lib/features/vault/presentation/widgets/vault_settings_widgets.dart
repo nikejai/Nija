@@ -178,6 +178,97 @@ class _RotateMasterPasswordDialogState
   }
 }
 
+class _RotateRecoveryPhraseDialog extends StatefulWidget {
+  const _RotateRecoveryPhraseDialog();
+
+  @override
+  State<_RotateRecoveryPhraseDialog> createState() =>
+      _RotateRecoveryPhraseDialogState();
+}
+
+class _RotateRecoveryPhraseDialogState
+    extends State<_RotateRecoveryPhraseDialog> {
+  final _currentController = TextEditingController();
+  final _nextController = TextEditingController();
+  final _confirmController = TextEditingController();
+
+  @override
+  void dispose() {
+    _currentController.dispose();
+    _nextController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  bool get _canSubmit {
+    return _currentController.text.trim().isNotEmpty &&
+        _nextController.text.trim().isNotEmpty &&
+        _nextController.text.trim() == _confirmController.text.trim();
+  }
+
+  void _submit() {
+    if (!_canSubmit) return;
+    Navigator.of(
+      context,
+    ).pop((_currentController.text.trim(), _nextController.text.trim()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canSubmit = _canSubmit;
+    return AlertDialog(
+      title: const Text('Rotate recovery phrase'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _currentController,
+              obscureText: true,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Current recovery phrase',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _nextController,
+              obscureText: true,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'New recovery phrase',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _confirmController,
+              obscureText: true,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(
+                labelText: 'Confirm recovery phrase',
+                helperText: _confirmController.text.isEmpty || canSubmit
+                    ? null
+                    : 'Recovery phrases do not match',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: canSubmit ? _submit : null,
+          child: const Text('Rotate'),
+        ),
+      ],
+    );
+  }
+}
+
 int _passwordStrengthScore(String password) {
   if (password.isEmpty) return 0;
   var score = 0;
@@ -483,6 +574,534 @@ class _InfoDetailSheetState extends State<_InfoDetailSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _SecurityEncryptionSheet extends StatelessWidget {
+  const _SecurityEncryptionSheet({
+    required this.metadataFuture,
+    required this.biometricEnabled,
+    required this.autoLockLabel,
+    required this.cloudBackupEnabled,
+    required this.cloudBackupLastLabel,
+    required this.onChangeMasterPassword,
+    required this.onRotateRecoveryPhrase,
+    required this.onManageBiometrics,
+    required this.onAdjustAutoLock,
+    required this.onExportVault,
+    required this.onBackupNow,
+    required this.onRestoreBackup,
+  });
+
+  final Future<Map<String, dynamic>>? metadataFuture;
+  final bool biometricEnabled;
+  final String autoLockLabel;
+  final bool cloudBackupEnabled;
+  final String cloudBackupLastLabel;
+  final VoidCallback onChangeMasterPassword;
+  final VoidCallback onRotateRecoveryPhrase;
+  final VoidCallback onManageBiometrics;
+  final VoidCallback onAdjustAutoLock;
+  final VoidCallback onExportVault;
+  final VoidCallback? onBackupNow;
+  final VoidCallback? onRestoreBackup;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.90,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.shield_outlined,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Security & Encryption',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Flexible(
+                child: FutureBuilder<Map<String, dynamic>>(
+                  future: metadataFuture,
+                  builder: (context, snapshot) {
+                    final model = _SecurityMetadataModel.fromInternals(
+                      snapshot.data,
+                    );
+                    return ListView(
+                      key: const ValueKey('security-encryption-sheet'),
+                      children: [
+                        _SecurityTextSection(
+                          title: 'How vault unlock works',
+                          body:
+                              'Your master password is used only to derive an unlock key. Argon2id derives password and recovery keys, then the derived key unwraps the random vault key. Vault contents are encrypted with authenticated encryption. Nija does not store your master password or raw vault key, and cannot recover a lost recovery phrase.',
+                        ),
+                        const SizedBox(height: 12),
+                        if (snapshot.connectionState == ConnectionState.waiting)
+                          const Center(child: CircularProgressIndicator())
+                        else if (snapshot.hasError)
+                          const _SecurityNotice(
+                            icon: Icons.info_outline,
+                            text:
+                                'Security metadata is unavailable for this vault session.',
+                          )
+                        else
+                          _SecurityRowsSection(
+                            title: 'Vault crypto metadata',
+                            rows: model.cryptoRows,
+                          ),
+                        const SizedBox(height: 12),
+                        _SecurityRowsSection(
+                          title: 'Vault format',
+                          rows: model.formatRows,
+                        ),
+                        const SizedBox(height: 12),
+                        _SecurityStatusSection(
+                          statuses: [
+                            const _SecurityStatusData(
+                              label: 'Vault encrypted at rest',
+                              value: 'Enabled',
+                              good: true,
+                            ),
+                            _SecurityStatusData(
+                              label: 'Recovery key wrapper',
+                              value: model.recoveryWrapperPresent
+                                  ? 'Present'
+                                  : 'Unavailable',
+                              good: model.recoveryWrapperPresent,
+                            ),
+                            _SecurityStatusData(
+                              label: 'Biometric unlock',
+                              value: biometricEnabled ? 'Enabled' : 'Disabled',
+                              good: biometricEnabled,
+                            ),
+                            _SecurityStatusData(
+                              label: 'Auto-lock',
+                              value: autoLockLabel,
+                              good: autoLockLabel != 'Off',
+                            ),
+                            _SecurityStatusData(
+                              label: 'Cloud backup',
+                              value: cloudBackupEnabled
+                                  ? 'Enabled'
+                                  : 'Disabled',
+                              good: cloudBackupEnabled,
+                            ),
+                            _SecurityStatusData(
+                              label: 'Last backup',
+                              value: cloudBackupLastLabel,
+                              good: cloudBackupLastLabel != 'Never',
+                            ),
+                            _SecurityStatusData(
+                              label: 'Release debug internals',
+                              value: kReleaseMode ? 'Hidden' : 'Debug build',
+                              good: kReleaseMode,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _SecurityActionGrid(
+                          actions: [
+                            _SecurityActionData(
+                              icon: Icons.lock_reset_outlined,
+                              label: 'Change master password',
+                              onTap: onChangeMasterPassword,
+                            ),
+                            _SecurityActionData(
+                              icon: Icons.key_outlined,
+                              label: 'Rotate recovery phrase',
+                              onTap: onRotateRecoveryPhrase,
+                            ),
+                            _SecurityActionData(
+                              icon: Icons.fingerprint,
+                              label: 'Manage biometrics',
+                              onTap: onManageBiometrics,
+                            ),
+                            _SecurityActionData(
+                              icon: Icons.lock_clock_outlined,
+                              label: 'Adjust auto-lock',
+                              onTap: onAdjustAutoLock,
+                            ),
+                            _SecurityActionData(
+                              icon: Icons.file_upload_outlined,
+                              label: 'Export encrypted vault',
+                              onTap: onExportVault,
+                            ),
+                            _SecurityActionData(
+                              icon: Icons.backup_outlined,
+                              label: 'Backup now',
+                              onTap: onBackupNow,
+                            ),
+                            _SecurityActionData(
+                              icon: Icons.restore_outlined,
+                              label: 'Restore backup',
+                              onTap: onRestoreBackup,
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SecurityMetadataModel {
+  const _SecurityMetadataModel({
+    required this.cryptoRows,
+    required this.formatRows,
+    required this.recoveryWrapperPresent,
+  });
+
+  final List<MapEntry<String, String>> cryptoRows;
+  final List<MapEntry<String, String>> formatRows;
+  final bool recoveryWrapperPresent;
+
+  factory _SecurityMetadataModel.fromInternals(Map<String, dynamic>? data) {
+    final crypto = data?['crypto'];
+    final cryptoMap = crypto is Map ? crypto : const <String, dynamic>{};
+    final recoveryBytes = _asInt(cryptoMap['encryptedRecoveryKeyBytes']);
+    return _SecurityMetadataModel(
+      recoveryWrapperPresent: recoveryBytes > 0,
+      cryptoRows: [
+        MapEntry(
+          'Guardian profile',
+          _valueOrUnknown(cryptoMap['guardianProfile']),
+        ),
+        MapEntry('KDF', _valueOrDefault(cryptoMap['kdf'], 'Argon2id')),
+        MapEntry('KDF memory', '${_asInt(cryptoMap['kdfMemoryKb'])} KB'),
+        MapEntry(
+          'KDF iterations',
+          _asInt(cryptoMap['kdfIterations']).toString(),
+        ),
+        MapEntry(
+          'KDF parallelism',
+          _asInt(cryptoMap['kdfParallelism']).toString(),
+        ),
+        MapEntry('Cipher', _valueOrDefault(cryptoMap['cipher'], 'AES-256-GCM')),
+      ],
+      formatRows: [
+        MapEntry('Format', _valueOrUnknown(data?['format'])),
+        MapEntry('Format version', _valueOrUnknown(data?['formatVersion'])),
+        MapEntry('Schema version', _valueOrUnknown(data?['schemaVersion'])),
+        MapEntry(
+          'Storage layout',
+          _valueOrUnknown(data?['storageLayoutVersion']),
+        ),
+        MapEntry('Manifest version', _valueOrUnknown(data?['manifestVersion'])),
+        MapEntry('Created', _valueOrUnknown(data?['createdAt'])),
+        MapEntry('Updated', _valueOrUnknown(data?['updatedAt'])),
+        MapEntry('Revision', _valueOrUnknown(data?['revision'])),
+      ],
+    );
+  }
+}
+
+int _asInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return 0;
+}
+
+String _valueOrDefault(Object? value, String fallback) {
+  final text = value?.toString().trim() ?? '';
+  return text.isEmpty ? fallback : text;
+}
+
+String _valueOrUnknown(Object? value) {
+  final text = value?.toString().trim() ?? '';
+  return text.isEmpty ? 'Unknown' : text;
+}
+
+class _SecurityTextSection extends StatelessWidget {
+  const _SecurityTextSection({required this.title, required this.body});
+
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _SecurityPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            body,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityRowsSection extends StatelessWidget {
+  const _SecurityRowsSection({required this.title, required this.rows});
+
+  final String title;
+  final List<MapEntry<String, String>> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _SecurityPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final row in rows) _SecurityMetadataRow(row: row),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityMetadataRow extends StatelessWidget {
+  const _SecurityMetadataRow({required this.row});
+
+  final MapEntry<String, String> row;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              row.key,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              row.value,
+              textAlign: TextAlign.end,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityStatusSection extends StatelessWidget {
+  const _SecurityStatusSection({required this.statuses});
+
+  final List<_SecurityStatusData> statuses;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _SecurityPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Security status',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          for (final status in statuses) _SecurityStatusRow(status: status),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityStatusData {
+  const _SecurityStatusData({
+    required this.label,
+    required this.value,
+    required this.good,
+  });
+
+  final String label;
+  final String value;
+  final bool good;
+}
+
+class _SecurityStatusRow extends StatelessWidget {
+  const _SecurityStatusRow({required this.status});
+
+  final _SecurityStatusData status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = status.good
+        ? const Color(0xFF15803D)
+        : theme.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(
+            status.good ? Icons.check_circle_outline : Icons.info_outline,
+            size: 18,
+            color: color,
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(status.label)),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              status.value,
+              textAlign: TextAlign.end,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityActionGrid extends StatelessWidget {
+  const _SecurityActionGrid({required this.actions});
+
+  final List<_SecurityActionData> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SecurityPanel(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final action in actions)
+            OutlinedButton.icon(
+              onPressed: action.onTap,
+              icon: Icon(action.icon, size: 18),
+              label: Text(action.label),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityActionData {
+  const _SecurityActionData({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+}
+
+class _SecurityNotice extends StatelessWidget {
+  const _SecurityNotice({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _SecurityPanel(
+      child: Row(
+        children: [
+          Icon(icon, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SecurityPanel extends StatelessWidget {
+  const _SecurityPanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: child,
     );
   }
 }

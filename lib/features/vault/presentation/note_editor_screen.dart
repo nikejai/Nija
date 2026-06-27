@@ -27,6 +27,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   Timer? _autosaveTimer;
   late final String _initialFingerprint;
   String _lastAutoSavedFingerprint = '';
+  bool _dirty = false;
 
   @override
   void initState() {
@@ -47,13 +48,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         DateTime.now().millisecondsSinceEpoch.toString();
     _initialFingerprint = _fingerprintForCurrentState();
     _lastAutoSavedFingerprint = _initialFingerprint;
-    _autosaveTimer = Timer.periodic(noteAutosaveInterval, (_) {
-      _emitAutoSave();
-    });
+    _titleController.addListener(_markDirty);
+    _quillController.addListener(_markDirty);
   }
 
   @override
   void dispose() {
+    _titleController.removeListener(_markDirty);
+    _quillController.removeListener(_markDirty);
     _titleController.dispose();
     _tagController.dispose();
     _editorScrollController.dispose();
@@ -61,6 +63,12 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _quillController.dispose();
     _autosaveTimer?.cancel();
     super.dispose();
+  }
+
+  void _markDirty() {
+    _dirty = true;
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer(noteAutosaveInterval, _emitAutoSave);
   }
 
   List<String> _extractInitialTags(Map<String, dynamic>? note) {
@@ -225,7 +233,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     );
   }
 
-  Map<String, dynamic> _buildNotePayload() {
+  _NoteEditorSnapshot _buildSnapshot() {
     final fallbackTitle =
         widget.initialNote?['title']?.toString().trim().isNotEmpty == true
         ? widget.initialNote!['title'].toString().trim()
@@ -233,12 +241,12 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     final title = _titleController.text.trim().isEmpty
         ? fallbackTitle
         : _titleController.text.trim();
+    final normalizedTitle = _normalizedTitle();
     final plainText = _quillController.document.toPlainText().trim();
     final preview = plainText
         .split('\n')
         .firstWhere((line) => line.trim().isNotEmpty, orElse: () => '');
     final deltaJson = _quillController.document.toDelta().toJson();
-
     final tags =
         _tags
             .map((entry) => entry.trim().toLowerCase())
@@ -246,75 +254,91 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
             .toSet()
             .toList()
           ..sort();
-
-    return {
-      'id': _noteId,
-      'title': title,
-      'preview': preview,
-      'updated': 'Now',
-      'pinned': widget.initialNote?['pinned'] ?? false,
-      'tags': tags.isEmpty ? <String>['note'] : tags,
-      'delta': jsonDecode(jsonEncode(deltaJson)),
-    };
+    final fingerprint = jsonEncode({
+      'title': normalizedTitle,
+      'plainText': plainText,
+      'tags': tags,
+      'delta': deltaJson,
+    });
+    final effectiveTags = tags.isEmpty ? <String>['note'] : tags;
+    return _NoteEditorSnapshot(
+      fingerprint: fingerprint,
+      isEmptyDraft: normalizedTitle.isEmpty && plainText.isEmpty,
+      payload: {
+        'id': _noteId,
+        'title': title,
+        'preview': preview,
+        'updated': 'Now',
+        'pinned': widget.initialNote?['pinned'] ?? false,
+        'tags': effectiveTags,
+        'delta': _cloneDeltaJson(deltaJson),
+      },
+    );
   }
 
   String _normalizedTitle() => _titleController.text.trim();
 
-  String _normalizedPlainText() =>
-      _quillController.document.toPlainText().trim();
-
-  List<String> _normalizedTags() {
-    final tags =
-        _tags
-            .map((entry) => entry.trim().toLowerCase())
-            .where((entry) => entry.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
-    return tags;
+  List<Map<String, dynamic>> _cloneDeltaJson(List<dynamic> deltaJson) {
+    return deltaJson
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList(growable: false);
   }
 
-  bool _isEmptyDraft() {
-    final hasTitle = _normalizedTitle().isNotEmpty;
-    final hasBody = _normalizedPlainText().isNotEmpty;
-    return !hasTitle && !hasBody;
-  }
-
-  String _fingerprintForCurrentState() {
-    final deltaJson = _quillController.document.toDelta().toJson();
-    return jsonEncode({
-      'title': _normalizedTitle(),
-      'plainText': _normalizedPlainText(),
-      'tags': _normalizedTags(),
-      'delta': deltaJson,
-    });
-  }
+  String _fingerprintForCurrentState() => _buildSnapshot().fingerprint;
 
   void _emitAutoSave() {
     final callback = widget.onAutoSave;
     if (callback == null) return;
-    if (_isEmptyDraft()) return;
-    final fingerprint = _fingerprintForCurrentState();
-    if (fingerprint == _initialFingerprint) return;
-    if (fingerprint == _lastAutoSavedFingerprint) return;
-    _lastAutoSavedFingerprint = fingerprint;
-    callback(_buildNotePayload());
+    if (!_dirty) return;
+    final snapshot = _buildSnapshot();
+    if (snapshot.isEmptyDraft) return;
+    if (snapshot.fingerprint == _initialFingerprint) {
+      _dirty = false;
+      return;
+    }
+    if (snapshot.fingerprint == _lastAutoSavedFingerprint) {
+      _dirty = false;
+      return;
+    }
+    _lastAutoSavedFingerprint = snapshot.fingerprint;
+    _dirty = false;
+    callback(snapshot.payload);
   }
 
   void _saveAndPop() {
-    if (widget.initialNote == null && _isEmptyDraft()) {
+    _autosaveTimer?.cancel();
+    final snapshot = _buildSnapshot();
+    if (widget.initialNote == null && snapshot.isEmptyDraft) {
       if (!mounted) return;
       Navigator.of(context).pop();
       return;
     }
-    _emitAutoSave();
+    if (widget.onAutoSave != null &&
+        snapshot.fingerprint != _initialFingerprint &&
+        snapshot.fingerprint != _lastAutoSavedFingerprint) {
+      _lastAutoSavedFingerprint = snapshot.fingerprint;
+      widget.onAutoSave!(snapshot.payload);
+    }
+    _dirty = false;
     if (!mounted) return;
-    Navigator.of(context).pop(_buildNotePayload());
+    Navigator.of(context).pop(snapshot.payload);
   }
 
   void _save() {
     _saveAndPop();
   }
+}
+
+class _NoteEditorSnapshot {
+  const _NoteEditorSnapshot({
+    required this.fingerprint,
+    required this.isEmptyDraft,
+    required this.payload,
+  });
+
+  final String fingerprint;
+  final bool isEmptyDraft;
+  final Map<String, dynamic> payload;
 }
 
 class NoteViewScreen extends StatelessWidget {

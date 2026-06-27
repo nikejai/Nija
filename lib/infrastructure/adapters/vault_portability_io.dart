@@ -201,8 +201,8 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       await driveApi.files.create(meta, uploadMedia: media);
       return true;
     } catch (error) {
-      debugPrint('[VaultPortability][GoogleDriveBackup] $error');
-      throw StateError('Google Drive backup failed: $error');
+      _debugLogCloudError('GoogleDriveBackup', error);
+      throw StateError('Google Drive backup failed.');
     } finally {
       authedClient?.close();
     }
@@ -247,7 +247,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
         content: utf8.decode(bytes),
       );
     } catch (error) {
-      debugPrint('[VaultPortability][GoogleDriveReadBackup] $error');
+      _debugLogCloudError('GoogleDriveReadBackup', error);
       return null;
     } finally {
       authedClient?.close();
@@ -305,7 +305,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       }
       return backups;
     } catch (error) {
-      debugPrint('[VaultPortability][GoogleDriveListBackups] $error');
+      _debugLogCloudError('GoogleDriveListBackups', error);
       return const <CloudVaultBackupFile>[];
     } finally {
       authedClient?.close();
@@ -396,7 +396,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       );
       return ok == true;
     } catch (error) {
-      debugPrint('[VaultPortability][ICloudBackup] $error');
+      _debugLogCloudError('ICloudBackup', error);
       return false;
     }
   }
@@ -426,6 +426,11 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       }
     }
   }
+}
+
+void _debugLogCloudError(String operation, Object error) {
+  if (!kDebugMode) return;
+  debugPrint('[VaultPortability][$operation] ${error.runtimeType}');
 }
 
 class _GoogleAuthClient extends http.BaseClient {

@@ -349,6 +349,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<bool> _handleRootBackPress() async {
     if (_step == OnboardingStep.app) {
+      _lockVaultSession();
       return false;
     }
     if (_step == OnboardingStep.setup) {
@@ -583,9 +584,17 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _activeVaultName = vaultName;
       await _resetBiometricForVault(_vaultFilePath);
       await _rememberVaultReference(_vaultFilePath, label: vaultName);
-      _stopBusy();
-      _vaultCreatedInSession = true;
-      setState(() => _step = OnboardingStep.recovery);
+      _busyWatchdog?.cancel();
+      setState(() {
+        _isBusy = false;
+        _busyProgress = 0;
+        _busyMessage = '';
+        _vaultCreatedInSession = true;
+        _step = OnboardingStep.recovery;
+      });
+      if (_lastLifecycleState == AppLifecycleState.paused) {
+        _scheduleBackgroundLockIfNeeded();
+      }
     } catch (error, stackTrace) {
       _logOperationError('createVault', error, stackTrace);
       _stopBusy();
@@ -1754,6 +1763,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   void _lockVaultSession() {
     _backgroundLockTimer?.cancel();
     _inactivityLockTimer?.cancel();
+    if (mounted) {
+      Navigator.of(
+        context,
+        rootNavigator: true,
+      ).popUntil((route) => route.isFirst);
+    }
     _clearSensitiveSessionState();
     if (!mounted) return;
     setState(() => _step = OnboardingStep.unlock);
@@ -2063,7 +2078,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     Object error,
     StackTrace stackTrace,
   ) {
-    debugPrint('[OnboardingFlow][$operation] $error');
+    if (!kDebugMode) return;
+    debugPrint('[OnboardingFlow][$operation] ${error.runtimeType}');
     debugPrintStack(stackTrace: stackTrace);
   }
 
@@ -3186,11 +3202,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _resetBiometricForVault(String vaultId) async {
     try {
-      await _biometricCredentialStore.removeMasterPassword(vaultId: vaultId);
-      await _biometricEnrollmentStore.setEnrolledForVault(
-        vaultId: vaultId,
-        enrolled: false,
-      );
+      await Future.wait<void>([
+        _biometricCredentialStore.removeMasterPassword(vaultId: vaultId),
+        _biometricEnrollmentStore.setEnrolledForVault(
+          vaultId: vaultId,
+          enrolled: false,
+        ),
+      ]).timeout(const Duration(seconds: 2));
     } catch (_) {
       // Biometric cleanup should not block vault creation, import, or unlock.
     }
@@ -3600,25 +3618,19 @@ class _SetupScreenState extends State<SetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return OnboardingScaffold(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
         child: ListView(
           children: [
-            Text(
-              AppStrings.step1Of2,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text(AppStrings.step1Of2, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 6),
-            Text(
-              AppStrings.chooseGuardian,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            Text(AppStrings.chooseGuardian, style: theme.textTheme.titleLarge),
             const SizedBox(height: 6),
-            Text(
-              AppStrings.guardianHelper,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text(AppStrings.guardianHelper, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 14),
             ...GuardianProfiles.all.map(
               (guardian) => Padding(
@@ -3634,7 +3646,7 @@ class _SetupScreenState extends State<SetupScreen> {
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFFF4F4F5),
+                color: colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Column(
@@ -3642,28 +3654,25 @@ class _SetupScreenState extends State<SetupScreen> {
                 children: [
                   Text(
                     '${widget.selectedGuardian.displayName} details',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleMedium?.copyWith(fontSize: 16),
+                    style: theme.textTheme.titleMedium?.copyWith(fontSize: 16),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     widget.selectedGuardian.detail,
-                    style: Theme.of(context).textTheme.bodyMedium,
+                    style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 10),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: colorScheme.surface,
                       borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: colorScheme.outlineVariant),
                     ),
                     child: Text(
                       'Argon2id + XChaCha20-Poly1305\nProfile: ${widget.selectedGuardian.id}',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodyMedium?.copyWith(fontSize: 12),
+                      style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
                     ),
                   ),
                 ],
@@ -3705,13 +3714,13 @@ class _SetupScreenState extends State<SetupScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF3C7),
+                color: colorScheme.tertiaryContainer,
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Text(
                 AppStrings.masterPasswordGuidance,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF92400E),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onTertiaryContainer,
                 ),
               ),
             ),
@@ -3749,34 +3758,29 @@ class RecoveryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final phrase = words.join(' ');
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final phraseCardColor = colorScheme.inverseSurface;
+    final phraseTextColor = colorScheme.onInverseSurface;
 
     return OnboardingScaffold(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
         child: ListView(
           children: [
-            Text(
-              AppStrings.step2Of2,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text(AppStrings.step2Of2, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 6),
-            Text(
-              AppStrings.recoveryPhrase,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
+            Text(AppStrings.recoveryPhrase, style: theme.textTheme.titleLarge),
             const SizedBox(height: 6),
-            Text(
-              AppStrings.recoveryOffline,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text(AppStrings.recoveryOffline, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 14),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFF18181B),
+                color: phraseCardColor,
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: const Color(0xFF18181B)),
+                border: Border.all(color: phraseCardColor),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3789,10 +3793,15 @@ class RecoveryScreen extends StatelessWidget {
                     children: [
                       Text(
                         AppStrings.recoveryPhrase,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontSize: 16, color: Colors.white),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontSize: 16,
+                          color: phraseTextColor,
+                        ),
                       ),
                       TextButton.icon(
+                        style: TextButton.styleFrom(
+                          foregroundColor: phraseTextColor,
+                        ),
                         onPressed: () async {
                           await Clipboard.setData(ClipboardData(text: phrase));
                           if (!context.mounted) return;
@@ -3825,12 +3834,12 @@ class RecoveryScreen extends StatelessWidget {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.10),
+                          color: phraseTextColor.withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: SelectableText(
                           '${index + 1}. $word',
-                          style: const TextStyle(color: Colors.white),
+                          style: TextStyle(color: phraseTextColor),
                         ),
                       );
                     },
@@ -3839,14 +3848,11 @@ class RecoveryScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            Text(
-              AppStrings.recoveryWarning,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text(AppStrings.recoveryWarning, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 8),
             Text(
               AppStrings.recoverySavedInVault,
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 24),
             SizedBox(
@@ -5161,6 +5167,7 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final filtered = widget.plan.entries.where(_matchesFilter).toList();
     final unresolved = widget.plan.entries.where((entry) {
       final selected = _selections[entry.key];
@@ -5168,10 +5175,10 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
     }).length;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF8FAFC),
-        foregroundColor: const Color(0xFF111827),
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
         elevation: 0,
         centerTitle: true,
         title: const Text(
@@ -5223,7 +5230,7 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
                       ? 'Items missing from ${widget.importedSourceLabel.toLowerCase()}. Choose whether to keep or remove them.'
                       : 'Review all compared entries. Conflicts and deletions need a decision.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: const Color(0xFF4B5563),
+                    color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -5232,7 +5239,7 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
                   Text(
                     '${_trueConflictCount()} conflicts, ${_deletionReviewCount()} deletions, ${widget.plan.identicalCount} identical, ${_autoMergeCount()} automatic.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF6B7280),
+                      color: colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -5267,8 +5274,8 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
                       Expanded(
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF4F46E5),
-                            side: const BorderSide(color: Color(0xFF4F46E5)),
+                            foregroundColor: colorScheme.primary,
+                            side: BorderSide(color: colorScheme.primary),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -5282,9 +5289,9 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
                       Expanded(
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor: const Color(0xFF4F46E5),
-                            side: const BorderSide(color: Color(0xFF4F46E5)),
+                            foregroundColor: colorScheme.onPrimary,
+                            backgroundColor: colorScheme.primary,
+                            side: BorderSide(color: colorScheme.primary),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -5304,8 +5311,8 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF4F46E5),
-                        foregroundColor: Colors.white,
+                        backgroundColor: colorScheme.primary,
+                        foregroundColor: colorScheme.onPrimary,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -5329,6 +5336,7 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
   }
 
   Widget _filterChip(String value, String label) {
+    final colorScheme = Theme.of(context).colorScheme;
     final selected = _filter == value;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
@@ -5337,13 +5345,13 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
         selected: selected,
         showCheckmark: false,
         labelStyle: TextStyle(
-          color: selected ? Colors.white : const Color(0xFF374151),
+          color: selected ? colorScheme.onPrimary : colorScheme.onSurface,
           fontWeight: FontWeight.w700,
         ),
-        selectedColor: const Color(0xFF4F46E5),
-        backgroundColor: Colors.white,
+        selectedColor: colorScheme.primary,
+        backgroundColor: colorScheme.surface,
         side: BorderSide(
-          color: selected ? const Color(0xFF4F46E5) : const Color(0xFFE5E7EB),
+          color: selected ? colorScheme.primary : colorScheme.outlineVariant,
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         onSelected: (_) => setState(() => _filter = value),
@@ -5470,48 +5478,51 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
         initialChildSize: 0.84,
         minChildSize: 0.45,
         maxChildSize: 0.94,
-        builder: (context, controller) => ListView(
-          controller: controller,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-          children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(99),
+        builder: (context, controller) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return ListView(
+            controller: controller,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              entry.title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Compare the current vault version with ${widget.importedSourceLabel.toLowerCase()}.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF6B7280)),
-            ),
-            const SizedBox(height: 12),
-            _MergeVersionPreview(
-              title: 'Current vault',
-              entry: entry.current,
-              kind: entry.kind,
-            ),
-            const SizedBox(height: 12),
-            _MergeVersionPreview(
-              title: widget.importedSourceLabel,
-              entry: entry.imported,
-              kind: entry.kind,
-            ),
-          ],
-        ),
+              const SizedBox(height: 14),
+              Text(
+                entry.title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Compare the current vault version with ${widget.importedSourceLabel.toLowerCase()}.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _MergeVersionPreview(
+                title: 'Current vault',
+                entry: entry.current,
+                kind: entry.kind,
+              ),
+              const SizedBox(height: 12),
+              _MergeVersionPreview(
+                title: widget.importedSourceLabel,
+                entry: entry.imported,
+                kind: entry.kind,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -5545,14 +5556,16 @@ class _MergeEntryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: const [
+        border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x14000000),
+            color: colorScheme.shadow.withValues(alpha: 0.08),
             blurRadius: 10,
             offset: Offset(0, 4),
           ),
@@ -5590,8 +5603,8 @@ class _MergeEntryCard extends StatelessWidget {
                           entry.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFF111827),
+                          style: TextStyle(
+                            color: colorScheme.onSurface,
                             fontSize: 14,
                             fontWeight: FontWeight.w800,
                           ),
@@ -5601,8 +5614,8 @@ class _MergeEntryCard extends StatelessWidget {
                           '${entry.type} • ${_statusLabel(entry.status)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFF6B7280),
+                          style: TextStyle(
+                            color: colorScheme.onSurfaceVariant,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                           ),
@@ -5614,7 +5627,7 @@ class _MergeEntryCard extends StatelessWidget {
                     expanded
                         ? Icons.keyboard_arrow_up
                         : Icons.keyboard_arrow_down,
-                    color: const Color(0xFF4B5563),
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 ],
               ),
@@ -5638,15 +5651,15 @@ class _MergeEntryCard extends StatelessWidget {
               InkWell(
                 borderRadius: BorderRadius.circular(8),
                 onTap: onViewDifferences,
-                child: const Padding(
-                  padding: EdgeInsets.fromLTRB(4, 10, 2, 4),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 10, 2, 4),
                   child: Row(
                     children: [
                       Expanded(
                         child: Text(
                           'View differences',
                           style: TextStyle(
-                            color: Color(0xFF374151),
+                            color: colorScheme.onSurface,
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
                           ),
@@ -5654,7 +5667,7 @@ class _MergeEntryCard extends StatelessWidget {
                       ),
                       Icon(
                         Icons.chevron_right,
-                        color: Color(0xFF4B5563),
+                        color: colorScheme.onSurfaceVariant,
                         size: 20,
                       ),
                     ],
@@ -5729,15 +5742,17 @@ class _MergeChoiceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
         decoration: BoxDecoration(
-          color: const Color(0xFFF9FAFB),
+          color: colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: colorScheme.outlineVariant),
         ),
         child: Row(
           children: [
@@ -5747,8 +5762,8 @@ class _MergeChoiceRow extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
-                      color: Color(0xFF111827),
+                    style: TextStyle(
+                      color: colorScheme.onSurface,
                       fontSize: 13,
                       fontWeight: FontWeight.w800,
                     ),
@@ -5758,8 +5773,8 @@ class _MergeChoiceRow extends StatelessWidget {
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFF6B7280),
+                    style: TextStyle(
+                      color: colorScheme.onSurfaceVariant,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                     ),
@@ -5771,17 +5786,15 @@ class _MergeChoiceRow extends StatelessWidget {
               width: 24,
               height: 24,
               decoration: BoxDecoration(
-                color: selected ? const Color(0xFF4F46E5) : Colors.transparent,
+                color: selected ? colorScheme.primary : Colors.transparent,
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: selected
-                      ? const Color(0xFF4F46E5)
-                      : const Color(0xFF9CA3AF),
+                  color: selected ? colorScheme.primary : colorScheme.outline,
                   width: 2,
                 ),
               ),
               child: selected
-                  ? const Icon(Icons.check, color: Colors.white, size: 15)
+                  ? Icon(Icons.check, color: colorScheme.onPrimary, size: 15)
                   : null,
             ),
           ],
@@ -5805,14 +5818,16 @@ class _MergeVersionPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = entry;
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: const [
+        border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x0F000000),
+            color: colorScheme.shadow.withValues(alpha: 0.06),
             blurRadius: 12,
             offset: Offset(0, 4),
           ),
@@ -5827,8 +5842,8 @@ class _MergeVersionPreview extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
-                      color: Color(0xFF4F46E5),
+                    style: TextStyle(
+                      color: colorScheme.primary,
                       fontSize: 13,
                       fontWeight: FontWeight.w800,
                     ),
@@ -5852,27 +5867,32 @@ class _MissingVersionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: const TextStyle(
-            color: Color(0xFF4F46E5),
+          style: TextStyle(
+            color: colorScheme.primary,
             fontSize: 13,
             fontWeight: FontWeight.w800,
           ),
         ),
         const SizedBox(height: 12),
-        const Row(
+        Row(
           children: [
-            Icon(Icons.remove_circle_outline, color: Color(0xFF9CA3AF)),
-            SizedBox(width: 8),
+            Icon(
+              Icons.remove_circle_outline,
+              color: colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'Not present in this vault version.',
                 style: TextStyle(
-                  color: Color(0xFF6B7280),
+                  color: colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -5891,6 +5911,7 @@ class _MergeItemPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final type = item['type']?.toString().trim().isNotEmpty == true
         ? item['type'].toString().trim()
         : 'Item';
@@ -5912,10 +5933,13 @@ class _MergeItemPreview extends StatelessWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: const Color(0xFFE0E7FF),
+                color: colorScheme.primaryContainer,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.lock_outline, color: Color(0xFF4F46E5)),
+              child: Icon(
+                Icons.lock_outline,
+                color: colorScheme.onPrimaryContainer,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -5926,8 +5950,8 @@ class _MergeItemPreview extends StatelessWidget {
                     type,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFF111827),
+                    style: TextStyle(
+                      color: colorScheme.onSurface,
                       fontSize: 17,
                       fontWeight: FontWeight.w800,
                     ),
@@ -5937,8 +5961,8 @@ class _MergeItemPreview extends StatelessWidget {
                     title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFF4B5563),
+                    style: TextStyle(
+                      color: colorScheme.onSurfaceVariant,
                       fontSize: 14,
                     ),
                   ),
@@ -5949,13 +5973,16 @@ class _MergeItemPreview extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         if (fields.isEmpty)
-          const Text('No fields', style: TextStyle(color: Color(0xFF6B7280)))
+          Text(
+            'No fields',
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+          )
         else
           Container(
             decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
+              color: colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE5E7EB)),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: Column(
               children: List.generate(fields.length, (index) {
@@ -5968,7 +5995,8 @@ class _MergeItemPreview extends StatelessWidget {
                 final sensitive = field['sensitive'] == true;
                 return Column(
                   children: [
-                    if (index > 0) const Divider(height: 1),
+                    if (index > 0)
+                      Divider(height: 1, color: colorScheme.outlineVariant),
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
@@ -5988,8 +6016,8 @@ class _MergeItemPreview extends StatelessWidget {
                                         label,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Color(0xFF6B7280),
+                                        style: TextStyle(
+                                          color: colorScheme.onSurfaceVariant,
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
                                         ),
@@ -5997,10 +6025,10 @@ class _MergeItemPreview extends StatelessWidget {
                                     ),
                                     if (sensitive) ...[
                                       const SizedBox(width: 6),
-                                      const Icon(
+                                      Icon(
                                         Icons.visibility_outlined,
                                         size: 13,
-                                        color: Color(0xFF9CA3AF),
+                                        color: colorScheme.onSurfaceVariant,
                                       ),
                                     ],
                                   ],
@@ -6010,8 +6038,8 @@ class _MergeItemPreview extends StatelessWidget {
                                   value.isEmpty ? 'Empty' : value,
                                   style: TextStyle(
                                     color: value.isEmpty
-                                        ? const Color(0xFF9CA3AF)
-                                        : const Color(0xFF111827),
+                                        ? colorScheme.onSurfaceVariant
+                                        : colorScheme.onSurface,
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
@@ -6048,6 +6076,7 @@ class _MergeNotePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final title = note['title']?.toString().trim().isNotEmpty == true
         ? note['title'].toString().trim()
         : 'Untitled note';
@@ -6063,12 +6092,12 @@ class _MergeNotePreview extends StatelessWidget {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF3C7),
+                color: colorScheme.secondaryContainer,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.description_outlined,
-                color: Color(0xFFD97706),
+                color: colorScheme.onSecondaryContainer,
               ),
             ),
             const SizedBox(width: 12),
@@ -6077,8 +6106,8 @@ class _MergeNotePreview extends StatelessWidget {
                 title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF111827),
+                style: TextStyle(
+                  color: colorScheme.onSurface,
                   fontSize: 17,
                   fontWeight: FontWeight.w800,
                 ),
@@ -6092,16 +6121,16 @@ class _MergeNotePreview extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 96),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
+            border: Border.all(color: colorScheme.outlineVariant),
           ),
           child: SelectableText(
             body.isEmpty ? 'Empty note' : body,
             style: TextStyle(
               color: body.isEmpty
-                  ? const Color(0xFF9CA3AF)
-                  : const Color(0xFF111827),
+                  ? colorScheme.onSurfaceVariant
+                  : colorScheme.onSurface,
               fontSize: 15,
               height: 1.45,
             ),
@@ -6130,6 +6159,8 @@ class _MergeMetadataLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (value.trim().isEmpty) return const SizedBox.shrink();
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
@@ -6139,14 +6170,17 @@ class _MergeMetadataLine extends StatelessWidget {
             width: 76,
             child: Text(
               label,
-              style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                color: Color(0xFF111827),
+              style: TextStyle(
+                color: colorScheme.onSurface,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -6202,6 +6236,8 @@ class VaultCreatedScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return OnboardingScaffold(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
@@ -6213,10 +6249,14 @@ class VaultCreatedScreen extends StatelessWidget {
                 width: 90,
                 height: 90,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF18181B),
+                  color: colorScheme.primary,
                   borderRadius: BorderRadius.circular(24),
                 ),
-                child: const Icon(Icons.check, color: Colors.white, size: 40),
+                child: Icon(
+                  Icons.check,
+                  color: colorScheme.onPrimary,
+                  size: 40,
+                ),
               ),
               const SizedBox(height: 24),
               Text(
@@ -6258,16 +6298,20 @@ class _GuardianCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: const Color(0xFFFAFAFA),
+          color: selected
+              ? colorScheme.primaryContainer
+              : colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? const Color(0xFF18181B) : const Color(0xFFE4E4E7),
+            color: selected ? colorScheme.primary : colorScheme.outlineVariant,
           ),
         ),
         child: Row(
@@ -6290,7 +6334,12 @@ class _GuardianCard extends StatelessWidget {
                 ],
               ),
             ),
-            if (selected) const Icon(Icons.check_circle, size: 20),
+            if (selected)
+              Icon(
+                Icons.check_circle,
+                color: colorScheme.onPrimaryContainer,
+                size: 20,
+              ),
           ],
         ),
       ),
