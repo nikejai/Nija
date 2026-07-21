@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
+import 'dart:typed_data';
 
 import 'secret_share_portability_base.dart';
 import 'secret_share_model.dart';
@@ -37,6 +38,28 @@ class SecretSharePortabilityAdapterImpl
     required String content,
   }) async {
     return shareEncryptedFile(suggestedName: suggestedName, content: content);
+  }
+
+  @override
+  Future<bool> exportPlainFile({
+    required String suggestedName,
+    required Uint8List bytes,
+    required String mimeType,
+  }) async {
+    try {
+      final blob = html.Blob(<dynamic>[bytes], mimeType);
+      final url = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: url)
+        ..download = suggestedName.trim().isEmpty ? 'document' : suggestedName
+        ..style.display = 'none';
+      html.document.body?.append(anchor);
+      anchor.click();
+      anchor.remove();
+      html.Url.revokeObjectUrl(url);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override

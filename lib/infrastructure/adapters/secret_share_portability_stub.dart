@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'secret_share_portability_base.dart';
 import 'secret_share_model.dart';
 
@@ -20,6 +22,17 @@ class SecretSharePortabilityAdapterImpl
   }) {
     throw UnsupportedError(
       'Encrypted secret export is not supported on this platform.',
+    );
+  }
+
+  @override
+  Future<bool> exportPlainFile({
+    required String suggestedName,
+    required Uint8List bytes,
+    required String mimeType,
+  }) {
+    throw UnsupportedError(
+      'Plain file export is not supported on this platform.',
     );
   }
 

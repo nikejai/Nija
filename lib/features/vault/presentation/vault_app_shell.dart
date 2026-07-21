@@ -167,6 +167,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
   String _cloudBackupAccountLabel = 'Not connected';
   bool _allItemsSelectionMode = false;
   final Set<String> _selectedAllItemsKeys = <String>{};
+  Future<Map<String, dynamic>>? _debugInternalsFuture;
+  _DashboardData? _dashboardDataCache;
+  int? _dashboardDataSignature;
   late final List<Map<String, dynamic>> _customTypeDefinitions;
   late final List<Map<String, dynamic>> _items;
   late final List<Map<String, dynamic>> _notes;
@@ -245,6 +248,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
             (entry) => Map<String, dynamic>.from(entry),
           ),
         );
+    }
+    if (oldWidget.onReadVaultInternals != widget.onReadVaultInternals) {
+      _debugInternalsFuture = null;
     }
   }
 
@@ -365,6 +371,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
             ],
             onDestinationSelected: (value) {
               if (value == _tabIndex) return;
+              if (value == 4 && kDebugMode) {
+                _ensureDebugInternalsFuture();
+              }
               setState(() => _tabIndex = value);
             },
           ),
@@ -464,40 +473,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Widget _buildVaultTab(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final recentAll =
-        <Map<String, dynamic>>[
-              ..._items.map(
-                (item) => <String, dynamic>{'kind': 'item', 'entry': item},
-              ),
-              ..._notes.map(
-                (note) => <String, dynamic>{'kind': 'note', 'entry': note},
-              ),
-            ]
-            .where((row) {
-              final entry = row['entry'] as Map<String, dynamic>;
-              return _activityAt(entry) != null;
-            })
-            .map((row) {
-              final entry = row['entry'] as Map<String, dynamic>;
-              return {...row, 'updatedLabel': _activityLabel(entry)};
-            })
-            .toList()
-          ..sort((a, b) {
-            final av = a['entry'] as Map<String, dynamic>;
-            final bv = b['entry'] as Map<String, dynamic>;
-            return _activityAt(bv)!.compareTo(_activityAt(av)!);
-          });
-    final recentItems = recentAll.take(4).toList();
-    final typeCounts = <String, int>{};
-    for (final item in _items) {
-      final type = item['type']?.toString().trim();
-      if (type == null || type.isEmpty) continue;
-      typeCounts[type] = (typeCounts[type] ?? 0) + 1;
-    }
-    final dashboardTypes = <MapEntry<String, int>>[
-      if (_notes.isNotEmpty) MapEntry<String, int>('Notes', _notes.length),
-      ...typeCounts.entries,
-    ]..sort((a, b) => b.value.compareTo(a.value));
+    final dashboardData = _dashboardData();
+    final recentItems = dashboardData.recentItems;
+    final dashboardTypes = dashboardData.dashboardTypes;
 
     return SafeArea(
       child: Padding(
@@ -507,20 +485,23 @@ class _VaultAppShellState extends State<VaultAppShell> {
           children: [
             Row(
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Nija', style: vaultPageHeadingStyle(context)),
-                    Text(
-                      _activeVaultName,
-                      style: TextStyle(
-                        color: colorScheme.onSurfaceVariant,
-                        fontSize: 12,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Nija', style: vaultPageHeadingStyle(context)),
+                      Text(
+                        _activeVaultName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                const Spacer(),
                 IconButton(
                   onPressed: () => _openAddItemScreen(context),
                   icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
@@ -1044,6 +1025,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           onReadDocument: widget.onReadVaultDocument,
           onShareEncryptedDocument: _shareEncryptedDocument,
           onExportEncryptedDocument: _exportEncryptedDocument,
+          onSaveDocumentCopy: _saveDocumentCopy,
           showDeleteAction: true,
         ),
       ),
@@ -1095,16 +1077,109 @@ class _VaultAppShellState extends State<VaultAppShell> {
         _parseEntryTimestamp(entry['createdAt']);
   }
 
+  _DashboardData _dashboardData() {
+    final signature = _dashboardInputSignature();
+    final cached = _dashboardDataCache;
+    if (cached != null && _dashboardDataSignature == signature) {
+      return cached;
+    }
+
+    final recent = <_DashboardRecentCandidate>[];
+    void addRecentCandidate(String kind, Map<String, dynamic> entry) {
+      final activityAt = _activityAt(entry);
+      if (activityAt == null) return;
+      final candidate = _DashboardRecentCandidate(
+        kind: kind,
+        entry: entry,
+        activityAt: activityAt,
+      );
+      var insertAt = recent.indexWhere(
+        (existing) => activityAt.isAfter(existing.activityAt),
+      );
+      if (insertAt == -1) insertAt = recent.length;
+      recent.insert(insertAt, candidate);
+      if (recent.length > 4) {
+        recent.removeLast();
+      }
+    }
+
+    final typeCounts = <String, int>{};
+    for (final item in _items) {
+      addRecentCandidate('item', item);
+      final type = item['type']?.toString().trim();
+      if (type == null || type.isEmpty) continue;
+      typeCounts[type] = (typeCounts[type] ?? 0) + 1;
+    }
+    for (final note in _notes) {
+      addRecentCandidate('note', note);
+    }
+
+    final dashboardTypes =
+        <MapEntry<String, int>>[
+          if (_notes.isNotEmpty) MapEntry<String, int>('Notes', _notes.length),
+          ...typeCounts.entries,
+        ]..sort((a, b) {
+          final countCompare = b.value.compareTo(a.value);
+          if (countCompare != 0) return countCompare;
+          return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+        });
+
+    final data = _DashboardData(
+      recentItems: recent
+          .map(
+            (candidate) => <String, dynamic>{
+              'kind': candidate.kind,
+              'entry': candidate.entry,
+              'updatedLabel': _relativeTimeLabel(candidate.activityAt),
+            },
+          )
+          .toList(growable: false),
+      dashboardTypes: dashboardTypes,
+    );
+    _dashboardDataSignature = signature;
+    _dashboardDataCache = data;
+    return data;
+  }
+
+  int _dashboardInputSignature() {
+    final values = <Object?>[
+      DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerMinute,
+      _items.length,
+      _notes.length,
+    ];
+    for (final item in _items) {
+      values.addAll([
+        item['id'],
+        item['type'],
+        item['title'],
+        item['subtitle'],
+        item['updated'],
+        item['updatedAt'],
+        item['documentUploadedAt'],
+        item['createdAt'],
+        item['lastAccessedAt'],
+        item['pinned'],
+      ]);
+    }
+    for (final note in _notes) {
+      values.addAll([
+        note['id'],
+        note['title'],
+        note['preview'],
+        note['updated'],
+        note['updatedAt'],
+        note['createdAt'],
+        note['lastAccessedAt'],
+        note['pinned'],
+      ]);
+    }
+    return Object.hashAll(values);
+  }
+
   DateTime? _parseEntryTimestamp(Object? raw) {
     final value = raw?.toString().trim() ?? '';
     if (value.isEmpty) return null;
     return DateTime.tryParse(value);
-  }
-
-  String _activityLabel(Map<String, dynamic> entry) {
-    final activityAt = _activityAt(entry);
-    if (activityAt == null) return 'Now';
-    return _relativeTimeLabel(activityAt);
   }
 
   String _relativeTimeLabel(DateTime timestamp) {
@@ -1326,14 +1401,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 ),
               ),
               _SettingsRow(
+                key: const ValueKey('settings-security-encryption-row'),
                 icon: Icons.shield_outlined,
                 title: 'Security & Encryption',
                 subtitle: 'View encryption details and key info',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(AppStrings.settingComingSoon)),
-                  );
-                },
+                onTap: () => _showSecurityEncryptionSheet(context),
               ),
             ],
           ),
@@ -1431,6 +1503,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 onTap: () => _showThemePicker(context),
               ),
               _SettingsRow(
+                key: const ValueKey('settings-categories-row'),
                 icon: Icons.folder_outlined,
                 title: 'Categories',
                 subtitle: '${_customTypeDefinitions.length} custom templates',
@@ -1494,20 +1567,36 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Widget _buildDebugInternalsTab(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final internalsFuture = _ensureDebugInternalsFuture();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: FutureBuilder<Map<String, dynamic>>(
-        future: widget.onReadVaultInternals?.call(),
+        future: internalsFuture,
         builder: (context, snapshot) {
           final data = snapshot.data;
           return ListView(
             children: [
-              const _SectionHeader(
-                title: 'Vault internals',
-                subtitle: 'Debug-only storage metadata and encrypted sections.',
+              _DebugHeader(
+                onRefresh: widget.onReadVaultInternals == null
+                    ? null
+                    : _refreshDebugInternals,
               ),
               const SizedBox(height: 14),
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (widget.onReadVaultInternals == null)
+                Card(
+                  child: ListTile(
+                    leading: Icon(
+                      Icons.info_outline,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    title: const Text('Debug internals unavailable'),
+                    subtitle: Text(
+                      'No debug internals reader is registered.',
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                )
+              else if (snapshot.connectionState == ConnectionState.waiting)
                 const Center(child: CircularProgressIndicator())
               else if (snapshot.hasError || data == null)
                 Card(
@@ -1597,6 +1686,21 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
+  Future<Map<String, dynamic>>? _ensureDebugInternalsFuture() {
+    final read = widget.onReadVaultInternals;
+    if (read == null) return null;
+    return _debugInternalsFuture ??= read();
+  }
+
+  void _refreshDebugInternals() {
+    final read = widget.onReadVaultInternals;
+    if (read == null) return;
+    final next = read();
+    setState(() {
+      _debugInternalsFuture = next;
+    });
+  }
+
   List<MapEntry<String, String>> _debugRows(
     Map<String, dynamic> data,
     List<String> keys,
@@ -1645,7 +1749,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
             )
             .toList()
           ..sort((a, b) => a.key.compareTo(b.key));
-    return rows;
+    const maxRows = 80;
+    if (rows.length <= maxRows) return rows;
+    return [
+      ...rows.take(maxRows),
+      MapEntry<String, String>(
+        'more',
+        '${rows.length - maxRows} files hidden; use Refresh after narrowing the issue.',
+      ),
+    ];
   }
 
   Future<void> _showRotateMasterPasswordDialog(BuildContext context) async {
@@ -1657,6 +1769,18 @@ class _VaultAppShellState extends State<VaultAppShell> {
     await widget.onRotateMasterPassword(
       currentPassword: values.$1,
       newPassword: values.$2,
+    );
+  }
+
+  Future<void> _showRotateRecoveryPhraseDialog(BuildContext context) async {
+    final values = await showDialog<(String, String)>(
+      context: context,
+      builder: (context) => const _RotateRecoveryPhraseDialog(),
+    );
+    if (values == null) return;
+    await widget.onRotateRecoveryPhrase(
+      currentRecoveryPhrase: values.$1,
+      newRecoveryPhrase: values.$2,
     );
   }
 
@@ -1745,6 +1869,57 @@ class _VaultAppShellState extends State<VaultAppShell> {
       isScrollControlled: true,
       builder: (context) =>
           _InfoDetailSheet(title: title, icon: icon, sections: sections),
+    );
+  }
+
+  Future<void> _showSecurityEncryptionSheet(BuildContext context) async {
+    final metadataFuture = widget.onReadVaultInternals?.call();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => _SecurityEncryptionSheet(
+        metadataFuture: metadataFuture,
+        biometricEnabled: widget.biometricEnabled,
+        autoLockLabel: _formatAutoLockSeconds(widget.autoLockSeconds),
+        cloudBackupEnabled: _cloudBackupEnabled,
+        cloudBackupLastLabel: _cloudBackupLastAtEpochMs <= 0
+            ? 'Never'
+            : DateTime.fromMillisecondsSinceEpoch(
+                _cloudBackupLastAtEpochMs,
+              ).toString(),
+        onChangeMasterPassword: () {
+          Navigator.of(sheetContext).pop();
+          _showRotateMasterPasswordDialog(context);
+        },
+        onRotateRecoveryPhrase: () {
+          Navigator.of(sheetContext).pop();
+          _showRotateRecoveryPhraseDialog(context);
+        },
+        onManageBiometrics: () {
+          Navigator.of(sheetContext).pop();
+          widget.onBiometricChanged(!widget.biometricEnabled);
+        },
+        onAdjustAutoLock: () {
+          Navigator.of(sheetContext).pop();
+          _showAutoLockPicker(context);
+        },
+        onExportVault: () {
+          Navigator.of(sheetContext).pop();
+          widget.onExportVault();
+        },
+        onBackupNow: AppFeatures.isPaidBuild
+            ? () {
+                Navigator.of(sheetContext).pop();
+                _handleCloudBackupNow();
+              }
+            : null,
+        onRestoreBackup: AppFeatures.isPaidBuild
+            ? () {
+                Navigator.of(sheetContext).pop();
+                widget.onRestoreFromCloud();
+              }
+            : null,
+      ),
     );
   }
 
@@ -1924,6 +2099,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
       plainText: _documentEncryptedPayload(item, bytes),
       suggestedBaseName: _documentSuggestedBaseName(item),
       contentType: 'document',
+    );
+  }
+
+  Future<bool> _saveDocumentCopy(
+    Map<String, dynamic> item,
+    List<int> bytes,
+  ) async {
+    return _secretSharePortability.exportPlainFile(
+      suggestedName: _documentFileName(item),
+      bytes: Uint8List.fromList(bytes),
+      mimeType: _mimeTypeForExtension(_documentExtension(item)),
     );
   }
 
@@ -3060,6 +3246,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
               onTap: () => Navigator.of(context).pop('export_encrypted'),
             ),
             ListTile(
+              key: const ValueKey('document-action-save-copy'),
+              leading: const Icon(Icons.download_for_offline_outlined),
+              title: const Text('Save copy'),
+              onTap: () => Navigator.of(context).pop('save_copy'),
+            ),
+            ListTile(
               key: const ValueKey('document-action-delete'),
               leading: const Icon(Icons.delete_outline),
               title: Text(AppStrings.delete),
@@ -3084,13 +3276,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
       await _persistVaultData();
       return;
     }
-    if (selected == 'share_encrypted' || selected == 'export_encrypted') {
+    if (selected == 'share_encrypted' ||
+        selected == 'export_encrypted' ||
+        selected == 'save_copy') {
       try {
         final bytes = await _readDocumentBytesForAction(item);
         if (selected == 'share_encrypted') {
           await _shareEncryptedDocument(item, bytes);
-        } else {
+        } else if (selected == 'export_encrypted') {
           await _exportEncryptedDocument(item, bytes);
+        } else {
+          final saved = await _saveDocumentCopy(item, bytes);
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                saved ? 'Document copy saved.' : 'Document save cancelled.',
+              ),
+            ),
+          );
         }
       } catch (_) {
         if (!context.mounted) return;
@@ -3930,6 +4134,34 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
+class _DebugHeader extends StatelessWidget {
+  const _DebugHeader({required this.onRefresh});
+
+  final VoidCallback? onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Expanded(
+          child: _SectionHeader(
+            title: 'Vault internals',
+            subtitle: 'Debug-only storage metadata and encrypted sections.',
+          ),
+        ),
+        const SizedBox(width: 12),
+        IconButton.filledTonal(
+          key: const ValueKey('debug-internals-refresh'),
+          onPressed: onRefresh,
+          icon: const Icon(Icons.refresh),
+          tooltip: 'Refresh internals',
+        ),
+      ],
+    );
+  }
+}
+
 class _DebugInfoCard extends StatelessWidget {
   const _DebugInfoCard({required this.title, required this.rows});
 
@@ -4001,6 +4233,7 @@ class _DebugInfoCard extends StatelessWidget {
 class _DebugFileTreeCard extends StatelessWidget {
   const _DebugFileTreeCard({required this.store});
 
+  static const int _maxRenderedFiles = 80;
   final dynamic store;
 
   @override
@@ -4071,28 +4304,53 @@ class _DebugFileTreeCard extends StatelessWidget {
     final lines = <_DebugTreeLineData>[
       _DebugTreeLineData(depth: 0, label: _rootLabel(root), folder: true),
     ];
-    if (core.isNotEmpty) {
+    var renderedFiles = 0;
+
+    bool canRenderMoreFiles() => renderedFiles < _maxRenderedFiles;
+
+    Iterable<_DebugTreeLineData> cappedFileLines(
+      Iterable<MapEntry<String, int>> files, {
+      required int depth,
+    }) sync* {
+      for (final entry in files) {
+        if (!canRenderMoreFiles()) return;
+        renderedFiles++;
+        yield _fileLine(entry, depth: depth);
+      }
+    }
+
+    if (core.isNotEmpty && canRenderMoreFiles()) {
       lines.add(
         const _DebugTreeLineData(depth: 1, label: 'core', folder: true),
       );
-      lines.addAll(core.map((entry) => _fileLine(entry, depth: 2)));
+      lines.addAll(cappedFileLines(core, depth: 2));
     }
-    if (documents.isNotEmpty) {
+    if (documents.isNotEmpty && canRenderMoreFiles()) {
       lines.add(
         const _DebugTreeLineData(depth: 1, label: 'documents', folder: true),
       );
       for (final docId in documents.keys.toList()..sort()) {
+        if (!canRenderMoreFiles()) break;
         final docFiles = documents[docId]!
           ..sort((a, b) => a.key.compareTo(b.key));
         lines.add(_DebugTreeLineData(depth: 2, label: docId, folder: true));
-        lines.addAll(docFiles.map((entry) => _fileLine(entry, depth: 3)));
+        lines.addAll(cappedFileLines(docFiles, depth: 3));
       }
     }
-    if (other.isNotEmpty) {
+    if (other.isNotEmpty && canRenderMoreFiles()) {
       lines.add(
         const _DebugTreeLineData(depth: 1, label: 'other', folder: true),
       );
-      lines.addAll(other.map((entry) => _fileLine(entry, depth: 2)));
+      lines.addAll(cappedFileLines(other, depth: 2));
+    }
+    if (entries.length > renderedFiles) {
+      lines.add(
+        _DebugTreeLineData(
+          depth: 1,
+          label:
+              '${entries.length - renderedFiles} more files hidden to keep Debug responsive',
+        ),
+      );
     }
     return lines;
   }
@@ -4507,6 +4765,28 @@ class _IndexedEntry {
   final String kind;
   final int index;
   final Map<String, dynamic> entry;
+}
+
+class _DashboardData {
+  const _DashboardData({
+    required this.recentItems,
+    required this.dashboardTypes,
+  });
+
+  final List<Map<String, dynamic>> recentItems;
+  final List<MapEntry<String, int>> dashboardTypes;
+}
+
+class _DashboardRecentCandidate {
+  const _DashboardRecentCandidate({
+    required this.kind,
+    required this.entry,
+    required this.activityAt,
+  });
+
+  final String kind;
+  final Map<String, dynamic> entry;
+  final DateTime activityAt;
 }
 
 class _AllItemsFilterState {

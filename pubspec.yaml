@@ -1,5 +1,5 @@
 name: nija
-description: "A new Flutter project."
+description: "A local-first, privacy-first encrypted vault for passwords, notes, documents, and identities."
 publish_to: 'none'
 version: 0.1.0+1
 

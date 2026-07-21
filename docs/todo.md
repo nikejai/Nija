@@ -178,19 +178,121 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [x] Clean up `vault_app_shell.dart` analyzer issues.
   - Goal: `flutter analyze` passes with zero issues.
   - Scope: unused fields/methods, deprecated `WillPopScope`, unnecessary casts, and related analyzer warnings.
-- [ ] Fix onboarding create-vault/recovery widget tests.
+- [x] Implement Settings `Security & Encryption`.
+  - Goal: replace the `Settings coming soon` placeholder with a user-safe security details surface.
+  - Add a polished screen or bottom sheet from Settings -> `Security & Encryption`.
+  - Explain the user-facing security model:
+    - master password is used only to derive an unlock key,
+    - Argon2id derives the password/recovery keys,
+    - the derived key unwraps the random vault key,
+    - vault contents are encrypted with authenticated encryption,
+    - master password and raw vault key are not stored,
+    - recovery phrase cannot be recovered by Nija if lost.
+  - Show current vault crypto metadata in a sanitized form:
+    - guardian profile,
+    - KDF name (`Argon2id`),
+    - KDF memory / iterations / parallelism,
+    - cipher name (`AES-256-GCM`),
+    - vault format/schema/storage layout versions,
+    - vault created/updated timestamps,
+    - vault revision/version label.
+  - Add simple security status checks:
+    - vault encrypted at rest,
+    - recovery key wrapper present,
+    - biometric unlock enabled/disabled,
+    - auto-lock setting,
+    - cloud backup enabled/disabled,
+    - last backup timestamp,
+    - release build hides debug internals.
+  - Add links/actions from this surface:
+    - change master password,
+    - rotate recovery phrase,
+    - manage biometrics,
+    - adjust auto-lock,
+    - export encrypted vault,
+    - open backup/restore controls.
+  - Reuse `readVaultInternals()` only through a sanitized presentation model.
+  - Keep debug internals separate: do not expose working folder/files, raw encrypted section names, raw errors, payloads, keys, salts, nonces, stack traces, or other non-user-facing internals in production UI.
+  - Add tests for the Settings row opening the new surface and for sanitized metadata/status rendering.
+  - Added bottom sheet with security model explanation, sanitized vault crypto/format metadata, status checks, and security actions.
+  - Added recovery-phrase rotation dialog entry point from the security surface.
+  - Added widget coverage that verifies sanitized metadata rendering and excludes raw working-store/internal fields.
+- [ ] Configure real Android release signing.
+  - Goal: release APK/AAB is signed with a production keystore, not debug keys.
+  - Scope: add `android/key.properties` handling, define a release signing config in `android/app/build.gradle.kts`, remove debug signing from `buildTypes.release`, and document release SHA setup for Google Drive OAuth.
+- [ ] Finalize production Android app identity and metadata.
+  - Goal: package ID, app description, version name/code, and release comments are production-ready.
+  - Scope: replace placeholder Gradle TODOs, confirm `applicationId`, update `pubspec.yaml` description/version, and verify store-facing labels/assets.
+- [x] Sanitize release logging and error surfaces.
+  - Goal: no production path logs raw vault, backup, payload, credential, or stack trace details.
+  - Scope: gate or remove `debugPrint`/stack traces in onboarding and cloud backup paths, return user-safe errors, and keep detailed diagnostics out of release builds.
+- [ ] Complete release hardening checklist signoff.
+  - Goal: every item in `docs/release_hardening_gates.md` is verified or explicitly documented before tagging a production build.
+  - Scope: recovery phrase handling, rotation flows, unlock failure behavior, migration rejection, sensitive-field clearing, debug config, logging, crash surfaces, and encrypted web storage behavior.
+- [ ] Run real-device production validation matrix.
+  - Goal: Android/iOS/Web critical flows are manually verified on release/profile builds.
+  - Scope: create vault, unlock, lock, recovery unlock, password reset, master/recovery rotation, CRUD persistence after restart, import/export, encrypted secret open-with, document open/share, and paid cloud backup/restore.
+- [x] Fix onboarding create-vault/recovery widget tests.
   - Goal: onboarding tests reliably reach `Recovery phrase` and `I saved my phrase`.
   - Scope: update test helpers or UI flow assumptions around vault-name/password fields and async create flow.
-- [ ] Fix note editor widget test localization setup.
+- [x] Fix note editor widget test localization setup.
   - Goal: note editor tests pass without `MissingFlutterQuillLocalizationException`.
   - Scope: add `FlutterQuillLocalizations.delegate` to test app setup or shared test harness.
-- [ ] Update stale vault shell widget tests for current UI.
+- [x] Update stale vault shell widget tests for current UI.
   - Goal: `test/vault_shell_test.dart` passes against the current app navigation/actions.
   - Scope: update tests expecting old `Custom templates`, `All types`, note action keys, selection/share actions, and related labels.
 - [ ] Re-run release readiness gates.
   - Goal: `./scripts/release_hardening_gate.sh`, `flutter test`, and `flutter build apk --release` all pass.
 
-## 14) Vault App Shell File Split
+## 14) Release Findings From Manual Testing
+
+- [x] Close sensitive item/detail screens when the vault is locked in background.
+  - Finding: if an item or note is open and the app auto-locks/background-locks, the same detail screen can remain visible after resume.
+  - Goal: on app resume, check the current lock state before rendering vault content.
+  - Scope: ensure item detail, note detail/editor, document preview, encrypted secret preview, and nested routes are dismissed or replaced by the unlock screen when the vault is locked.
+  - Add regression coverage for: open item -> lock app/session -> resume -> item content is not visible.
+  - Lock now collapses app routes to the root before switching to unlock, so sensitive pushed screens cannot remain above the unlock UI.
+  - Added onboarding lifecycle regression coverage for: open note detail -> background auto-lock -> resume -> unlock screen visible and detail route dismissed.
+- [x] Fix Debug view performance/hang.
+  - Finding: opening the debug/internals view can hang the app, and pressing Home or performing operations feels slow afterward.
+  - Goal: Debug view must not block UI or repeatedly trigger expensive filesystem/metadata reads.
+  - Scope: audit `onReadVaultInternals`, debug file-tree rendering, `FutureBuilder` rebuild behavior, file-size traversal, and any synchronous work on the UI isolate.
+  - Keep debug-only internals behind development surfaces and avoid raw filesystem scans in production paths.
+  - Add performance guard or test coverage for opening/closing Debug view without repeated expensive reads.
+  - Cached the debug internals future so Home/Debug navigation and normal rebuilds do not repeatedly read metadata/filesystem state.
+  - Added an explicit Refresh action for debug internals when a fresh snapshot is needed.
+  - Capped rendered debug file rows/tree entries to keep large vaults from flooding the widget tree.
+  - Added widget coverage for cached debug reads, explicit refresh, and capped rendering.
+- [x] Investigate and fix app lag when pressing Home.
+  - Finding: the app starts lagging when the Home tab/button is pressed.
+  - Goal: Home navigation should feel immediate and should not trigger unnecessary persistence, vault metadata reads, document byte reads, debug reads, or broad list recomputation.
+  - Scope: profile Home tab rebuilds, recent-item sorting, size calculations, dashboard filters, lifecycle lock checks, and any async work started during tab switch.
+  - Add targeted profiling notes and regression coverage for avoiding redundant work on Home navigation.
+  - Cached derived Home dashboard data behind an input signature so normal Home rebuilds/tab switches do not repeatedly recompute counts and recent rows.
+  - Replaced full recent-list sorting with a single-pass top-4 recent activity calculation.
+  - Kept relative-time labels on a minute-bucket signature so labels refresh without rebuilding on every frame.
+- [x] Investigate and fix note writing lag.
+  - Finding: typing in notes lags.
+  - Goal: note editor typing should remain responsive with autosave enabled.
+  - Scope: audit autosave interval, rich-text delta serialization, title/tag rebuilds, persistence frequency, keyboard/scroll listeners, and expensive parent callbacks.
+  - Consider debouncing heavy serialization/persistence and keeping autosave off the typing critical path.
+  - Add a large-note/manual typing validation case before release.
+  - Replaced periodic autosave polling with a debounced autosave timer that resets while the user continues editing.
+  - Full Quill document serialization and parent persistence now happen only after the user pauses or explicitly saves.
+  - Reused a single note snapshot for fingerprinting/payload creation and removed a JSON encode/decode clone from the save path.
+  - Added widget coverage that verifies active edits delay autosave until typing pauses.
+- [x] Allow attached documents to be downloaded from preview and item pages.
+  - Finding: document preview/viewing flow lacks a direct download/export action where users expect it.
+  - Goal: users can save/download an attached document from the document preview page and from the item detail page when an item has document attachments.
+  - Scope: add clear `Download`/`Save copy` actions to document preview, document detail, and item detail attachment rows.
+  - Preserve encrypted vault storage; exported/downloaded files are explicit user actions and should use the original filename/mime where available.
+  - Add tests for document preview download action availability and item-page attachment download action availability.
+  - Added platform export support for decrypted document bytes using the original filename and MIME type.
+  - Added `Save copy` on the document preview/detail page.
+  - Added `Save copy` to document quick actions from the item list.
+  - Added widget coverage for save-copy action availability in the document preview and document action sheet.
+
+## 15) Vault App Shell File Split
 
 - [x] Move encrypted import/share UI out of `vault_app_shell.dart`.
   - Goal: keep vault shell focused on orchestration, not import bundle screens.
