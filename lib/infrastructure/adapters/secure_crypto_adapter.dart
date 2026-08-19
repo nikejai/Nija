@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 
 import 'crypto_adapter.dart';
+import 'vault_crypto_isolate.dart';
 
 class SecureCryptoAdapter implements CryptoAdapter {
   SecureCryptoAdapter({
@@ -22,18 +23,14 @@ class SecureCryptoAdapter implements CryptoAdapter {
     required int memoryKb,
     required int iterations,
     required int parallelism,
-  }) async {
-    final algorithm = Argon2id(
-      memory: memoryKb,
+  }) {
+    return deriveVaultKeyInBackground(
+      password: password,
+      salt: salt,
+      memoryKb: memoryKb,
       iterations: iterations,
       parallelism: parallelism,
-      hashLength: 32,
     );
-    final secretKey = await algorithm.deriveKeyFromPassword(
-      password: password,
-      nonce: salt,
-    );
-    return secretKey.extractBytes();
   }
 
   @override

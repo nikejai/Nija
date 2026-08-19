@@ -238,6 +238,13 @@ class FilePrivateVaultStore implements PrivateVaultStore {
       File('${dir.path}${Platform.pathSeparator}header.json'),
       Uint8List.fromList(utf8.encode(jsonEncode(header.toJson()))),
     );
+    final retained = <String>{...sections.keys, 'header.json'};
+    await for (final entity in dir.list(followLinks: false)) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      if (name.endsWith('.tmp') || retained.contains(name)) continue;
+      await entity.delete();
+    }
   }
 
   @override

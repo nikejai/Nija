@@ -10,9 +10,22 @@ abstract class VaultPortabilityAdapter {
     required String vaultId,
     required String suggestedName,
     required String content,
+    bool forceAccountChooser = false,
   });
-  Future<List<CloudVaultBackupFile>> listCloudBackups();
-  Future<CloudVaultBackupFile?> readCloudBackup({required String vaultId});
+  Future<List<CloudVaultBackupFile>> listCloudBackups({
+    bool forceAccountChooser = false,
+  });
+  Future<CloudVaultBackupFile> hydrateCloudBackupContent(
+    CloudVaultBackupFile listing, {
+    bool forceAccountChooser = false,
+  });
+  Future<CloudVaultBackupFile?> readCloudBackup({
+    required String vaultId,
+    bool forceAccountChooser = false,
+  });
   Future<String?> getCloudBackupAccountLabel();
   Future<bool> changeCloudBackupAccount();
+  Future<bool> ensureCloudBackupAccountSelected({
+    bool forceAccountChooser = false,
+  });
 }

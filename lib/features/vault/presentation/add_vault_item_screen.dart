@@ -4,6 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/config/vault_limits.dart';
+import '../../../core/localization/app_strings.dart';
 import 'widgets/vault_page_heading.dart';
 
 class VaultFieldTemplate {
@@ -33,11 +35,27 @@ class AddVaultItemScreen extends StatefulWidget {
     this.customTypeDefinitions = const <Map<String, dynamic>>[],
     this.initialItem,
     this.fixedType,
+    this.currentVaultSizeBytes = 0,
+    this.maxVaultBytes = VaultLimits.freeVaultBytes,
+    this.maxDocumentBytes = VaultLimits.maxDocumentBytes,
+    this.onLifecycleLockSuppressed,
   });
 
   final List<Map<String, dynamic>> customTypeDefinitions;
   final Map<String, dynamic>? initialItem;
   final String? fixedType;
+  final int currentVaultSizeBytes;
+  final int maxVaultBytes;
+  final int maxDocumentBytes;
+  final ValueChanged<bool>? onLifecycleLockSuppressed;
+
+  static const _documentEditTemplate = VaultItemTemplate(
+    type: 'Documents',
+    fields: [
+      VaultFieldTemplate(label: 'Title'),
+      VaultFieldTemplate(label: 'Description'),
+    ],
+  );
 
   static const templates = <VaultItemTemplate>[
     VaultItemTemplate(
@@ -184,8 +202,10 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       <String, TextEditingController>{};
   final Set<String> _revealedSensitiveFields = <String>{};
   final List<Map<String, dynamic>> _idPhotos = <Map<String, dynamic>>[];
+  final List<Map<String, dynamic>> _attachments = <Map<String, dynamic>>[];
   late final TextEditingController _tagDraftController;
   final List<String> _tags = <String>[];
+  String? _attachmentErrorText;
 
   @override
   void initState() {
@@ -238,6 +258,9 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
 
     final templates = [...AddVaultItemScreen.templates, ...custom];
     final initialType = widget.initialItem?['type']?.toString();
+    if (initialType == 'Documents') {
+      return [...templates, AddVaultItemScreen._documentEditTemplate];
+    }
     if (initialType == null ||
         initialType.isEmpty ||
         templates.any((template) => template.type == initialType)) {
@@ -297,6 +320,10 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       if (label.isEmpty) continue;
       _controllers[label]?.text = field['value']?.toString() ?? '';
     }
+    if (item['type']?.toString() == 'Documents' &&
+        (_controllers['Description']?.text.trim().isEmpty ?? false)) {
+      _controllers['Description']?.text = _documentDescription(item, fields);
+    }
     final tags = (item['tags'] as List<dynamic>? ?? const <dynamic>[])
         .map((entry) => entry.toString().trim())
         .where((entry) => entry.isNotEmpty)
@@ -315,6 +342,56 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
               return bytes.isNotEmpty;
             }),
       );
+    _attachments
+      ..clear()
+      ..addAll(_initialAttachments(item));
+  }
+
+  String _documentDescription(
+    Map<String, dynamic> item,
+    List<Map<String, dynamic>> fields,
+  ) {
+    for (final field in fields) {
+      final label = field['label']?.toString().trim().toLowerCase() ?? '';
+      if (label == 'description') {
+        return field['value']?.toString() ?? '';
+      }
+    }
+    final subtitle = item['subtitle']?.toString() ?? '';
+    final fileName = item['documentFileName']?.toString() ?? '';
+    return subtitle == fileName ? '' : subtitle;
+  }
+
+  List<Map<String, dynamic>> _initialAttachments(Map<String, dynamic> item) {
+    return (item['attachments'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .where((entry) {
+          final fileName = entry['documentFileName']?.toString().trim() ?? '';
+          final section = entry['documentSection']?.toString().trim() ?? '';
+          return fileName.isNotEmpty || section.isNotEmpty;
+        })
+        .toList();
+  }
+
+  Map<String, dynamic>? get _primaryDocumentSelection {
+    final item = widget.initialItem;
+    if (item == null) return null;
+    if ((item['type']?.toString() ?? '') != 'Documents') return null;
+    final fileName = item['documentFileName']?.toString().trim() ?? '';
+    final section = item['documentSection']?.toString().trim() ?? '';
+    if (fileName.isEmpty && section.isEmpty) return null;
+    return {
+      'id': item['id']?.toString() ?? 'primary-document',
+      'documentFileName': fileName.isEmpty
+          ? item['title']?.toString() ?? 'document'
+          : fileName,
+      'documentExtension': item['documentExtension']?.toString() ?? 'FILE',
+      'documentSizeBytes': item['documentSizeBytes'] ?? 0,
+      'documentSection': section,
+      'documentStorage': item['documentStorage'] ?? 'private-section',
+      '__primaryDocument__': true,
+    };
   }
 
   bool get _canSave {
@@ -347,188 +424,214 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
         actions: [const SizedBox.shrink()],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: categoryColor.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                          child: Icon(
-                            categoryIcon,
-                            color: categoryColor,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _type,
-                            style: vaultPageHeadingStyle(context),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    if (showTypeSelector) ...[
-                      DropdownButtonFormField<String>(
-                        initialValue: _type,
-                        items: _allTemplates
-                            .map(
-                              (template) => DropdownMenuItem(
-                                value: template.type,
-                                child: Text(template.type),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value == null || value == _type) return;
-                          setState(() {
-                            _type = value;
-                            _syncControllers();
-                          });
-                        },
-                        decoration: const InputDecoration(
-                          labelText: 'Category',
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-                    ..._template.fields.map((field) {
-                      final controller = _controllers[field.label]!;
-                      final isLong =
-                          field.label == 'Private key' ||
-                          field.label == 'Notes' ||
-                          field.label == 'Address line';
-                      final isDate = field.valueType == 'date';
-                      final isNumber = field.valueType == 'number';
-                      final key = field.label;
-                      final isRevealed = _revealedSensitiveFields.contains(key);
-                      final obscure = field.sensitive && !isLong && !isRevealed;
-                      final hint = _fieldHint(field.label);
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: TextField(
-                          controller: controller,
-                          keyboardType: isNumber
-                              ? TextInputType.number
-                              : field.keyboardType,
-                          readOnly: isDate,
-                          obscureText: obscure,
-                          minLines: isLong ? 3 : 1,
-                          maxLines: isLong ? 6 : 1,
-                          onChanged: (_) => setState(() {}),
-                          onTap: isDate
-                              ? () async {
-                                  final now = DateTime.now();
-                                  final picked = await showDatePicker(
-                                    context: context,
-                                    firstDate: DateTime(now.year - 100),
-                                    lastDate: DateTime(now.year + 100),
-                                    initialDate: now,
-                                  );
-                                  if (picked == null) return;
-                                  controller.text =
-                                      '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
-                                  setState(() {});
-                                }
-                              : null,
-                          decoration: InputDecoration(
-                            labelText: field.label,
-                            hintText: hint == field.label ? null : hint,
-                            suffixIcon: field.sensitive && !isLong
-                                ? SizedBox(
-                                    width: 56,
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        InkWell(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          onTap: () {
-                                            setState(() {
-                                              if (isRevealed) {
-                                                _revealedSensitiveFields.remove(
-                                                  key,
-                                                );
-                                              } else {
-                                                _revealedSensitiveFields.add(
-                                                  key,
-                                                );
-                                              }
-                                            });
-                                          },
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(4),
-                                            child: Icon(
-                                              isRevealed
-                                                  ? Icons.visibility_off
-                                                  : Icons.visibility,
-                                              size: 17,
-                                            ),
-                                          ),
-                                        ),
-                                        InkWell(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          onTap: () async {
-                                            await Clipboard.setData(
-                                              ClipboardData(
-                                                text: controller.text,
-                                              ),
-                                            );
-                                          },
-                                          child: const Padding(
-                                            padding: EdgeInsets.all(4),
-                                            child: Icon(Icons.copy, size: 17),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                : null,
-                          ),
-                        ),
-                      );
-                    }),
-                    _buildTagsEditor(context),
-                    if (_supportsIdPhotos) ...[
-                      const SizedBox(height: 12),
-                      _buildIdPhotosSection(context),
-                    ],
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _canSave ? _save : null,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF10B981),
-                        ),
-                        child: const Text('Save'),
-                      ),
-                    ),
-                  ],
-                ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final viewport = MediaQuery.sizeOf(context);
+            final isWide = viewport.width >= 760 && viewport.height >= 700;
+            return ListView(
+              padding: EdgeInsets.fromLTRB(
+                isWide ? 24 : 16,
+                18,
+                isWide ? 24 : 16,
+                28,
               ),
-            ),
-          ],
+              children: [
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: isWide ? 860 : double.infinity,
+                    ),
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: BoxDecoration(
+                                    color: categoryColor.withValues(
+                                      alpha: 0.18,
+                                    ),
+                                    borderRadius: BorderRadius.circular(9),
+                                  ),
+                                  child: Icon(
+                                    categoryIcon,
+                                    color: categoryColor,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _type,
+                                    style: vaultPageHeadingStyle(context),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            if (showTypeSelector) ...[
+                              DropdownButtonFormField<String>(
+                                initialValue: _type,
+                                items: _allTemplates
+                                    .map(
+                                      (template) => DropdownMenuItem(
+                                        value: template.type,
+                                        child: Text(template.type),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) {
+                                  if (value == null || value == _type) return;
+                                  setState(() {
+                                    _type = value;
+                                    _syncControllers();
+                                  });
+                                },
+                                decoration: const InputDecoration(
+                                  labelText: 'Category',
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            ..._template.fields.map((field) {
+                              final controller = _controllers[field.label]!;
+                              final isLong =
+                                  field.label == 'Private key' ||
+                                  field.label == 'Notes' ||
+                                  field.label == 'Address line';
+                              final isDate = field.valueType == 'date';
+                              final isNumber = field.valueType == 'number';
+                              final key = field.label;
+                              final isRevealed = _revealedSensitiveFields
+                                  .contains(key);
+                              final obscure =
+                                  field.sensitive && !isLong && !isRevealed;
+                              final hint = _fieldHint(field.label);
+
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: TextField(
+                                  controller: controller,
+                                  keyboardType: isNumber
+                                      ? TextInputType.number
+                                      : field.keyboardType,
+                                  readOnly: isDate,
+                                  obscureText: obscure,
+                                  minLines: isLong ? 3 : 1,
+                                  maxLines: isLong ? 6 : 1,
+                                  onChanged: (_) => setState(() {}),
+                                  onTap: isDate
+                                      ? () async {
+                                          final now = DateTime.now();
+                                          final picked = await showDatePicker(
+                                            context: context,
+                                            firstDate: DateTime(now.year - 100),
+                                            lastDate: DateTime(now.year + 100),
+                                            initialDate: now,
+                                          );
+                                          if (picked == null) return;
+                                          controller.text =
+                                              '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+                                          setState(() {});
+                                        }
+                                      : null,
+                                  decoration: InputDecoration(
+                                    labelText: field.label,
+                                    hintText: hint == field.label ? null : hint,
+                                    suffixIcon: field.sensitive && !isLong
+                                        ? SizedBox(
+                                            width: 56,
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.end,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                InkWell(
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                  onTap: () {
+                                                    setState(() {
+                                                      if (isRevealed) {
+                                                        _revealedSensitiveFields
+                                                            .remove(key);
+                                                      } else {
+                                                        _revealedSensitiveFields
+                                                            .add(key);
+                                                      }
+                                                    });
+                                                  },
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.all(4),
+                                                    child: Icon(
+                                                      isRevealed
+                                                          ? Icons.visibility_off
+                                                          : Icons.visibility,
+                                                      size: 17,
+                                                    ),
+                                                  ),
+                                                ),
+                                                InkWell(
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                  onTap: () async {
+                                                    await Clipboard.setData(
+                                                      ClipboardData(
+                                                        text: controller.text,
+                                                      ),
+                                                    );
+                                                  },
+                                                  child: const Padding(
+                                                    padding: EdgeInsets.all(4),
+                                                    child: Icon(
+                                                      Icons.copy,
+                                                      size: 17,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          )
+                                        : null,
+                                  ),
+                                ),
+                              );
+                            }),
+                            _buildTagsEditor(context),
+                            if (_supportsIdPhotos) ...[
+                              const SizedBox(height: 12),
+                              _buildIdPhotosSection(context),
+                            ],
+                            const SizedBox(height: 12),
+                            _buildAttachmentsEditor(context),
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                onPressed: _canSave ? _save : null,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF10B981),
+                                ),
+                                child: const Text('Save'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -609,6 +712,188 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
     setState(() {});
   }
 
+  Widget _buildAttachmentsEditor(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final primaryDocument = _primaryDocumentSelection;
+    final selectedDocuments = [?primaryDocument, ..._attachments];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Documents',
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                key: const ValueKey('item-form-add-document'),
+                onPressed: _pickAttachment,
+                icon: const Icon(Icons.attach_file),
+                label: Text(
+                  selectedDocuments.isEmpty ? 'Choose document' : 'Add another',
+                ),
+              ),
+            ],
+          ),
+          Text(
+            'Maximum file size: ${VaultLimits.formatBytes(widget.maxDocumentBytes)}',
+            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
+          ),
+          if (_attachmentErrorText != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _attachmentErrorText!,
+              style: TextStyle(color: colorScheme.error, fontSize: 12),
+            ),
+          ],
+          const SizedBox(height: 8),
+          if (selectedDocuments.isEmpty)
+            Text(
+              'No documents selected',
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
+            )
+          else
+            ...List.generate(selectedDocuments.length, (index) {
+              final attachment = selectedDocuments[index];
+              final isPrimary = attachment['__primaryDocument__'] == true;
+              return Material(
+                color: Colors.transparent,
+                child: ListTile(
+                  key: ValueKey(
+                    'item-form-attachment-${attachment['id']?.toString() ?? index}',
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.insert_drive_file_outlined),
+                  title: Text(
+                    attachment['documentFileName']?.toString() ?? 'document',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    isPrimary
+                        ? 'Current document · ${VaultLimits.formatBytes(_attachmentSizeBytes(attachment))}'
+                        : VaultLimits.formatBytes(
+                            _attachmentSizeBytes(attachment),
+                          ),
+                  ),
+                  trailing: IconButton(
+                    key: ValueKey('item-form-remove-attachment-$index'),
+                    onPressed: isPrimary
+                        ? null
+                        : () => setState(() {
+                            final attachmentIndex = primaryDocument == null
+                                ? index
+                                : index - 1;
+                            _attachments.removeAt(attachmentIndex);
+                            _attachmentErrorText = null;
+                          }),
+                    icon: const Icon(Icons.close),
+                    tooltip: isPrimary
+                        ? 'Current document cannot be removed here'
+                        : 'Remove document',
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickAttachment() async {
+    widget.onLifecycleLockSuppressed?.call(true);
+    final FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        withData: false,
+        withReadStream: true,
+      );
+    } finally {
+      widget.onLifecycleLockSuppressed?.call(false);
+    }
+    final file = result?.files.single;
+    if (file == null) return;
+    final error = _attachmentValidationError(file);
+    if (error != null) {
+      setState(() => _attachmentErrorText = error);
+      return;
+    }
+    final uploadedAt = DateTime.now().toUtc().toIso8601String();
+    final attachment = <String, dynamic>{
+      'id': 'attachment-${DateTime.now().microsecondsSinceEpoch}',
+      'title': _fileNameWithoutExtension(file.name),
+      'documentFileName': file.name,
+      'documentExtension': _extensionForFileName(file.name),
+      'documentSizeBytes': file.size,
+      'documentUploadedAt': uploadedAt,
+      'documentStorage': 'pending',
+      if (file.readStream != null) '__documentReadStream__': file.readStream,
+      if (file.bytes != null) '__documentBytes__': file.bytes,
+    };
+    setState(() {
+      _attachments.add(attachment);
+      _attachmentErrorText = null;
+    });
+  }
+
+  String? _attachmentValidationError(PlatformFile file) {
+    if (file.size > widget.maxDocumentBytes) {
+      return 'Document must be ${VaultLimits.formatBytes(widget.maxDocumentBytes)} or smaller.';
+    }
+    if (file.readStream == null && file.bytes == null) {
+      return 'Could not read the selected document.';
+    }
+    final selectedBytes = _attachments.fold<int>(
+      0,
+      (sum, attachment) => sum + _pendingAttachmentSizeBytes(attachment),
+    );
+    final projected = widget.currentVaultSizeBytes + selectedBytes + file.size;
+    if (projected > widget.maxVaultBytes) {
+      return 'Not enough vault space. Limit is ${VaultLimits.formatBytes(widget.maxVaultBytes)}.';
+    }
+    return null;
+  }
+
+  int _pendingAttachmentSizeBytes(Map<String, dynamic> attachment) {
+    if (attachment['documentSection'] != null) return 0;
+    return _attachmentSizeBytes(attachment);
+  }
+
+  int _attachmentSizeBytes(Map<String, dynamic> attachment) {
+    final raw = attachment['documentSizeBytes'];
+    if (raw is int && raw >= 0) return raw;
+    return int.tryParse(raw?.toString() ?? '') ?? 0;
+  }
+
+  String _extensionForFileName(String fileName) {
+    final dot = fileName.lastIndexOf('.');
+    if (dot == -1 || dot == fileName.length - 1) return 'FILE';
+    return fileName.substring(dot + 1).toUpperCase();
+  }
+
+  String _fileNameWithoutExtension(String fileName) {
+    final dot = fileName.lastIndexOf('.');
+    if (dot <= 0) return fileName;
+    return fileName.substring(0, dot);
+  }
+
   void _save() {
     final title = _controllers['Title']!.text.trim();
 
@@ -653,6 +938,13 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
           .toList();
     } else {
       item.remove('idPhotos');
+    }
+    if (_attachments.isNotEmpty) {
+      item['attachments'] = _attachments
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+    } else {
+      item.remove('attachments');
     }
     Navigator.of(context).pop(item);
   }
@@ -786,11 +1078,19 @@ class NewItemCategoryScreen extends StatefulWidget {
   const NewItemCategoryScreen({
     super.key,
     required this.customTypeDefinitions,
+    this.currentVaultSizeBytes = 0,
+    this.maxVaultBytes = VaultLimits.freeVaultBytes,
+    this.maxDocumentBytes = VaultLimits.maxDocumentBytes,
+    this.onLifecycleLockSuppressed,
     this.onCreateNote,
     this.onCreateDocument,
   });
 
   final List<Map<String, dynamic>> customTypeDefinitions;
+  final int currentVaultSizeBytes;
+  final int maxVaultBytes;
+  final int maxDocumentBytes;
+  final ValueChanged<bool>? onLifecycleLockSuppressed;
   final Future<Map<String, dynamic>?> Function()? onCreateNote;
   final Future<Map<String, dynamic>?> Function()? onCreateDocument;
 
@@ -825,161 +1125,225 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-            child: TextField(
-              decoration: const InputDecoration(
-                hintText: 'Search category...',
-                prefixIcon: Icon(Icons.search),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 760;
+          return Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              key: const ValueKey('new-item-category-shell'),
+              constraints: BoxConstraints(
+                maxWidth: isWide ? 680 : constraints.maxWidth,
               ),
-              onChanged: (value) => setState(() => _query = value),
-            ),
-          ),
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              itemCount: filtered.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final option = filtered[index];
-                final colorScheme = Theme.of(context).colorScheme;
-                return Material(
-                  key: ValueKey(
-                    'new-item-category-${option.kind}-${option.type}',
-                  ),
-                  color: colorScheme.surface,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: colorScheme.outlineVariant),
-                  ),
-                  child: ListTile(
-                    leading: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: option.color.withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(9),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Search category...',
+                        prefixIcon: Icon(Icons.search),
                       ),
-                      child: Icon(option.icon, color: option.color, size: 18),
+                      onChanged: (value) => setState(() => _query = value),
                     ),
-                    title: Text(
-                      option.type,
-                      style: TextStyle(
-                        color: colorScheme.onSurface,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    subtitle: Text(
-                      option.subtitle,
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                    trailing: Icon(
-                      Icons.chevron_right,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    onTap: () async {
-                      if (option.kind == 'note' &&
-                          widget.onCreateNote != null) {
-                        final createdNote = await widget.onCreateNote!.call();
-                        if (createdNote == null || !context.mounted) return;
-                        await _showSavedSuccessSheet(context);
-                        if (!context.mounted) return;
-                        Navigator.of(
-                          context,
-                        ).pop({'kind': 'note', 'entry': createdNote});
-                        return;
-                      }
-                      if (option.kind == 'document' &&
-                          widget.onCreateDocument != null) {
-                        final createdDocument = await widget.onCreateDocument!
-                            .call();
-                        if (createdDocument == null || !context.mounted) {
-                          return;
-                        }
-                        await _showSavedSuccessSheet(context);
-                        if (!context.mounted) return;
-                        Navigator.of(
-                          context,
-                        ).pop({'kind': 'item', 'entry': createdDocument});
-                        return;
-                      }
-                      final createdItem = await Navigator.of(context)
-                          .push<Map<String, dynamic>>(
-                            MaterialPageRoute(
-                              builder: (_) => AddVaultItemScreen(
-                                customTypeDefinitions:
-                                    widget.customTypeDefinitions,
-                                fixedType: option.type,
+                  ),
+                  Expanded(
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                      itemCount: filtered.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final option = filtered[index];
+                        final colorScheme = Theme.of(context).colorScheme;
+                        return Material(
+                          key: ValueKey(
+                            'new-item-category-${option.kind}-${option.type}',
+                          ),
+                          color: colorScheme.surface,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(
+                              color: colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: ListTile(
+                            minVerticalPadding: 12,
+                            leading: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: option.color.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: Icon(
+                                option.icon,
+                                color: option.color,
+                                size: 18,
                               ),
                             ),
-                          );
-                      if (createdItem == null || !context.mounted) return;
-                      await _showSavedSuccessSheet(context);
-                      if (!context.mounted) return;
-                      Navigator.of(
-                        context,
-                      ).pop({'kind': 'item', 'entry': createdItem});
-                    },
+                            title: Text(
+                              option.type,
+                              style: TextStyle(
+                                color: colorScheme.onSurface,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: Text(
+                              option.subtitle,
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            trailing: Icon(
+                              Icons.chevron_right,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                            onTap: () async {
+                              if (option.kind == 'note' &&
+                                  widget.onCreateNote != null) {
+                                final createdNote = await widget.onCreateNote!
+                                    .call();
+                                if (createdNote == null || !context.mounted) {
+                                  return;
+                                }
+                                await _showSavedSuccessSheet(context);
+                                if (!context.mounted) return;
+                                Navigator.of(context).pop({
+                                  'kind': 'note',
+                                  'entry': createdNote,
+                                });
+                                return;
+                              }
+                              if (option.kind == 'document' &&
+                                  widget.onCreateDocument != null) {
+                                final createdDocument = await widget
+                                    .onCreateDocument!
+                                    .call();
+                                if (createdDocument == null ||
+                                    !context.mounted) {
+                                  return;
+                                }
+                                await _showSavedSuccessSheet(context);
+                                if (!context.mounted) return;
+                                Navigator.of(context).pop({
+                                  'kind': 'item',
+                                  'entry': createdDocument,
+                                });
+                                return;
+                              }
+                              final createdItem = await Navigator.of(context)
+                                  .push<Map<String, dynamic>>(
+                                    MaterialPageRoute(
+                                      builder: (_) => AddVaultItemScreen(
+                                        customTypeDefinitions:
+                                            widget.customTypeDefinitions,
+                                        fixedType: option.type,
+                                        currentVaultSizeBytes:
+                                            widget.currentVaultSizeBytes,
+                                        maxVaultBytes: widget.maxVaultBytes,
+                                        maxDocumentBytes:
+                                            widget.maxDocumentBytes,
+                                        onLifecycleLockSuppressed:
+                                            widget.onLifecycleLockSuppressed,
+                                      ),
+                                    ),
+                                  );
+                              if (createdItem == null || !context.mounted) {
+                                return;
+                              }
+                              await _showSavedSuccessSheet(context);
+                              if (!context.mounted) return;
+                              Navigator.of(context).pop({
+                                'kind': 'item',
+                                'entry': createdItem,
+                              });
+                            },
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                );
-              },
+                ],
+              ),
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 
   Future<void> _showSavedSuccessSheet(BuildContext context) async {
+    final isWide = MediaQuery.sizeOf(context).width >= 720;
+    if (isWide) {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Dialog(
+          insetPadding: const EdgeInsets.all(32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: const _SavedSuccessContent(),
+          ),
+        ),
+      );
+      return;
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       isDismissible: false,
       enableDrag: false,
-      builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFDCFCE7),
-                  borderRadius: BorderRadius.circular(26),
-                ),
-                child: const Icon(
-                  Icons.check_circle_outline,
-                  color: Color(0xFF16A34A),
-                  size: 30,
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Entry saved',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Your new entry has been saved successfully.',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Done'),
-                ),
-              ),
-            ],
+      builder: (context) => const SafeArea(child: _SavedSuccessContent()),
+    );
+  }
+}
+
+class _SavedSuccessContent extends StatelessWidget {
+  const _SavedSuccessContent();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      key: const ValueKey('saved-success-content'),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: const Color(0xFFDCFCE7),
+              borderRadius: BorderRadius.circular(26),
+            ),
+            child: const Icon(
+              Icons.check_circle_outline,
+              color: Color(0xFF16A34A),
+              size: 30,
+            ),
           ),
-        ),
+          const SizedBox(height: 14),
+          Text(
+            AppStrings.entrySaved,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            AppStrings.entrySavedMessage,
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(AppStrings.done),
+            ),
+          ),
+        ],
       ),
     );
   }

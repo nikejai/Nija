@@ -13,6 +13,7 @@ import 'dart:math';
 import '../../../application/services/default_vault_service.dart';
 import '../../../application/services/vault_service.dart';
 import '../../../application/services/vault_merge_helper.dart';
+import '../../../app/theme/entry_typography.dart';
 import '../../../core/config/guardian_profiles.dart';
 import '../../../core/config/recovery_phrase_dictionary.dart';
 import '../../../core/config/recovery_phrase_generator.dart';
@@ -22,6 +23,8 @@ import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/biometric_auth_service.dart';
 import '../../../core/security/biometric_credential_store.dart';
 import '../../../core/security/biometric_enrollment_store.dart';
+import '../../../core/security/pin_credential_store.dart';
+import '../../../core/security/web_page_lifecycle.dart';
 import '../../../domain/models/vault_reference.dart';
 import '../../../domain/models/vault_payload.dart';
 import '../../../domain/models/vault_transfer_result.dart';
@@ -32,20 +35,48 @@ import '../../../infrastructure/adapters/secret_share_portability_base.dart';
 import '../../../infrastructure/adapters/secret_share_model.dart';
 import '../../../infrastructure/adapters/secret_intent_bridge.dart';
 import '../../../infrastructure/adapters/secure_crypto_adapter.dart';
+import '../../../infrastructure/adapters/google_drive_vault_portability.dart';
 import '../../../infrastructure/adapters/vault_portability.dart';
 import '../../../infrastructure/adapters/vault_portability_base.dart';
 import '../../../infrastructure/adapters/vault_portability_model.dart';
 import '../../../infrastructure/adapters/vault_reference_cache.dart';
 import '../../../infrastructure/adapters/web_vault_storage_adapter.dart';
+import '../../vault/application/vault_home_demo_data.dart';
 import '../../vault/presentation/vault_app_shell.dart';
+import '../../vault/presentation/widgets/google_drive_web_sign_in_dialog.dart';
+import '../../vault/presentation/widgets/web_biometric_dialog.dart';
+import 'first_install_walkthrough_screen.dart';
 import 'onboarding_scaffold.dart';
 import 'welcome_screen.dart';
 
-enum OnboardingStep { welcome, setup, recovery, created, unlock, app }
+enum OnboardingStep {
+  walkthrough,
+  welcome,
+  selectVault,
+  setup,
+  recovery,
+  created,
+  unlock,
+  app,
+}
 
 enum _CloudMergeOutcome { noMergeNeeded, merged, cancelled }
 
 enum _VaultPickerAction { importFromDevice, importFromCloud }
+
+enum _VaultSelectionMode { known, cloudBackup }
+
+class _ImportVaultCredentialChoice {
+  const _ImportVaultCredentialChoice.password(this.password)
+    : recoverWithPhrase = false;
+
+  const _ImportVaultCredentialChoice.recoverWithPhrase()
+    : password = '',
+      recoverWithPhrase = true;
+
+  final String password;
+  final bool recoverWithPhrase;
+}
 
 class OnboardingFlow extends StatefulWidget {
   const OnboardingFlow({
@@ -62,6 +93,7 @@ class OnboardingFlow extends StatefulWidget {
     this.biometricAuthService,
     this.biometricCredentialStore,
     this.biometricEnrollmentStore,
+    this.firstInstallWalkthroughCompletedOverride,
   });
 
   final String languageMode;
@@ -76,6 +108,7 @@ class OnboardingFlow extends StatefulWidget {
   final BiometricAuthService? biometricAuthService;
   final BiometricCredentialStore? biometricCredentialStore;
   final BiometricEnrollmentStore? biometricEnrollmentStore;
+  final bool? firstInstallWalkthroughCompletedOverride;
 
   @override
   State<OnboardingFlow> createState() => _OnboardingFlowState();
@@ -86,21 +119,43 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   static const _vaultOpTimeout = Duration(seconds: 20);
   static const _unlockBackExitWindow = Duration(seconds: 2);
   static const _prefsDeviceIdKey = 'nija_device_id_v1';
+  static const _prefsFirstInstallWalkthroughCompletedKey =
+      'nija_first_install_walkthrough_completed_v1';
   static const _defaultVaultName = 'Nija Vault';
-  OnboardingStep _step = OnboardingStep.welcome;
+  OnboardingStep _step = OnboardingStep.walkthrough;
+  OnboardingStep _selectVaultReturnStep = OnboardingStep.welcome;
+  _VaultSelectionMode _vaultSelectionMode = _VaultSelectionMode.known;
+  List<VaultReference> _cloudVaultReferences = <VaultReference>[];
+  Map<String, CloudVaultBackupFile> _cloudBackupsByStorageId =
+      <String, CloudVaultBackupFile>{};
+  String _cloudVaultSelectionHeading = AppStrings.importVaultFromCloud;
+  Completer<CloudVaultBackupFile?>? _cloudBackupPickerCompleter;
+  OnboardingStep? _cloudPickerOuterReturnStep;
+  bool _stepTransitionForward = true;
   GuardianProfile _selectedGuardian = GuardianProfiles.owl;
+  GuardianProfile _activeGuardianProfile = GuardianProfiles.owl;
   final _passwordController = TextEditingController();
   final _vaultNameController = TextEditingController();
   List<String> _recoveryWords = RecoveryPhraseGenerator.generate();
   bool _biometricEnabled = false;
   bool _biometricPromptShown = false;
+  bool _biometricAvailable = false;
+  bool _pinEnabled = false;
+  String _biometricUnlockLabel = AppStrings.useBiometricUnlock;
+  IconData _biometricUnlockIcon = Icons.fingerprint;
+  Completer<_ImportVaultCredentialChoice?>? _importCredentialCompleter;
+  bool _importCredentialAllowRecovery = true;
+  Completer<bool>? _actionUnlockCompleter;
+  String? _sessionMasterPassword;
   bool _isBusy = false;
   double _busyProgress = 0;
   String _busyMessage = '';
   bool _vaultCreatedInSession = false;
+  bool _isExploreDemoSession = false;
   List<Map<String, dynamic>> _vaultItems = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _vaultNotes = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _customTypeDefinitions = <Map<String, dynamic>>[];
+  Future<void> _persistVaultChain = Future<void>.value();
   Timer? _busyWatchdog;
   Timer? _backgroundLockTimer;
   Timer? _inactivityLockTimer;
@@ -118,6 +173,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   late final BiometricAuthService _biometricAuthService;
   late final BiometricCredentialStore _biometricCredentialStore;
   late final BiometricEnrollmentStore _biometricEnrollmentStore;
+  final _pinCredentialStore = PinCredentialStore();
   List<VaultReference> _knownVaults = const <VaultReference>[];
   bool _enableVaultReferenceCache = true;
   bool _storageReady = false;
@@ -125,13 +181,18 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   late String _vaultFilePath;
   String _activeVaultName = 'vault.nija';
   int _activeVaultSizeBytes = 0;
+  int _activeVaultRevision = 0;
+  String _activeVaultVersionId = '';
+  String _activeVaultUpdatedAt = '';
   String _draftVaultId = '';
   final Random _idRandom = Random.secure();
   String _deviceId = '';
   String _deviceLabel = 'unknown';
   DateTime? _lastUnlockBackPressAt;
+  SharedTextIntent? _pendingSharedTextIntent;
   bool _setupOpenedFromUnlock = false;
   bool _consumingPendingSecretIntent = false;
+  bool _consumingPendingSharedTextIntent = false;
   bool _handlingRootPop = false;
 
   @override
@@ -144,8 +205,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     _biometricEnrollmentStore =
         widget.biometricEnrollmentStore ?? BiometricEnrollmentStore();
     WidgetsBinding.instance.addObserver(this);
+    if (kIsWeb) {
+      registerWebPageHiddenListener(_handleWebPageHidden);
+    }
     _prepareVaultDraft();
     unawaited(_initializeDeviceMetadata());
+    _initializeFirstInstallWalkthroughState();
     if (widget.vaultService != null) {
       _enableVaultReferenceCache = false;
       _vaultService = widget.vaultService!;
@@ -153,6 +218,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _activeVaultName = _displayNameForVault(_vaultFilePath);
       _storageReady = true;
       unawaited(_consumePendingSecretIntent());
+      unawaited(_consumePendingSharedTextIntent());
       return;
     }
 
@@ -164,8 +230,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _vaultFilePath = widget.vaultFilePath ?? 'web_vault.nija';
       _activeVaultName = _displayNameForVault(_vaultFilePath);
       _storageReady = true;
-      unawaited(_restoreKnownVaultSession());
+      _scheduleKnownVaultDiscovery();
       unawaited(_consumePendingSecretIntent());
+      unawaited(_consumePendingSharedTextIntent());
       return;
     }
 
@@ -176,6 +243,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   @override
   void dispose() {
+    if (kIsWeb) {
+      registerWebPageHiddenListener(null);
+    }
     WidgetsBinding.instance.removeObserver(this);
     _busyWatchdog?.cancel();
     _backgroundLockTimer?.cancel();
@@ -192,6 +262,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _backgroundLockTimer?.cancel();
       _scheduleInactivityLockIfNeeded();
       unawaited(_consumePendingSecretIntent());
+      unawaited(_consumePendingSharedTextIntent());
       return;
     }
     if (state == AppLifecycleState.detached && _step == OnboardingStep.app) {
@@ -209,6 +280,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   @override
   Widget build(BuildContext context) {
     final screen = switch (_step) {
+      OnboardingStep.walkthrough => FirstInstallWalkthroughScreen(
+        onSkip: _completeFirstInstallWalkthrough,
+        onFinish: _completeFirstInstallWalkthrough,
+      ),
       OnboardingStep.welcome => WelcomeScreen(
         onCreateVault: () {
           _prepareVaultDraft();
@@ -217,7 +292,18 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             _step = OnboardingStep.setup;
           });
         },
-        onOpenExistingVault: _openExistingVault,
+        onSelectKnownVault: _selectKnownVault,
+        onOpenVaultFile: () =>
+            unawaited(_importVaultFromLocal(continueToUnlock: true)),
+        onImportVault: () =>
+            unawaited(_importVaultFromLocal(continueToUnlock: true)),
+        onImportVaultFromCloud: () =>
+            unawaited(_importVaultFromCloud(continueToUnlock: true)),
+        onExploreDemo: _enterExploreDemoSession,
+        recentVaults: _knownVaults,
+        onRecentVaultSelected: _handleKnownVaultSelected,
+        themeMode: widget.themeMode,
+        onThemeModeChanged: widget.onThemeModeChanged,
       ),
       OnboardingStep.setup => SetupScreen(
         selectedGuardian: _selectedGuardian,
@@ -233,12 +319,60 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onNext: () => setState(() => _step = OnboardingStep.created),
       ),
       OnboardingStep.created => VaultCreatedScreen(
-        onContinue: () => setState(() => _step = OnboardingStep.unlock),
+        onContinue: () => unawaited(_presentUnlockStep()),
+      ),
+      OnboardingStep.selectVault => KnownVaultSelectionScreen(
+        knownVaults: _vaultSelectionMode == _VaultSelectionMode.known
+            ? _knownVaults
+            : _cloudVaultReferences,
+        themeMode: widget.themeMode,
+        onThemeModeChanged: widget.onThemeModeChanged,
+        onBack: _goBackFromSelectVault,
+        onVaultSelected: _vaultSelectionMode == _VaultSelectionMode.known
+            ? _handleKnownVaultSelected
+            : _handleCloudVaultSelected,
+        onImportFromDevice: _vaultSelectionMode == _VaultSelectionMode.known
+            ? () async {
+                final picked = await _pickVaultFileForUnlock();
+                if (picked == null || !mounted) return;
+                _handleKnownVaultSelected(picked);
+              }
+            : null,
+        onImportFromCloud: _vaultSelectionMode == _VaultSelectionMode.known
+            ? () => _importVaultFromCloud(
+                continueToUnlock: true,
+                returnOnCancel: _selectVaultReturnStep,
+              )
+            : null,
+        sectionLabel: _vaultSelectionMode == _VaultSelectionMode.known
+            ? null
+            : AppStrings.cloudVaultsSection,
+        heading: _vaultSelectionMode == _VaultSelectionMode.known
+            ? null
+            : _cloudVaultSelectionHeading,
+        description: _vaultSelectionMode == _VaultSelectionMode.known
+            ? null
+            : AppStrings.cloudVaultsDescription,
+        showImportFromDevice: _vaultSelectionMode == _VaultSelectionMode.known,
+        useCloudBackupCards:
+            _vaultSelectionMode == _VaultSelectionMode.cloudBackup,
       ),
       OnboardingStep.unlock => UnlockScreen(
+        vaultName: _activeVaultName,
+        guardianProfile: _activeGuardianProfile,
         passwordController: _passwordController,
+        pinEnabled: _pinEnabled,
         biometricEnabled: _biometricEnabled,
+        biometricUnlockLabel: _biometricUnlockLabel,
+        biometricUnlockIcon: _biometricUnlockIcon,
+        showRecoveryAction:
+            _importCredentialCompleter == null ||
+            _importCredentialAllowRecovery,
+        themeMode: widget.themeMode,
+        onThemeModeChanged: widget.onThemeModeChanged,
+        onBack: _goBackFromUnlock,
         onUnlock: _unlockWithPassword,
+        onPinUnlock: _unlockWithPin,
         onBiometricUnlock: _unlockWithBiometric,
         onRecover: _unlockWithRecoveryPhrase,
         onSelectDifferentVault: _openExistingVault,
@@ -248,6 +382,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       OnboardingStep.app => VaultAppShell(
         activeVaultName: _activeVaultName,
         vaultSizeBytes: _activeVaultSizeBytes,
+        activeVaultRevision: _activeVaultRevision,
+        activeVaultVersionId: _activeVaultVersionId,
+        activeVaultUpdatedAt: _activeVaultUpdatedAt,
         recoveryWords: _recoveryWords,
         initialItems: _vaultItems,
         initialNotes: _vaultNotes,
@@ -258,27 +395,108 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onThemeModeChanged: widget.onThemeModeChanged,
         autoLockSeconds: widget.autoLockSeconds,
         onAutoLockSecondsChanged: widget.onAutoLockSecondsChanged,
-        biometricEnabled: _biometricEnabled,
-        onBiometricChanged: _onBiometricPreferenceChanged,
-        onPersistVaultData: _persistVaultData,
-        onPersistVaultDocument: _persistVaultDocument,
-        onPersistVaultDocumentStream: _persistVaultDocumentStream,
-        onReadVaultDocument: _readVaultDocument,
+        biometricEnabled: _isExploreDemoSession ? false : _biometricEnabled,
+        biometricAvailable: _isExploreDemoSession ? false : _biometricAvailable,
+        pinEnabled: _isExploreDemoSession ? false : _pinEnabled,
+        onPinChanged: _isExploreDemoSession ? (_) {} : _onPinPreferenceChanged,
+        onBiometricChanged: _isExploreDemoSession
+            ? (_) {}
+            : _onBiometricPreferenceChanged,
+        onPersistVaultData: _isExploreDemoSession
+            ? ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {}
+            : _persistVaultData,
+        onPersistVaultDocument: _isExploreDemoSession
+            ? null
+            : _persistVaultDocument,
+        onPersistVaultDocumentStream: _isExploreDemoSession
+            ? null
+            : _persistVaultDocumentStream,
+        onReadVaultDocument: _isExploreDemoSession ? null : _readVaultDocument,
         onLifecycleLockSuppressed: _setLifecycleLockSuppressed,
-        onRotateMasterPassword: _rotateMasterPassword,
-        onRotateRecoveryPhrase: _rotateRecoveryPhrase,
-        onExportVault: () =>
-            _exportCurrentVaultToLocal(setAsActiveLocation: false),
-        onImportVault: () => _importVaultFromLocal(continueToUnlock: false),
-        onBackupToCloud: _backupCurrentVaultToCloud,
-        onRestoreFromCloud: _restoreCurrentVaultFromCloud,
-        onReadCloudBackupAccount: _readCloudBackupAccountLabel,
-        onChangeCloudBackupAccount: _changeCloudBackupAccount,
-        onRenameVault: _renameActiveVault,
-        onReadVaultInternals: kDebugMode ? _readVaultInternals : null,
+        onRotateMasterPassword: _isExploreDemoSession
+            ? ({required currentPassword, required newPassword}) async {}
+            : _rotateMasterPassword,
+        onRotateRecoveryPhrase: _isExploreDemoSession
+            ? ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {}
+            : _rotateRecoveryPhrase,
+        onExportVault: _isExploreDemoSession
+            ? () async {}
+            : () => _exportCurrentVaultToLocal(setAsActiveLocation: false),
+        onImportVault: _isExploreDemoSession
+            ? () async {}
+            : () => _importVaultFromLocal(continueToUnlock: false),
+        onBackupToCloud: _isExploreDemoSession
+            ? () async {}
+            : _backupCurrentVaultToCloud,
+        onRestoreFromCloud: _isExploreDemoSession
+            ? () async {}
+            : _restoreCurrentVaultFromCloud,
+        onReadCloudBackupAccount: _isExploreDemoSession
+            ? () async => null
+            : _readCloudBackupAccountLabel,
+        onChangeCloudBackupAccount: _isExploreDemoSession
+            ? () async => false
+            : _changeCloudBackupAccount,
+        onRenameVault: _isExploreDemoSession ? null : _renameActiveVault,
+        onReadVaultInternals: kDebugMode && !_isExploreDemoSession
+            ? _readVaultInternals
+            : null,
         onLockNow: _lockVaultSession,
+        onSwitchVault: _isExploreDemoSession
+            ? _exitExploreDemoSession
+            : _switchVaultFromApp,
+        isExploreDemoSession: _isExploreDemoSession,
+        onExitExploreDemo: _exitExploreDemoSession,
+        cloudBackupFeatureAvailableOverride: _isExploreDemoSession
+            ? false
+            : null,
+        debugInternalsFeatureAvailableOverride: _isExploreDemoSession
+            ? false
+            : null,
       ),
     };
+
+    final usesEntryFlowTransition =
+        _step == OnboardingStep.welcome ||
+        _step == OnboardingStep.selectVault ||
+        _step == OnboardingStep.unlock;
+    final body = usesEntryFlowTransition
+        ? ClipRect(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) {
+                final curved = CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOutCubic,
+                  reverseCurve: Curves.easeInCubic,
+                );
+                final begin = _stepTransitionForward
+                    ? const Offset(1, 0)
+                    : const Offset(-0.22, 0);
+                return SlideTransition(
+                  position: Tween<Offset>(
+                    begin: begin,
+                    end: Offset.zero,
+                  ).animate(curved),
+                  child: child,
+                );
+              },
+              child: KeyedSubtree(
+                key: ValueKey('$_step-${_vaultSelectionMode.name}'),
+                child: screen,
+              ),
+            ),
+          )
+        : screen;
 
     return PopScope(
       canPop: false,
@@ -288,12 +506,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       },
       child: Listener(
         behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) => _handleUserActivity(),
-        onPointerMove: (_) => _handleUserActivity(),
+        onPointerDown: _step == OnboardingStep.app && !kIsWeb
+            ? (_) => _scheduleUserActivityAfterFrame()
+            : null,
         child: Stack(
           children: [
-            screen,
-            if (_isBusy)
+            body,
+            if (_isBusy && !_isExploreDemoSession)
               Positioned.fill(
                 child: Container(
                   color: Colors.black.withValues(alpha: 0.25),
@@ -348,9 +567,22 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<bool> _handleRootBackPress() async {
+    if (_isBusy) {
+      if (!mounted) return false;
+      final messenger = ScaffoldMessenger.of(context)..removeCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Please wait for the operation to finish.'),
+        ),
+      );
+      return false;
+    }
     if (_step == OnboardingStep.app) {
       _lockVaultSession();
       return false;
+    }
+    if (_step == OnboardingStep.walkthrough) {
+      return true;
     }
     if (_step == OnboardingStep.setup) {
       if (!mounted) return false;
@@ -364,12 +596,17 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
     if (_step == OnboardingStep.recovery) {
       if (!mounted) return false;
-      setState(() => _step = OnboardingStep.setup);
+      _setOnboardingStep(OnboardingStep.setup, forward: false);
       return false;
     }
     if (_step == OnboardingStep.created) {
       if (!mounted) return false;
-      setState(() => _step = OnboardingStep.recovery);
+      _setOnboardingStep(OnboardingStep.recovery, forward: false);
+      return false;
+    }
+    if (_step == OnboardingStep.selectVault) {
+      if (!mounted) return false;
+      _goBackFromSelectVault();
       return false;
     }
     if (_step != OnboardingStep.unlock) return true;
@@ -401,26 +638,168 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   void _handleUnlock() {
-    setState(() => _step = OnboardingStep.app);
+    _setOnboardingStep(OnboardingStep.app, forward: true);
     _scheduleInactivityLockIfNeeded();
     unawaited(_markVaultAsOpened(_vaultFilePath));
+    unawaited(_importPendingSharedTextIfReady());
 
     unawaited(_maybePromptToEnableBiometrics());
+  }
+
+  void _setOnboardingStep(OnboardingStep step, {required bool forward}) {
+    setState(() {
+      _stepTransitionForward = forward;
+      _step = step;
+    });
+    if (step == OnboardingStep.welcome) {
+      unawaited(_syncKnownVaults());
+    }
+  }
+
+  Future<void> _presentSelectVaultStep({
+    required OnboardingStep returnOnCancel,
+  }) async {
+    await _syncKnownVaults();
+    if (!mounted) return;
+    _selectVaultReturnStep = returnOnCancel;
+    _setOnboardingStep(OnboardingStep.selectVault, forward: true);
+  }
+
+  void _goBackFromSelectVault() {
+    if (_vaultSelectionMode == _VaultSelectionMode.cloudBackup) {
+      _cloudBackupPickerCompleter?.complete(null);
+      _cloudBackupPickerCompleter = null;
+    }
+    setState(() {
+      if (_vaultSelectionMode == _VaultSelectionMode.cloudBackup) {
+        _clearCloudVaultSelectionState();
+        if (_cloudPickerOuterReturnStep != null) {
+          _step = OnboardingStep.selectVault;
+          _cloudPickerOuterReturnStep = null;
+        } else {
+          _step = _selectVaultReturnStep;
+        }
+      } else {
+        _step = _selectVaultReturnStep;
+      }
+      _stepTransitionForward = false;
+    });
+  }
+
+  void _clearCloudVaultSelectionState() {
+    _vaultSelectionMode = _VaultSelectionMode.known;
+    _cloudVaultReferences = <VaultReference>[];
+    _cloudBackupsByStorageId = <String, CloudVaultBackupFile>{};
+    _cloudVaultSelectionHeading = AppStrings.importVaultFromCloud;
+  }
+
+  VaultReference _vaultReferenceForCloudBackup(CloudVaultBackupFile backup) {
+    final updatedAt = cloudBackupEffectiveUpdatedAt(backup);
+    return VaultReference(
+      id: backup.storageId,
+      label: cloudBackupDisplayTitle(backup),
+      addedAtEpochMs: updatedAt?.millisecondsSinceEpoch ?? 0,
+      lastOpenedAtEpochMs: updatedAt?.millisecondsSinceEpoch ?? 0,
+      sourceDescription: AppStrings.googleDriveBackup,
+    );
+  }
+
+  void _handleCloudVaultSelected(VaultReference selected) {
+    final backup = _cloudBackupsByStorageId[selected.id];
+    final completer = _cloudBackupPickerCompleter;
+    setState(() {
+      _cloudBackupPickerCompleter = null;
+      _cloudPickerOuterReturnStep = null;
+      _clearCloudVaultSelectionState();
+      if (completer == null) {
+        _stepTransitionForward = false;
+        _step = _selectVaultReturnStep;
+      }
+    });
+    completer?.complete(backup);
+  }
+
+  void _handleKnownVaultSelected(VaultReference selected) {
+    unawaited(_openKnownVault(selected));
+  }
+
+  Future<void> _openKnownVault(VaultReference selected) async {
+    _clearSensitiveSessionState();
+    _clearImportCredentialUi();
+    final storagePath = await _resolveVaultStoragePath(selected.id);
+    if (!mounted) return;
+    setState(() {
+      _vaultFilePath = storagePath;
+      _vaultCreatedInSession = false;
+    });
+    await _presentUnlockStep(forward: true);
+  }
+
+  void _initializeFirstInstallWalkthroughState() {
+    final override = widget.firstInstallWalkthroughCompletedOverride;
+    if (override != null) {
+      _step = override ? OnboardingStep.welcome : OnboardingStep.walkthrough;
+      return;
+    }
+    if (widget.vaultService != null) {
+      _step = OnboardingStep.welcome;
+      return;
+    }
+    if (kIsWeb) {
+      _step = OnboardingStep.welcome;
+      return;
+    }
+    unawaited(_restoreFirstInstallWalkthroughState());
+  }
+
+  Future<void> _restoreFirstInstallWalkthroughState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final completed =
+          prefs.getBool(_prefsFirstInstallWalkthroughCompletedKey) ?? false;
+      if (!mounted) return;
+      setState(() {
+        _step = completed ? OnboardingStep.welcome : OnboardingStep.walkthrough;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _step = OnboardingStep.walkthrough);
+    }
+  }
+
+  Future<void> _completeFirstInstallWalkthrough() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsFirstInstallWalkthroughCompletedKey, true);
+    } catch (_) {
+      // Completion should still move the user forward if preferences fail.
+    }
+    if (!mounted) return;
+    setState(() => _step = OnboardingStep.welcome);
+    unawaited(_syncKnownVaults());
   }
 
   Future<void> _maybePromptToEnableBiometrics() async {
     if (_biometricEnabled) return;
     final vaultId = _vaultFilePath;
+    final hasPinForVault = await _pinCredentialStore.hasPin(vaultId: vaultId);
     final enrolledForVault = await _biometricEnrollmentStore.isEnrolledForVault(
       vaultId,
     );
-    if (enrolledForVault) return;
-    final hasSavedCredential =
-        (await _biometricCredentialStore.readMasterPassword(
-          vaultId: vaultId,
-        ))?.isNotEmpty ==
-        true;
-    if (hasSavedCredential) {
+    if (enrolledForVault && hasPinForVault) return;
+    if (enrolledForVault && !hasPinForVault) {
+      await _biometricCredentialStore.removeMasterPassword(vaultId: vaultId);
+      await _biometricEnrollmentStore.setEnrolledForVault(
+        vaultId: vaultId,
+        enrolled: false,
+      );
+    }
+    final hasSavedCredential = await _biometricCredentialStore
+        .hasStoredCredential(vaultId: vaultId);
+    if (hasSavedCredential && !hasPinForVault) {
+      await _biometricCredentialStore.removeMasterPassword(vaultId: vaultId);
+    }
+    if (hasSavedCredential && hasPinForVault) {
       await _biometricEnrollmentStore.setEnrolledForVault(
         vaultId: vaultId,
         enrolled: true,
@@ -434,37 +813,78 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (_biometricPromptShown) return;
     _biometricPromptShown = true;
 
-    final canUseBiometrics = await _biometricAuthService.canUseBiometrics();
-    if (!canUseBiometrics) return;
-
     if (!mounted || _step != OnboardingStep.app || _vaultFilePath != vaultId) {
       return;
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || _vaultFilePath != vaultId) return;
-      final shouldEnable = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(AppStrings.enableBiometricPromptTitle),
-          content: Text(AppStrings.enableBiometricPromptMessage),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(AppStrings.notNow),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text(AppStrings.enable),
-            ),
-          ],
-        ),
-      );
+      String? pin;
+      if (kIsWeb) {
+        pin = await _ensurePinForCurrentVault();
+        if (pin == null || !mounted || _vaultFilePath != vaultId) return;
+      }
+      final canUseBiometrics = await _biometricAuthService.canUseBiometrics();
+      if (!canUseBiometrics) {
+        await _refreshBiometricStateForActiveVault();
+        return;
+      }
+      if (!mounted || _vaultFilePath != vaultId) return;
+      final shouldEnable = kIsWeb
+          ? await showWebBiometricEnableDialog(
+              context,
+              onConfirm: () async {
+                await _biometricCredentialStore.saveMasterPassword(
+                  vaultId: vaultId,
+                  password: pin!,
+                  displayName: _activeVaultName,
+                  newEnrollment: true,
+                );
+              },
+            )
+          : await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text(AppStrings.enableBiometricPromptTitle),
+                content: Text(AppStrings.enableBiometricPromptMessage),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: Text(AppStrings.notNow),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    child: Text(AppStrings.enable),
+                  ),
+                ],
+              ),
+            );
 
       if (shouldEnable == true && mounted && _vaultFilePath == vaultId) {
-        await _enableBiometricForCurrentVault();
+        if (kIsWeb) {
+          await _biometricEnrollmentStore.setEnrolledForVault(
+            vaultId: vaultId,
+            enrolled: true,
+          );
+          await _refreshBiometricStateForActiveVault();
+          if (!mounted || _vaultFilePath != vaultId) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Biometric unlock enabled.')),
+          );
+        } else {
+          await _enableBiometricForCurrentVault();
+        }
       }
     });
+  }
+
+  void _handleWebPageHidden() {
+    if (!mounted ||
+        _step != OnboardingStep.app ||
+        _shouldSuppressLifecycleLock) {
+      return;
+    }
+    _lockVaultSession();
   }
 
   void _onBiometricPreferenceChanged(bool enabled) {
@@ -475,74 +895,136 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     unawaited(_confirmAndDisableBiometricForCurrentVault());
   }
 
+  void _onPinPreferenceChanged(bool _) {
+    unawaited(_setOrChangePinForCurrentVault());
+  }
+
+  Future<GuardianProfile> _resolveGuardianForVault(String filePath) async {
+    try {
+      final raw = await _vaultService.readRawVaultFile(filePath: filePath);
+      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final guardian = decoded['guardian'];
+      if (guardian is Map) {
+        final profileId = guardian['profile']?.toString() ?? '';
+        for (final candidate in GuardianProfiles.all) {
+          if (candidate.id == profileId) return candidate;
+        }
+      }
+    } catch (_) {
+      // Fall back to the last selected guardian profile.
+    }
+    return _selectedGuardian;
+  }
+
+  Future<void> _syncUnlockPresentation({String? vaultLabel}) async {
+    _activeVaultName = vaultLabel ?? await _resolveVaultLabel(_vaultFilePath);
+    _activeGuardianProfile = await _resolveGuardianForVault(_vaultFilePath);
+  }
+
+  Future<void> _presentUnlockStep({
+    String? vaultLabel,
+    bool forward = true,
+  }) async {
+    await _syncUnlockPresentation(vaultLabel: vaultLabel);
+    if (!mounted) return;
+    _setOnboardingStep(OnboardingStep.unlock, forward: forward);
+    await _refreshBiometricStateForActiveVault();
+  }
+
+  Future<void> _goBackFromUnlock() async {
+    if (!mounted) return;
+    _completeImportCredentialRequest(null);
+    _completeActionUnlockRequest(success: false);
+    _passwordController.clear();
+    await _syncKnownVaults();
+    if (!mounted) return;
+    _selectVaultReturnStep = OnboardingStep.welcome;
+    _setOnboardingStep(OnboardingStep.selectVault, forward: false);
+  }
+
+  void _completeImportCredentialRequest(_ImportVaultCredentialChoice? choice) {
+    final completer = _importCredentialCompleter;
+    _importCredentialCompleter = null;
+    _importCredentialAllowRecovery = true;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(choice);
+    }
+  }
+
+  void _completeActionUnlockRequest({required bool success}) {
+    final completer = _actionUnlockCompleter;
+    _actionUnlockCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(success);
+    }
+  }
+
   Future<void> _openExistingVault() async {
     if (!_storageReady) return;
     if (!mounted) return;
-    await _syncKnownVaults();
-    if (!mounted) return;
+    await _presentSelectVaultStep(returnOnCancel: OnboardingStep.unlock);
+  }
 
-    final selected = await showModalBottomSheet<Object>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 8,
+  Future<void> _selectKnownVault() async {
+    if (!_storageReady || !mounted) return;
+    await _presentSelectVaultStep(returnOnCancel: OnboardingStep.welcome);
+  }
+
+  Future<Object?> _showVaultPicker() {
+    final useDialog = MediaQuery.sizeOf(context).width >= 720;
+    final picker = _VaultPickerSurface(knownVaults: _knownVaults);
+    if (useDialog) {
+      return showDialog<Object>(
+        context: context,
+        builder: (context) => Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 32,
+            vertical: 32,
           ),
-          children: [
-            ListTile(
-              title: Text(
-                AppStrings.selectVaultToOpen,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-            if (_knownVaults.isEmpty)
-              ListTile(
-                title: Text(AppStrings.noSavedVaultLocations),
-                subtitle: Text(AppStrings.importVaultToContinue),
-              )
-            else
-              ..._knownVaults.map(
-                (entry) => ListTile(
-                  leading: const Icon(Icons.lock_outline),
-                  title: Text(entry.label),
-                  subtitle: Text(entry.id),
-                  onTap: () => Navigator.of(context).pop(entry),
-                ),
-              ),
-            ListTile(
-              leading: const Icon(Icons.file_open_outlined),
-              title: Text(AppStrings.importVaultFromDevice),
-              onTap: () => Navigator.of(
-                context,
-              ).pop(_VaultPickerAction.importFromDevice),
-            ),
-            ListTile(
-              leading: const Icon(Icons.cloud_download_outlined),
-              title: const Text('Import vault from cloud'),
-              onTap: () =>
-                  Navigator.of(context).pop(_VaultPickerAction.importFromCloud),
-            ),
-          ],
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: picker,
+          ),
         ),
-      ),
+      );
+    }
+    return showModalBottomSheet<Object>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(child: picker),
     );
+  }
 
-    if (!mounted) return;
-    if (selected is VaultReference) {
-      setState(() {
-        _vaultFilePath = selected.id;
-        _activeVaultName = selected.label;
-        _step = OnboardingStep.unlock;
-      });
-      await _refreshBiometricStateForActiveVault();
-      return;
-    }
-    if (selected == _VaultPickerAction.importFromDevice) {
-      await _importVaultFromLocal(continueToUnlock: true);
-    }
-    if (selected == _VaultPickerAction.importFromCloud) {
-      await _importVaultFromCloud(continueToUnlock: true);
+  Future<VaultReference?> _pickVaultFileForUnlock() async {
+    try {
+      final imported = await _vaultPortability.importVaultFromLocal();
+      if (imported == null) return null;
+      final importedPath = await _localPathForImportedVault(imported);
+      await _vaultService.writeRawVaultFile(
+        filePath: importedPath,
+        rawContent: imported.content,
+      );
+      final label = _humanImportLabel(imported);
+      await _rememberVaultReference(
+        importedPath,
+        label: label,
+        sourceDescription: _sourceDescriptionForImportedVault(imported),
+      );
+      if (!mounted) return null;
+      return VaultReference(
+        id: importedPath,
+        label: label,
+        addedAtEpochMs: DateTime.now().millisecondsSinceEpoch,
+        sourceDescription: _sourceDescriptionForImportedVault(imported),
+      );
+    } catch (error, stackTrace) {
+      if (_isFilePickerCancellation(error)) return null;
+      _logOperationError('pickVaultFileForUnlock', error, stackTrace);
+      if (!mounted) return null;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.vaultImportFailed)));
+      return null;
     }
   }
 
@@ -583,7 +1065,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       if (!mounted) return;
       _activeVaultName = vaultName;
       await _resetBiometricForVault(_vaultFilePath);
-      await _rememberVaultReference(_vaultFilePath, label: vaultName);
+      await _rememberVaultReference(
+        _vaultFilePath,
+        label: vaultName,
+        sourceDescription: _defaultVaultSourceDescription(),
+      );
       _busyWatchdog?.cancel();
       setState(() {
         _isBusy = false;
@@ -610,25 +1096,56 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<void> _unlockWithPassword() async {
     if (!_storageReady) return;
     if (_isBusy) return;
+
+    final importCompleter = _importCredentialCompleter;
+    if (importCompleter != null) {
+      final password = _passwordController.text.trim();
+      if (password.isEmpty) return;
+      _importCredentialCompleter = null;
+      if (!importCompleter.isCompleted) {
+        importCompleter.complete(
+          _ImportVaultCredentialChoice.password(password),
+        );
+      }
+      return;
+    }
+
     _startBusy('Starting vault unlock...');
     try {
+      final vaultPath = await _resolveVaultStoragePath(_vaultFilePath);
+      if (vaultPath != _vaultFilePath && mounted) {
+        setState(() => _vaultFilePath = vaultPath);
+      }
       await _vaultService
           .unlockVault(
-            filePath: _vaultFilePath,
+            filePath: vaultPath,
             password: _passwordController.text,
             onProgress: _updateBusy,
           )
           .timeout(_vaultOpTimeout);
       await _loadVaultData(_passwordController.text);
-      _activeVaultName = await _resolveVaultLabel(_vaultFilePath);
+      _activeVaultName = await _resolveVaultLabel(vaultPath);
       await _refreshVaultSize();
-      if (_biometricEnabled) {
-        await _biometricCredentialStore.saveMasterPassword(
-          vaultId: _vaultFilePath,
-          password: _passwordController.text,
-        );
+      _sessionMasterPassword = _passwordController.text;
+      if (_biometricEnabled && !kIsWeb) {
+        try {
+          await _biometricCredentialStore.saveMasterPassword(
+            vaultId: _vaultFilePath,
+            password: _passwordController.text,
+            displayName: _activeVaultName,
+          );
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(AppStrings.webBiometricEnableFailed)),
+            );
+          }
+        }
       }
       if (!mounted) return;
+      if (_actionUnlockCompleter != null) {
+        _completeActionUnlockRequest(success: true);
+      }
       _handleUnlock();
     } on TimeoutException {
       if (!mounted) return;
@@ -657,10 +1174,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<void> _unlockWithBiometric() async {
     if (!_biometricEnabled || _isBusy || !_storageReady) return;
     final vaultId = _vaultFilePath;
-    final savedPassword = await _biometricCredentialStore.readMasterPassword(
+    final hasCredential = await _biometricCredentialStore.hasStoredCredential(
       vaultId: vaultId,
     );
-    if (savedPassword == null || savedPassword.isEmpty) {
+    if (!hasCredential) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -671,9 +1188,58 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       return;
     }
-    final authenticated = await _biometricAuthService.authenticateForUnlock();
+    final authenticated = await _biometricAuthService.authenticateForUnlock(
+      localizedReason: AppStrings.biometricAuthenticateReason,
+      vaultId: vaultId,
+    );
     if (!authenticated || !mounted || _vaultFilePath != vaultId) return;
-    _passwordController.text = savedPassword;
+    final savedPassword = await _biometricCredentialStore.readMasterPassword(
+      vaultId: vaultId,
+      webAuthCompleted: true,
+    );
+    if (savedPassword == null || savedPassword.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.webBiometricUnlockFailed)),
+      );
+      return;
+    }
+    if (kIsWeb) {
+      final password = await _pinCredentialStore.readMasterPassword(
+        vaultId: vaultId,
+        pin: savedPassword,
+      );
+      if (password == null || password.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppStrings.webBiometricUnlockFailed)),
+        );
+        return;
+      }
+      _passwordController.text = password;
+    } else {
+      _passwordController.text = savedPassword;
+    }
+    await _unlockWithPassword();
+  }
+
+  Future<void> _unlockWithPin() async {
+    if (!_pinEnabled || _isBusy || !_storageReady) return;
+    final vaultId = _vaultFilePath;
+    final pin = await _promptForPin(title: AppStrings.appPinUnlockTitle);
+    if (pin == null || !mounted || _vaultFilePath != vaultId) return;
+    final password = await _pinCredentialStore.readMasterPassword(
+      vaultId: vaultId,
+      pin: pin,
+    );
+    if (password == null || password.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.appPinInvalidMessage)));
+      return;
+    }
+    _passwordController.text = password;
     await _unlockWithPassword();
   }
 
@@ -694,6 +1260,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _consumePendingSecretIntent() async {
+    if (_isExploreDemoSession) return;
     if (_consumingPendingSecretIntent) return;
     _consumingPendingSecretIntent = true;
     try {
@@ -703,6 +1270,116 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     } finally {
       _consumingPendingSecretIntent = false;
     }
+  }
+
+  Future<void> _consumePendingSharedTextIntent() async {
+    if (_isExploreDemoSession) return;
+    if (_consumingPendingSharedTextIntent) return;
+    _consumingPendingSharedTextIntent = true;
+    try {
+      final shared = await _secretIntentBridge.consumePendingSharedText();
+      if (shared == null || !mounted) return;
+      _pendingSharedTextIntent = shared;
+      if (_step == OnboardingStep.app) {
+        await _importPendingSharedTextIfReady();
+      } else {
+        await _routeToVaultForPendingSharedText();
+      }
+    } finally {
+      _consumingPendingSharedTextIntent = false;
+    }
+  }
+
+  Future<void> _routeToVaultForPendingSharedText() async {
+    if (!mounted || _pendingSharedTextIntent == null || !_storageReady) return;
+    if (_step != OnboardingStep.welcome) return;
+    final hasDefaultVault = await _vaultService.vaultExists(
+      filePath: _vaultFilePath,
+    );
+    if (!mounted || _pendingSharedTextIntent == null) return;
+    if (hasDefaultVault) {
+      await _presentUnlockStep();
+      return;
+    }
+    if (_knownVaults.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _pendingSharedTextIntent == null) return;
+        unawaited(_openExistingVault());
+      });
+    }
+  }
+
+  Future<void> _importPendingSharedTextIfReady() async {
+    if (_isExploreDemoSession) return;
+    final shared = _pendingSharedTextIntent;
+    if (shared == null || !mounted || _step != OnboardingStep.app) return;
+    _pendingSharedTextIntent = null;
+    final note = _noteFromSharedText(shared);
+    final nextNotes = <Map<String, dynamic>>[
+      note,
+      ..._vaultNotes.map((entry) => Map<String, dynamic>.from(entry)),
+    ];
+    await _persistVaultData(
+      items: _vaultItems,
+      notes: nextNotes,
+      customTypeDefinitions: _customTypeDefinitions,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Shared text saved to ${note['title']}')),
+    );
+  }
+
+  Map<String, dynamic> _noteFromSharedText(SharedTextIntent shared) {
+    final importedAt = DateTime.now().toUtc();
+    final importedAtIso = importedAt.toIso8601String();
+    final sourceApplication = shared.sourceApplication.trim().isEmpty
+        ? 'Unknown app'
+        : shared.sourceApplication.trim();
+    final sourceTag = _tagFromSharedSource(sourceApplication);
+    final tags = <String>{
+      'shared',
+      sourceTag,
+    }.where((entry) => entry.trim().isNotEmpty).toList()..sort();
+    final title =
+        'Shared from $sourceApplication ${_formatSharedImportTimestamp(importedAt)}';
+    final body = shared.text.endsWith('\n') ? shared.text : '${shared.text}\n';
+    final preview = shared.text
+        .split('\n')
+        .firstWhere((line) => line.trim().isNotEmpty, orElse: () => '')
+        .trim();
+    return {
+      'id': 'note-shared-${DateTime.now().microsecondsSinceEpoch}',
+      'title': title,
+      'preview': preview,
+      'updated': 'Now',
+      'pinned': false,
+      'tags': tags,
+      'createdAt': importedAtIso,
+      'updatedAt': importedAtIso,
+      'sharedAt': importedAtIso,
+      'importedAt': importedAtIso,
+      'sourceApplication': sourceApplication,
+      if (shared.sourcePackage != null) 'sourcePackage': shared.sourcePackage,
+      'delta': [
+        {'insert': body},
+      ],
+    };
+  }
+
+  String _tagFromSharedSource(String sourceApplication) {
+    return sourceApplication
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  String _formatSharedImportTimestamp(DateTime timestamp) {
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    final local = timestamp.toLocal();
+    return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} '
+        '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
   }
 
   Future<void> _openImportedEncryptedSecret(ImportedSecretFile imported) async {
@@ -942,46 +1619,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
     setState(() {
       _vaultFilePath = selectedVault.id;
-      _activeVaultName = selectedVault.label;
-      _step = OnboardingStep.unlock;
     });
-    await _refreshBiometricStateForActiveVault();
-
-    final password = await _promptVaultCredentialForAction(
-      actionLabel: actionLabel,
-    );
-    if (password == null || password.isEmpty || !mounted) return false;
-
-    _startBusy('Unlocking vault...');
-    try {
-      await _vaultService
-          .unlockVault(
-            filePath: _vaultFilePath,
-            password: password,
-            onProgress: _updateBusy,
-          )
-          .timeout(_vaultOpTimeout);
-      await _loadVaultData(password);
-      _activeVaultName = await _resolveVaultLabel(_vaultFilePath);
-      await _refreshVaultSize();
-      _passwordController.text = password;
-      _handleUnlock();
-      return true;
-    } on TimeoutException {
-      if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unlock timed out. Please try again.')),
-      );
-      return false;
-    } catch (_) {
-      if (!mounted) return false;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Wrong vault password')));
-      return false;
-    } finally {
-      _stopBusy();
-    }
+    _actionUnlockCompleter = Completer<bool>();
+    final unlockResult = _actionUnlockCompleter!;
+    await _presentUnlockStep(vaultLabel: selectedVault.label);
+    return unlockResult.future;
   }
 
   Future<VaultReference?> _selectVaultForAuthenticatedAction() async {
@@ -1018,74 +1660,6 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         ),
       ),
     );
-  }
-
-  Future<String?> _promptVaultCredentialForAction({
-    required String actionLabel,
-  }) async {
-    final passwordController = TextEditingController();
-    try {
-      final hasSavedBiometricCredential =
-          ((await _biometricCredentialStore.readMasterPassword(
-            vaultId: _vaultFilePath,
-          ))?.isNotEmpty ==
-          true);
-      if (!mounted) return null;
-      final showBiometric = _biometricEnabled && hasSavedBiometricCredential;
-
-      final decision = await showDialog<String>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setLocalState) {
-            final canContinue = passwordController.text.trim().isNotEmpty;
-            return AlertDialog(
-              title: Text('$actionLabel: unlock vault'),
-              content: TextField(
-                controller: passwordController,
-                autofocus: true,
-                obscureText: true,
-                onChanged: (_) => setLocalState(() {}),
-                decoration: InputDecoration(
-                  labelText: AppStrings.masterPassword,
-                  hintText: _displayNameForVault(_vaultFilePath),
-                ),
-              ),
-              actions: [
-                if (showBiometric)
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop('__biometric__'),
-                    child: const Text('Use biometric'),
-                  ),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: canContinue
-                      ? () => Navigator.of(
-                          context,
-                        ).pop(passwordController.text.trim())
-                      : null,
-                  child: const Text('Unlock'),
-                ),
-              ],
-            );
-          },
-        ),
-      );
-      if (decision == '__biometric__') {
-        final authenticated = await _biometricAuthService
-            .authenticateForUnlock();
-        if (!authenticated) return null;
-        return await _biometricCredentialStore.readMasterPassword(
-          vaultId: _vaultFilePath,
-        );
-      }
-      return decision;
-    } finally {
-      await _waitForDialogTeardown();
-      passwordController.dispose();
-    }
   }
 
   Future<bool> _applyImportedSecret(DecryptedSharePayload payload) async {
@@ -1598,14 +2172,84 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _customTypeDefinitions = customTypes;
     });
     await _refreshVaultSize();
+    await _ensureRecoveryPhraseNoteInVault(password: password);
+  }
+
+  Map<String, dynamic> _buildRecoveryPhraseNote() {
+    final lines = <String>[
+      'Recovery phrase',
+      '',
+      _recoveryWords.join(' '),
+      '',
+      'Keep this phrase offline and private.',
+    ];
+    final documentText = '${lines.join('\n')}\n';
+    return {
+      'id': 'note-recovery-phrase',
+      'title': 'Recovery Phrase',
+      'preview': 'Recovery phrase (plain copyable text).',
+      'updated': 'Now',
+      'pinned': true,
+      'tags': ['recovery', 'security'],
+      'delta': [
+        {'insert': documentText},
+      ],
+      'blocks': [
+        {'type': 'heading', 'text': 'Recovery phrase'},
+        {
+          'type': 'paragraph',
+          'text': 'Seeded from your configured recovery phrase template.',
+        },
+      ],
+    };
+  }
+
+  Future<void> _ensureRecoveryPhraseNoteInVault({
+    required String password,
+  }) async {
+    if (_vaultNotes.any(
+      (note) => note['id']?.toString() == 'note-recovery-phrase',
+    )) {
+      return;
+    }
+    final notes = <Map<String, dynamic>>[
+      _buildRecoveryPhraseNote(),
+      ..._vaultNotes.map((note) => Map<String, dynamic>.from(note)),
+    ];
+    await _persistVaultData(
+      items: _vaultItems,
+      notes: notes,
+      customTypeDefinitions: _customTypeDefinitions,
+      passwordOverride: password,
+    );
   }
 
   Future<void> _persistVaultData({
     required List<Map<String, dynamic>> items,
     required List<Map<String, dynamic>> notes,
     required List<Map<String, dynamic>> customTypeDefinitions,
+    String? passwordOverride,
   }) async {
-    final password = _passwordController.text.trim();
+    final run = _persistVaultChain.then(
+      (_) => _persistVaultDataImpl(
+        items: items,
+        notes: notes,
+        customTypeDefinitions: customTypeDefinitions,
+        passwordOverride: passwordOverride,
+      ),
+    );
+    _persistVaultChain = run.catchError((_) {});
+    await run;
+  }
+
+  Future<void> _persistVaultDataImpl({
+    required List<Map<String, dynamic>> items,
+    required List<Map<String, dynamic>> notes,
+    required List<Map<String, dynamic>> customTypeDefinitions,
+    String? passwordOverride,
+  }) async {
+    final password =
+        passwordOverride?.trim() ?? _passwordController.text.trim();
     if (password.isEmpty) {
       throw StateError('Master password missing for persistence.');
     }
@@ -1685,7 +2329,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     return sectionName;
   }
 
-  Future<List<int>> _readVaultDocument({required String sectionName}) async {
+  Future<List<int>> _readVaultDocument({
+    required String sectionName,
+    VaultDocumentLoadProgress? onProgress,
+  }) async {
     final password = _passwordController.text.trim();
     if (password.isEmpty) {
       throw StateError('Master password missing for document preview.');
@@ -1694,6 +2341,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       filePath: _vaultFilePath,
       password: password,
       sectionName: sectionName,
+      onProgress: onProgress == null
+          ? null
+          : (progress) => onProgress(progress.message, progress.value),
     );
   }
 
@@ -1714,14 +2364,23 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   bool get _shouldSuppressLifecycleLock => _lifecycleLockSuppressed || _isBusy;
 
   bool get _shouldSuppressAutoLock =>
-      _shouldSuppressLifecycleLock || widget.autoLockDelay <= Duration.zero;
+      _shouldSuppressLifecycleLock ||
+      _isExploreDemoSession ||
+      widget.autoLockDelay <= Duration.zero;
 
-  void _handleUserActivity() {
+  void _deferAfterPointer(VoidCallback action) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      action();
+    });
+  }
+
+  void _scheduleUserActivityAfterFrame() {
     if (_step != OnboardingStep.app ||
         _lastLifecycleState != AppLifecycleState.resumed) {
       return;
     }
-    _scheduleInactivityLockIfNeeded();
+    _deferAfterPointer(_scheduleInactivityLockIfNeeded);
   }
 
   void _scheduleInactivityLockIfNeeded() {
@@ -1760,7 +2419,61 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     });
   }
 
+  void _enterExploreDemoSession() {
+    _backgroundLockTimer?.cancel();
+    _inactivityLockTimer?.cancel();
+    _pendingSharedTextIntent = null;
+    _deferAfterPointer(() {
+      if (!mounted) return;
+      _busyWatchdog?.cancel();
+      setState(() {
+        _isBusy = false;
+        _busyProgress = 0;
+        _busyMessage = '';
+        _isExploreDemoSession = true;
+        _activeVaultName = VaultHomeDemoData.vaultName;
+        _activeGuardianProfile = GuardianProfiles.owl;
+        _recoveryWords = List<String>.from(VaultHomeDemoData.recoveryWords);
+        _vaultItems = VaultHomeDemoData.cloneItems();
+        _vaultNotes = VaultHomeDemoData.cloneNotes();
+        _customTypeDefinitions = <Map<String, dynamic>>[];
+        _stepTransitionForward = true;
+        _step = OnboardingStep.app;
+      });
+    });
+  }
+
+  void _exitExploreDemoSession() {
+    _backgroundLockTimer?.cancel();
+    _inactivityLockTimer?.cancel();
+    _deferAfterPointer(() {
+      if (!mounted) return;
+      Navigator.of(
+        context,
+        rootNavigator: true,
+      ).popUntil((route) => route.isFirst);
+      if (!mounted) return;
+      setState(() {
+        _isExploreDemoSession = false;
+        _stepTransitionForward = false;
+        _step = OnboardingStep.welcome;
+      });
+    });
+  }
+
   void _lockVaultSession() {
+    if (_isExploreDemoSession) {
+      _exitExploreDemoSession();
+      return;
+    }
+    final lockedVault = VaultReference(
+      id: _vaultFilePath,
+      label: _activeVaultName,
+      addedAtEpochMs: DateTime.now().millisecondsSinceEpoch,
+      sourceDescription:
+          _findVaultReference(_vaultFilePath)?.sourceDescription ??
+          _defaultVaultSourceDescription(),
+    );
     _backgroundLockTimer?.cancel();
     _inactivityLockTimer?.cancel();
     if (mounted) {
@@ -1771,7 +2484,34 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
     _clearSensitiveSessionState();
     if (!mounted) return;
-    setState(() => _step = OnboardingStep.unlock);
+    setState(() {
+      _selectVaultReturnStep = OnboardingStep.welcome;
+      _stepTransitionForward = true;
+      _step = OnboardingStep.selectVault;
+      if (!_knownVaults.any((entry) => entry.id == lockedVault.id)) {
+        _knownVaults = <VaultReference>[lockedVault, ..._knownVaults];
+      }
+    });
+  }
+
+  Future<void> _switchVaultFromApp() async {
+    await _syncKnownVaults();
+    if (!mounted) return;
+    final currentVault = VaultReference(
+      id: _vaultFilePath,
+      label: _activeVaultName,
+      addedAtEpochMs: DateTime.now().millisecondsSinceEpoch,
+      sourceDescription:
+          _findVaultReference(_vaultFilePath)?.sourceDescription ??
+          _defaultVaultSourceDescription(),
+    );
+    setState(() {
+      if (!_knownVaults.any((entry) => entry.id == currentVault.id)) {
+        _knownVaults = <VaultReference>[currentVault, ..._knownVaults];
+      }
+    });
+
+    await _presentSelectVaultStep(returnOnCancel: OnboardingStep.app);
   }
 
   Future<void> _renameActiveVault(String name) async {
@@ -1781,7 +2521,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     await _vaultService.renameVault(filePath: _vaultFilePath, label: renamed);
-    await _rememberVaultReference(_vaultFilePath, label: renamed);
+    await _rememberVaultReference(
+      _vaultFilePath,
+      label: renamed,
+      sourceDescription: _findVaultReference(_vaultFilePath)?.sourceDescription,
+    );
     await _refreshVaultSize();
     if (!mounted) return;
     setState(() => _activeVaultName = renamed);
@@ -1839,7 +2583,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
                 ? previous['updatedAt'].toString().trim()
                 : (current['updatedAt']?.toString().trim().isNotEmpty == true
                       ? current['updatedAt'].toString().trim()
-                      : nowIso));
+                      : createdAt));
       final updatedByDevice = changed
           ? _deviceLabel
           : (previous['updatedByDevice']?.toString().trim().isNotEmpty == true
@@ -1891,6 +2635,75 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<void> _unlockWithRecoveryPhrase() async {
     if (!_storageReady) return;
     if (_isBusy) return;
+
+    final importCompleter = _importCredentialCompleter;
+    if (importCompleter != null) {
+      if (!_importCredentialAllowRecovery) return;
+      _importCredentialCompleter = null;
+      _importCredentialAllowRecovery = true;
+      if (!importCompleter.isCompleted) {
+        importCompleter.complete(
+          const _ImportVaultCredentialChoice.recoverWithPhrase(),
+        );
+      }
+      return;
+    }
+
+    final recovery = await _promptRecoveryPhrase();
+    if (recovery == null || recovery.isEmpty) return;
+    if (!mounted) return;
+
+    final normalizedRecovery = _normalizeRecoveryPhrase(recovery);
+    if (!_validateRecoveryWords(normalizedRecovery)) return;
+    if (_vaultCreatedInSession &&
+        !listEquals(normalizedRecovery, _recoveryWords)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Recovery phrase order does not match.')),
+      );
+      return;
+    }
+
+    _startBusy('Starting recovery unlock...');
+    try {
+      await _vaultService
+          .unlockVaultWithRecoveryPhrase(
+            filePath: _vaultFilePath,
+            recoveryPhrase: normalizedRecovery.join(' '),
+            onProgress: _updateBusy,
+          )
+          .timeout(_vaultOpTimeout);
+      if (!mounted) return;
+      _stopBusy();
+      final didReset = await _showMandatoryMasterPasswordReset(
+        normalizedRecovery.join(' '),
+      );
+      if (!didReset || !mounted) return;
+      _passwordController.clear();
+      await _presentUnlockStep();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Recovery successful. Please log in with your new master password.',
+          ),
+        ),
+      );
+    } on TimeoutException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Recovery timed out. Please try again.')),
+      );
+    } catch (error, stackTrace) {
+      _logOperationError('unlockWithRecoveryPhrase', error, stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Recovery phrase is invalid.')),
+      );
+    } finally {
+      _stopBusy();
+    }
+  }
+
+  Future<String?> _promptRecoveryPhrase() async {
     final recoveryController = TextEditingController();
     final recovery = await showDialog<String>(
       context: context,
@@ -1936,23 +2749,27 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     await _waitForDialogTeardown();
     recoveryController.clear();
     recoveryController.dispose();
-    if (recovery == null || recovery.isEmpty) return;
-    if (!mounted) return;
+    return recovery;
+  }
 
-    final normalizedRecovery = recovery
+  List<String> _normalizeRecoveryPhrase(String recovery) {
+    return recovery
         .toLowerCase()
         .trim()
         .split(RegExp(r'\s+'))
         .map((word) => word.replaceAll(RegExp(r'[^a-z]'), ''))
         .where((word) => word.isNotEmpty)
         .toList();
+  }
+
+  bool _validateRecoveryWords(List<String> normalizedRecovery) {
     if (normalizedRecovery.length != 12) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Recovery phrase must be exactly 12 words.'),
         ),
       );
-      return;
+      return false;
     }
     final dictionary = RecoveryPhraseDictionary.words.toSet();
     final invalidWords = normalizedRecovery
@@ -1966,54 +2783,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           ),
         ),
       );
-      return;
+      return false;
     }
-    if (_vaultCreatedInSession &&
-        !listEquals(normalizedRecovery, _recoveryWords)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery phrase order does not match.')),
-      );
-      return;
-    }
-
-    _startBusy('Starting recovery unlock...');
-    try {
-      await _vaultService
-          .unlockVaultWithRecoveryPhrase(
-            filePath: _vaultFilePath,
-            recoveryPhrase: normalizedRecovery.join(' '),
-            onProgress: _updateBusy,
-          )
-          .timeout(_vaultOpTimeout);
-      if (!mounted) return;
-      _stopBusy();
-      final didReset = await _showMandatoryMasterPasswordReset(
-        normalizedRecovery.join(' '),
-      );
-      if (!didReset || !mounted) return;
-      _passwordController.clear();
-      setState(() => _step = OnboardingStep.unlock);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Recovery successful. Please log in with your new master password.',
-          ),
-        ),
-      );
-    } on TimeoutException {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery timed out. Please try again.')),
-      );
-    } catch (error, stackTrace) {
-      _logOperationError('unlockWithRecoveryPhrase', error, stackTrace);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery phrase is invalid.')),
-      );
-    } finally {
-      _stopBusy();
-    }
+    return true;
   }
 
   void _startBusy(
@@ -2056,16 +2828,30 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   void _stopBusy() {
     if (!mounted) return;
     _busyWatchdog?.cancel();
+    if (!_isBusy && _busyProgress == 0 && _busyMessage.isEmpty) {
+      _scheduleLockAfterBusyChange();
+      return;
+    }
     setState(() {
       _isBusy = false;
       _busyProgress = 0;
       _busyMessage = '';
     });
+    _scheduleLockAfterBusyChange();
+  }
+
+  void _scheduleLockAfterBusyChange() {
     if (_lastLifecycleState == AppLifecycleState.paused) {
       _scheduleBackgroundLockIfNeeded();
     } else {
       _scheduleInactivityLockIfNeeded();
     }
+  }
+
+  void _showOperationSnackBar(String message) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context)..removeCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _waitForOverlayTeardown() async {
@@ -2084,6 +2870,31 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   String _errorHint(Object error) {
+    final message = error.toString();
+    if (message.contains('abortTrigger') ||
+        message.contains('Request aborted')) {
+      return 'Cloud request was interrupted. Stay on this tab and retry.';
+    }
+    if (message.contains('DetailedApiRequestError') &&
+        message.contains('Invalid Value')) {
+      return 'Google Drive rejected the backup search request. Retry in a moment.';
+    }
+    if (message.contains('TimeoutException') ||
+        message.contains('Timed out while searching')) {
+      return 'Cloud backup search timed out. Check your connection and retry.';
+    }
+    if (message.contains('DetailedApiRequestError') &&
+        message.contains('insufficientPermissions')) {
+      return 'Google Drive permissions are missing. Reconnect and allow Drive access.';
+    }
+    if (message.contains('QuotaExceededError') ||
+        message.contains('exceeded the quota')) {
+      return 'This vault is too large for browser storage. Reload and retry after updating.';
+    }
+    if (message.contains('Google Drive is not connected') ||
+        message.contains('allow Drive access')) {
+      return 'Google Drive is not connected. Sign in again and allow Drive access.';
+    }
     if (kDebugMode) {
       return '($error)';
     }
@@ -2120,29 +2931,26 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _syncKnownVaults() async {
-    if (!_enableVaultReferenceCache) return;
+    if (!_enableVaultReferenceCache || _isExploreDemoSession) return;
     final known = await _mergedKnownAndPrivateVaultReferences();
-    if (!mounted) return;
-    setState(() {
-      _knownVaults = known;
-    });
+    if (!mounted || _isExploreDemoSession) return;
+    if (listEquals(_knownVaults, known)) return;
+    void apply() {
+      if (!mounted || _isExploreDemoSession) return;
+      setState(() {
+        _knownVaults = known;
+      });
+    }
+
+    if (kIsWeb) {
+      _deferAfterPointer(apply);
+      return;
+    }
+    apply();
   }
 
   Future<void> _restoreKnownVaultSession() async {
-    if (!_enableVaultReferenceCache) return;
-    final known = await _mergedKnownAndPrivateVaultReferences();
-    if (!mounted) return;
-    if (known.isEmpty) {
-      setState(() => _knownVaults = known);
-      return;
-    }
-    setState(() {
-      _knownVaults = known;
-      _vaultFilePath = known.first.id;
-      _activeVaultName = known.first.label;
-      _step = OnboardingStep.unlock;
-    });
-    await _refreshBiometricStateForActiveVault();
+    await _syncKnownVaults();
   }
 
   Future<List<VaultReference>> _mergedKnownAndPrivateVaultReferences() async {
@@ -2214,6 +3022,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         label: label,
         addedAtEpochMs: stat.changed.millisecondsSinceEpoch,
         lastOpenedAtEpochMs: 0,
+        sourceDescription: _defaultVaultSourceDescription(),
       );
     } catch (_) {
       return null;
@@ -2241,8 +3050,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         _activeVaultName = _displayNameForVault(path);
         _storageReady = true;
       });
-      unawaited(_restoreKnownVaultSession());
+      _scheduleKnownVaultDiscovery();
       unawaited(_consumePendingSecretIntent());
+      unawaited(_consumePendingSharedTextIntent());
     } catch (_) {
       _vaultService = DefaultVaultService(
         storageAdapter: const FileVaultStorageAdapter(),
@@ -2258,21 +3068,39 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         _activeVaultName = _displayNameForVault(_vaultFilePath);
         _storageReady = true;
       });
-      unawaited(_restoreKnownVaultSession());
+      _scheduleKnownVaultDiscovery();
       unawaited(_consumePendingSecretIntent());
+      unawaited(_consumePendingSharedTextIntent());
     }
   }
 
-  Future<void> _rememberVaultReference(String filePath, {String? label}) async {
+  void _scheduleKnownVaultDiscovery() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_restoreKnownVaultSession());
+    });
+  }
+
+  Future<void> _rememberVaultReference(
+    String filePath, {
+    String? label,
+    String? sourceDescription,
+  }) async {
     if (!_enableVaultReferenceCache) return;
     final previous = _findVaultReference(filePath);
     final now = DateTime.now().millisecondsSinceEpoch;
     final resolvedLabel = label ?? await _resolveVaultLabel(filePath);
+    final resolvedSource = sourceDescription?.trim().isNotEmpty == true
+        ? sourceDescription!.trim()
+        : previous?.sourceDescription.trim().isNotEmpty == true
+        ? previous!.sourceDescription
+        : _defaultVaultSourceDescription();
     final reference = VaultReference(
       id: filePath,
       label: resolvedLabel,
       addedAtEpochMs: previous?.addedAtEpochMs ?? now,
       lastOpenedAtEpochMs: previous?.lastOpenedAtEpochMs ?? 0,
+      sourceDescription: resolvedSource,
     );
     await _vaultReferenceCache.upsert(reference);
     await _syncKnownVaults();
@@ -2288,9 +3116,25 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       label: resolvedLabel,
       addedAtEpochMs: previous?.addedAtEpochMs ?? now,
       lastOpenedAtEpochMs: now,
+      sourceDescription:
+          previous?.sourceDescription ?? _defaultVaultSourceDescription(),
     );
     await _vaultReferenceCache.upsert(reference);
     await _syncKnownVaults();
+  }
+
+  String _sourceDescriptionForImportedVault(ImportedVaultFile imported) {
+    final selectedFile = imported.sourceDescription.trim().isNotEmpty
+        ? imported.sourceDescription.trim()
+        : _displayNameForVault(imported.storageId);
+    return '${_defaultVaultSourceDescription()} · '
+        '${AppStrings.selectedVaultFile} $selectedFile';
+  }
+
+  String _defaultVaultSourceDescription() {
+    return kIsWeb
+        ? AppStrings.webVaultPrivateStorage
+        : AppStrings.appVaultPrivateStorage;
   }
 
   VaultReference? _findVaultReference(String filePath) {
@@ -2305,6 +3149,33 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     final parts = normalized.split('/');
     final last = parts.isEmpty ? normalized : parts.last;
     return last.isEmpty ? 'vault.nija' : last;
+  }
+
+  Future<String> _resolveVaultStoragePath(String candidate) async {
+    final trimmed = candidate.trim();
+    if (trimmed.isNotEmpty &&
+        await _vaultService.vaultExists(filePath: trimmed)) {
+      return trimmed;
+    }
+
+    if (kIsWeb) {
+      const webHandle = 'web_vault.nija';
+      if (trimmed != webHandle &&
+          await _vaultService.vaultExists(filePath: webHandle)) {
+        if (trimmed.isEmpty) return webHandle;
+        try {
+          final raw = await _vaultService.readRawVaultFile(filePath: webHandle);
+          final decoded = jsonDecode(raw);
+          if (decoded is Map && decoded['vaultId']?.toString() == trimmed) {
+            return webHandle;
+          }
+        } catch (_) {
+          // Ignore metadata read failures and keep searching other handles.
+        }
+      }
+    }
+
+    return trimmed.isEmpty ? _vaultFilePath : trimmed;
   }
 
   Future<String> _resolveVaultLabel(String filePath) async {
@@ -2379,9 +3250,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     try {
       final imported = await _vaultPortability.importVaultFromLocal();
       if (imported == null) return;
+      final importedPath = await _localPathForImportedVault(imported);
       await _importVaultFile(
-        imported: imported,
+        imported: ImportedVaultFile(
+          storageId: importedPath,
+          label: imported.label,
+          content: imported.content,
+        ),
         continueToUnlock: continueToUnlock,
+        stageRawContent: true,
       );
     } catch (error, stackTrace) {
       if (_isFilePickerCancellation(error)) return;
@@ -2393,186 +3270,405 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
   }
 
-  Future<void> _importVaultFromCloud({required bool continueToUnlock}) async {
+  Future<void> _importVaultFromCloud({
+    required bool continueToUnlock,
+    OnboardingStep returnOnCancel = OnboardingStep.welcome,
+  }) async {
     try {
-      _startBusy('Checking cloud backups...');
-      final backups = await _vaultPortability.listCloudBackups();
+      final signedIn = await _ensureCloudBackupGoogleAccountSelected();
+      if (!signedIn || !mounted) return;
+
+      _startBusy(
+        'Checking cloud backups...',
+        timeout: const Duration(minutes: 2),
+        timeoutMessage:
+            'Cloud import is still working. This can take longer on slow connections.',
+      );
+      final backups = await _vaultPortability.listCloudBackups(
+        forceAccountChooser: false,
+      );
       _stopBusy();
       if (!mounted) return;
       if (backups.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No cloud vault backups found.')),
+        _showOperationSnackBar(
+          'No cloud vault backups found. If you backed up on mobile, open Backup there once, then retry.',
         );
         return;
       }
-      final selected = await showModalBottomSheet<CloudVaultBackupFile>(
-        context: context,
-        builder: (context) => SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom + 8,
-            ),
-            children: [
-              const ListTile(
-                title: Text(
-                  'Select cloud vault',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ),
-              ...backups.map((backup) {
-                return ListTile(
-                  leading: const Icon(Icons.cloud_done_outlined),
-                  title: Text(_cloudBackupLabel(backup)),
-                  subtitle: Text(_cloudBackupSubtitle(backup)),
-                  onTap: () => Navigator.of(context).pop(backup),
-                );
-              }),
-            ],
-          ),
-        ),
+      final selected = await _pickCloudBackupFromList(
+        backups,
+        title: AppStrings.importVaultFromCloud,
+        returnOnCancel: returnOnCancel,
       );
       if (selected == null || !mounted) return;
-      final importedPath = await _localPathForCloudBackup(selected.storageId);
+      final hydrated = await _ensureCloudBackupContent(selected);
+      if (!mounted) return;
+      final importedPath = await _localPathForCloudBackup(hydrated.storageId);
       await _importVaultFile(
         imported: ImportedVaultFile(
           storageId: importedPath,
-          label: _cloudBackupLabel(selected),
-          content: selected.content,
+          label: cloudBackupDisplayTitle(hydrated),
+          content: hydrated.content,
         ),
         continueToUnlock: continueToUnlock,
+        stageRawContent: true,
       );
     } catch (error, stackTrace) {
       _stopBusy();
       _logOperationError('importVaultFromCloud', error, stackTrace);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to import cloud vault. ${_errorHint(error)}'),
-        ),
+      _showOperationSnackBar(
+        'Failed to import cloud vault. ${_errorHint(error)}',
       );
     }
   }
 
-  String _cloudBackupLabel(CloudVaultBackupFile backup) {
-    final label = backup.label.trim();
-    if (label.isNotEmpty) {
-      final withoutExtension = label.toLowerCase().endsWith('.nija')
-          ? label.substring(0, label.length - 5)
-          : label;
-      return withoutExtension
-          .replaceAll(RegExp(r'^backup_\d{8}_\d{4}_'), '')
-          .replaceAll(RegExp(r'[_-]+'), ' ')
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
+  Future<bool> _ensureCloudBackupGoogleAccountSelected() async {
+    if (kIsWeb) {
+      final selected = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: Colors.black.withValues(alpha: 0.45),
+        builder: (context) =>
+            const GoogleDriveWebSignInDialog(forceAccountChooser: true),
+      );
+      if (selected != true && mounted) {
+        _showOperationSnackBar(
+          'Google sign-in cancelled. If the button fails, add http://localhost '
+          'and http://localhost:5173 to Authorized JavaScript origins in Google Cloud Console.',
+        );
+      }
+      if (selected != true) return false;
+      const drivePortability = GoogleDriveVaultPortability();
+      final ready = await drivePortability.ensureDriveSessionReady();
+      if (!ready && mounted) {
+        _showOperationSnackBar(
+          'Google Drive access was not granted. Sign in again and allow Drive access.',
+        );
+      }
+      return ready;
     }
-    return 'Cloud vault backup';
+
+    final selected = await _vaultPortability.ensureCloudBackupAccountSelected(
+      forceAccountChooser: true,
+    );
+    if (!selected && mounted) {
+      _showOperationSnackBar('Google account sign-in cancelled.');
+    }
+    return selected;
   }
 
-  String _cloudBackupSubtitle(CloudVaultBackupFile backup) {
-    final label = backup.label.trim();
-    if (label.isEmpty) return 'Google Drive backup';
-    return label.toLowerCase().endsWith('.nija') ? label : '$label.nija';
+  Future<CloudVaultBackupFile?> _pickCloudBackupFromList(
+    List<CloudVaultBackupFile> backups, {
+    required String title,
+    required OnboardingStep returnOnCancel,
+  }) async {
+    if (backups.isEmpty || !mounted) return null;
+
+    final openedFromKnownVaultPicker =
+        _step == OnboardingStep.selectVault &&
+        _vaultSelectionMode == _VaultSelectionMode.known;
+    final completer = Completer<CloudVaultBackupFile?>();
+    setState(() {
+      _cloudBackupsByStorageId = {
+        for (final backup in backups) backup.storageId: backup,
+      };
+      _cloudVaultReferences = backups
+          .map(_vaultReferenceForCloudBackup)
+          .toList(growable: false);
+      _cloudVaultSelectionHeading = title;
+      _vaultSelectionMode = _VaultSelectionMode.cloudBackup;
+      if (openedFromKnownVaultPicker) {
+        _cloudPickerOuterReturnStep = _selectVaultReturnStep;
+      } else {
+        _cloudPickerOuterReturnStep = null;
+        _selectVaultReturnStep = returnOnCancel;
+      }
+      _cloudBackupPickerCompleter = completer;
+      _stepTransitionForward = true;
+      _step = OnboardingStep.selectVault;
+    });
+    return completer.future;
+  }
+
+  void _clearImportCredentialUi() {
+    _importCredentialCompleter = null;
+    _importCredentialAllowRecovery = true;
+  }
+
+  Future<void> _stageImportedVaultForUnlock({
+    required String storageId,
+    required String vaultLabel,
+  }) async {
+    final storagePath = await _resolveVaultStoragePath(storageId);
+    if (!mounted) return;
+    setState(() {
+      _vaultFilePath = storagePath;
+      _activeVaultName = vaultLabel;
+    });
   }
 
   Future<void> _importVaultFile({
     required ImportedVaultFile imported,
     required bool continueToUnlock,
+    required bool stageRawContent,
   }) async {
-    await _vaultService.writeRawVaultFile(
-      filePath: imported.storageId,
-      rawContent: imported.content,
-    );
-    final selectedVaultLabel = _humanImportLabel(imported);
-    var credential = _passwordController.text.trim();
-    if (credential.isEmpty) {
-      final prompted = await _promptImportVaultCredential(
-        message: 'Selected vault: $selectedVaultLabel',
+    if (stageRawContent) {
+      await _vaultService.writeRawVaultFile(
+        filePath: imported.storageId,
+        rawContent: imported.content,
       );
-      if (prompted == null || prompted.isEmpty) return;
-      credential = prompted;
     }
-    var result = await _vaultService.importNijaFile(
-      filePath: imported.storageId,
-      unlockCredential: credential,
+    final selectedVaultLabel = _humanImportLabel(imported);
+    await _stageImportedVaultForUnlock(
+      storageId: imported.storageId,
+      vaultLabel: selectedVaultLabel,
     );
-    if (result.status == ImportStatus.failed) {
-      final prompted = await _promptImportVaultCredential(
-        title: 'Unlock imported vault',
-        message:
-            'Selected vault: $selectedVaultLabel\n\nThe selected file did not unlock with the active vault password. Enter the password that was valid when this file was exported.',
-      );
-      if (prompted == null || prompted.isEmpty || prompted == credential) {
-        throw StateError(result.userSafeMessage);
+    if (!mounted) return;
+
+    try {
+      var credential = _passwordController.text.trim();
+      if (credential.isEmpty) {
+        final prompted = await _promptImportVaultCredential(
+          vaultLabel: selectedVaultLabel,
+          message: 'Selected vault: $selectedVaultLabel',
+        );
+        if (prompted == null) return;
+        if (prompted.recoverWithPhrase) {
+          await _recoverImportedVault(
+            imported: imported,
+            selectedVaultLabel: selectedVaultLabel,
+            continueToUnlock: continueToUnlock,
+          );
+          return;
+        }
+        if (prompted.password.isEmpty) return;
+        credential = prompted.password;
       }
-      credential = prompted;
-      result = await _vaultService.importNijaFile(
+
+      _startBusy('Importing vault...');
+      var result = await _vaultService.importNijaFile(
         filePath: imported.storageId,
         unlockCredential: credential,
       );
-    }
-    if (result.status == ImportStatus.failed &&
-        result.userSafeMessage.contains('Confirm replace')) {
-      final replace = await _confirmReplaceNewerImportedVault(result);
-      if (replace) {
+      if (result.status == ImportStatus.failed) {
+        _stopBusy();
+        final prompted = await _promptImportVaultCredential(
+          vaultLabel: selectedVaultLabel,
+          title: AppStrings.unlockImportedVaultTitle,
+          message:
+              'Selected vault: $selectedVaultLabel\n\nThe selected file did not unlock with the active vault password. Enter the password that was valid when this file was exported.',
+        );
+        if (prompted == null) {
+          throw StateError(result.userSafeMessage);
+        }
+        if (prompted.recoverWithPhrase) {
+          await _recoverImportedVault(
+            imported: imported,
+            selectedVaultLabel: selectedVaultLabel,
+            continueToUnlock: continueToUnlock,
+          );
+          return;
+        }
+        if (prompted.password.isEmpty || prompted.password == credential) {
+          throw StateError(result.userSafeMessage);
+        }
+        credential = prompted.password;
+        _startBusy('Importing vault...');
         result = await _vaultService.importNijaFile(
           filePath: imported.storageId,
           unlockCredential: credential,
-          confirmReplace: true,
         );
       }
-    }
-    if (result.status == ImportStatus.failed) {
-      throw StateError(result.userSafeMessage);
-    }
-    if (result.status == ImportStatus.alreadyUpToDate ||
-        result.status == ImportStatus.incomingOlder) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
-      return;
-    }
-    if (result.status == ImportStatus.conflictCreated) {
-      final conflictVaultId = result.conflictVaultId;
-      if (conflictVaultId == null || conflictVaultId.isEmpty) {
-        throw StateError('Conflict import did not return conflict vault id.');
+      if (result.status == ImportStatus.failed &&
+          result.userSafeMessage.contains('Confirm replace')) {
+        _stopBusy();
+        final replace = await _confirmReplaceNewerImportedVault(result);
+        if (replace) {
+          _startBusy('Importing vault...');
+          result = await _vaultService.importNijaFile(
+            filePath: imported.storageId,
+            unlockCredential: credential,
+            confirmReplace: true,
+          );
+        }
       }
-      await _reviewAndMergeVaultConflict(
-        conflictVaultId: conflictVaultId,
-        importedPassword: credential,
+      if (result.status == ImportStatus.failed) {
+        throw StateError(result.userSafeMessage);
+      }
+      if (result.status == ImportStatus.alreadyUpToDate ||
+          result.status == ImportStatus.incomingOlder) {
+        if (!mounted) return;
+        if (continueToUnlock && result.vaultId.isNotEmpty) {
+          final resolvedLabel = await _resolveVaultLabel(result.vaultId);
+          final importedLabel = resolvedLabel == result.vaultId
+              ? selectedVaultLabel
+              : resolvedLabel;
+          await _rememberVaultReference(
+            result.vaultId,
+            label: importedLabel,
+            sourceDescription: _sourceDescriptionForImportedVault(imported),
+          );
+          if (!mounted) return;
+          setState(() {
+            _vaultFilePath = result.vaultId;
+            _activeVaultName = importedLabel;
+            _vaultCreatedInSession = false;
+            _clearImportCredentialUi();
+          });
+          _passwordController.text = credential;
+          await _loadVaultData(credential);
+          await _refreshBiometricStateForActiveVault();
+          if (!mounted) return;
+          _handleUnlock();
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
+          return;
+        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
+        return;
+      }
+      if (result.status == ImportStatus.conflictCreated) {
+        final conflictVaultId = result.conflictVaultId;
+        if (conflictVaultId == null || conflictVaultId.isEmpty) {
+          throw StateError('Conflict import did not return conflict vault id.');
+        }
+        await _reviewAndMergeVaultConflict(
+          conflictVaultId: conflictVaultId,
+          importedPassword: credential,
+        );
+        return;
+      }
+      final activeId = result.conflictVaultId ?? result.vaultId;
+      final resolvedLabel = await _resolveVaultLabel(activeId);
+      final importedLabel = result.status == ImportStatus.conflictCreated
+          ? 'Vault conflict copy'
+          : resolvedLabel == activeId
+          ? selectedVaultLabel
+          : resolvedLabel;
+      await _resetBiometricForVault(activeId);
+      await _rememberVaultReference(
+        activeId,
+        label: importedLabel,
+        sourceDescription: _sourceDescriptionForImportedVault(imported),
       );
-      return;
-    }
-    final activeId = result.conflictVaultId ?? result.vaultId;
-    final resolvedLabel = await _resolveVaultLabel(activeId);
-    final importedLabel = result.status == ImportStatus.conflictCreated
-        ? 'Vault conflict copy'
-        : resolvedLabel == activeId
-        ? selectedVaultLabel
-        : resolvedLabel;
-    await _resetBiometricForVault(activeId);
-    await _rememberVaultReference(activeId, label: importedLabel);
-    if (!mounted) return;
-    setState(() {
-      _vaultFilePath = activeId;
-      _activeVaultName = importedLabel;
+      if (!mounted) return;
+      setState(() {
+        _vaultFilePath = activeId;
+        _activeVaultName = importedLabel;
+        _vaultCreatedInSession = false;
+        _clearImportCredentialUi();
+      });
       if (continueToUnlock) {
-        _step = OnboardingStep.unlock;
+        _passwordController.text = credential;
+        await _loadVaultData(credential);
+        await _refreshBiometricStateForActiveVault();
+        if (!mounted) return;
+        _handleUnlock();
+      } else {
+        await _refreshVaultSize();
+        await _refreshBiometricStateForActiveVault();
       }
-    });
-    await _refreshVaultSize();
-    await _refreshBiometricStateForActiveVault();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          result.userSafeMessage.trim().isEmpty
-              ? AppStrings.vaultImportedSuccess
-              : result.userSafeMessage,
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.userSafeMessage.trim().isEmpty
+                ? AppStrings.vaultImportedSuccess
+                : result.userSafeMessage,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _stopBusy();
+      if (mounted) {
+        setState(_clearImportCredentialUi);
+      }
+    }
+  }
+
+  Future<void> _recoverImportedVault({
+    required ImportedVaultFile imported,
+    required String selectedVaultLabel,
+    required bool continueToUnlock,
+  }) async {
+    final recoveryPhrase = await _promptRecoveryPhrase();
+    if (recoveryPhrase == null) return;
+    final normalizedRecovery = _normalizeRecoveryPhrase(recoveryPhrase);
+    if (!_validateRecoveryWords(normalizedRecovery)) return;
+
+    _startBusy('Starting imported vault recovery...');
+    try {
+      await _vaultService
+          .unlockVaultWithRecoveryPhrase(
+            filePath: imported.storageId,
+            recoveryPhrase: normalizedRecovery.join(' '),
+            onProgress: _updateBusy,
+          )
+          .timeout(_vaultOpTimeout);
+      if (!mounted) return;
+      _stopBusy();
+      final didReset = await _showMandatoryMasterPasswordReset(
+        normalizedRecovery.join(' '),
+        filePath: imported.storageId,
+      );
+      if (!didReset || !mounted) return;
+      final newPassword = _passwordController.text.trim();
+      final result = await _vaultService.importNijaFile(
+        filePath: imported.storageId,
+        unlockCredential: newPassword,
+      );
+      if (result.status == ImportStatus.failed) {
+        throw StateError(result.userSafeMessage);
+      }
+      final activeId = result.conflictVaultId ?? result.vaultId;
+      final resolvedLabel = await _resolveVaultLabel(activeId);
+      final importedLabel = resolvedLabel == activeId
+          ? selectedVaultLabel
+          : resolvedLabel;
+      await _resetBiometricForVault(activeId);
+      await _rememberVaultReference(
+        activeId,
+        label: importedLabel,
+        sourceDescription: _sourceDescriptionForImportedVault(imported),
+      );
+      if (!mounted) return;
+      setState(() {
+        _vaultFilePath = activeId;
+        _activeVaultName = importedLabel;
+        _vaultCreatedInSession = false;
+      });
+      if (continueToUnlock) {
+        _passwordController.text = newPassword;
+        await _loadVaultData(newPassword);
+        await _refreshBiometricStateForActiveVault();
+        if (!mounted) return;
+        _handleUnlock();
+      } else {
+        await _refreshVaultSize();
+        await _refreshBiometricStateForActiveVault();
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Recovery successful. Vault opened.')),
+      );
+    } on TimeoutException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Recovery timed out. Please try again.')),
+      );
+    } catch (error, stackTrace) {
+      _logOperationError('recoverImportedVault', error, stackTrace);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Recovery phrase is invalid.')),
+      );
+    } finally {
+      _stopBusy();
+    }
   }
 
   String _humanImportLabel(ImportedVaultFile imported) {
@@ -2603,96 +3699,134 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }) async {
     final currentPassword = await _activeVaultPasswordForMerge();
     if (currentPassword == null || currentPassword.isEmpty) return;
-    final currentPayload = await _vaultService.readVaultPayload(
-      filePath: _vaultFilePath,
-      password: currentPassword,
-    );
-    final importedPayload = await _vaultService.readVaultPayload(
-      filePath: conflictVaultId,
-      password: importedPassword,
-    );
-    final plan = _vaultMergeHelper.buildPlan(
-      current: currentPayload,
-      imported: importedPayload,
-    );
-    if (plan.conflictCount == 0) {
-      final mergedPayload = _vaultMergeHelper.merge(
-        current: currentPayload,
-        imported: importedPayload,
-        selections: const <String, VaultMergeSource>{},
+    var busyActive = false;
+    void startMergeBusy(String message) {
+      _startBusy(
+        message,
+        timeout: const Duration(minutes: 2),
+        timeoutMessage:
+            'Vault merge is still working. Large vaults can take longer.',
       );
-      await _vaultService.persistVaultPayload(
+      busyActive = true;
+    }
+
+    void stopMergeBusy() {
+      if (!busyActive) return;
+      _stopBusy();
+      busyActive = false;
+    }
+
+    try {
+      startMergeBusy('Preparing vault merge...');
+      _updateBusyStep('Reading current vault...', 0.15);
+      final currentPayload = await _vaultService.readVaultPayload(
         filePath: _vaultFilePath,
         password: currentPassword,
-        payload: mergedPayload,
       );
-      if (resolvedVaultVersionId != null && resolvedVaultVersionId.isNotEmpty) {
-        await _vaultService.markVaultConflictResolved(
-          filePath: _vaultFilePath,
-          resolvedVaultVersionId: resolvedVaultVersionId,
+      _updateBusyStep('Reading imported vault...', 0.35);
+      final importedPayload = await _vaultService.readVaultPayload(
+        filePath: conflictVaultId,
+        password: importedPassword,
+      );
+      _updateBusyStep('Comparing vault versions...', 0.55);
+      final plan = _vaultMergeHelper.buildPlan(
+        current: currentPayload,
+        imported: importedPayload,
+      );
+      if (plan.conflictCount == 0) {
+        final mergedPayload = _vaultMergeHelper.merge(
+          current: currentPayload,
+          imported: importedPayload,
+          selections: const <String, VaultMergeSource>{},
         );
+        await _applyMergedVaultPayload(
+          payload: mergedPayload,
+          password: currentPassword,
+          resolvedVaultVersionId: resolvedVaultVersionId,
+          progressStart: 0.70,
+        );
+        stopMergeBusy();
+        if (!mounted) return;
+        _showOperationSnackBar(
+          'Same vault detected. Non-conflicting changes were merged automatically. Please review if needed.',
+        );
+        if (askBackupAfterMerge) {
+          await _confirmBackupAfterCloudMerge();
+        }
+        return;
       }
-      await _loadVaultData(currentPassword);
-      await _refreshVaultSize();
+      stopMergeBusy();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Same vault detected. Non-conflicting changes were merged automatically. Please review if needed.',
+      final mergedPayload = await Navigator.of(context).push<VaultPayload>(
+        MaterialPageRoute<VaultPayload>(
+          builder: (context) => _VaultMergeScreen(
+            plan: plan,
+            currentPayload: currentPayload,
+            importedPayload: importedPayload,
+            mergeHelper: _vaultMergeHelper,
+            importedSourceLabel: importedSourceLabel,
           ),
         ),
       );
+      if (mergedPayload == null) {
+        if (!mounted) return;
+        _showOperationSnackBar('Vault merge cancelled.');
+        return;
+      }
+
+      startMergeBusy('Applying vault merge...');
+      await _applyMergedVaultPayload(
+        payload: mergedPayload,
+        password: currentPassword,
+        resolvedVaultVersionId: resolvedVaultVersionId,
+      );
+      stopMergeBusy();
+      if (!mounted) return;
+      _showOperationSnackBar('Vault merged successfully.');
       if (askBackupAfterMerge) {
         await _confirmBackupAfterCloudMerge();
       }
-      return;
-    }
-    if (!mounted) return;
-    final mergedPayload = await Navigator.of(context).push<VaultPayload>(
-      MaterialPageRoute<VaultPayload>(
-        builder: (context) => _VaultMergeScreen(
-          plan: plan,
-          currentPayload: currentPayload,
-          importedPayload: importedPayload,
-          mergeHelper: _vaultMergeHelper,
-          importedSourceLabel: importedSourceLabel,
-        ),
-      ),
-    );
-    if (mergedPayload == null) {
+    } catch (error, stackTrace) {
+      stopMergeBusy();
+      _logOperationError('reviewAndMergeVaultConflict', error, stackTrace);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Vault merge cancelled.')));
-      return;
+      _showOperationSnackBar('Failed to merge vault. ${_errorHint(error)}');
     }
+  }
 
+  Future<void> _applyMergedVaultPayload({
+    required VaultPayload payload,
+    required String password,
+    String? resolvedVaultVersionId,
+    double progressStart = 0.20,
+  }) async {
+    _updateBusyStep('Saving merged vault...', progressStart);
     await _vaultService.persistVaultPayload(
       filePath: _vaultFilePath,
-      password: currentPassword,
-      payload: mergedPayload,
+      password: password,
+      payload: payload,
     );
     if (resolvedVaultVersionId != null && resolvedVaultVersionId.isNotEmpty) {
+      _updateBusyStep('Marking conflict resolved...', progressStart + 0.25);
       await _vaultService.markVaultConflictResolved(
         filePath: _vaultFilePath,
         resolvedVaultVersionId: resolvedVaultVersionId,
       );
     }
-    await _loadVaultData(currentPassword);
+    _updateBusyStep('Reloading merged vault...', 0.85);
+    await _loadVaultData(password);
+    _updateBusyStep('Refreshing vault size...', 0.95);
     await _refreshVaultSize();
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Vault merged successfully.')));
-    if (askBackupAfterMerge) {
-      await _confirmBackupAfterCloudMerge();
-    }
   }
 
   Future<String?> _activeVaultPasswordForMerge() async {
     final activePassword = _passwordController.text.trim();
     if (activePassword.isNotEmpty) return activePassword;
-    return _promptVaultCredentialForAction(actionLabel: 'Merge vault');
+    final unlocked = await _ensureAuthenticatedVaultSessionForAction(
+      actionLabel: 'Merge vault',
+    );
+    if (!unlocked || !mounted) return null;
+    return _passwordController.text.trim();
   }
 
   Future<void> _exportCurrentVaultToLocal({
@@ -2723,8 +3857,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           exportedPath.isNotEmpty &&
           exportedPath != '__web_download__' &&
           setAsActiveLocation) {
+        final sourceDescription =
+            _findVaultReference(_vaultFilePath)?.sourceDescription ??
+            _defaultVaultSourceDescription();
         _vaultFilePath = exportedPath;
-        await _rememberVaultReference(exportedPath);
+        await _rememberVaultReference(
+          exportedPath,
+          sourceDescription: sourceDescription,
+        );
         await _refreshBiometricStateForActiveVault();
       }
       if (!mounted) return;
@@ -2765,6 +3905,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     try {
+      final signedIn = await _ensureCloudBackupGoogleAccountSelected();
+      if (!signedIn || !mounted) return;
+
       startCloudBusy('Preparing cloud backup...');
       final rawContent = await _vaultService.readRawVaultFile(
         filePath: _vaultFilePath,
@@ -2786,47 +3929,47 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _updateBusyStep('Checking cloud backup status...', 0.30);
       final existingBackup = await _vaultPortability.readCloudBackup(
         vaultId: vaultId,
+        forceAccountChooser: false,
       );
       stopCloudBusy();
       var shouldContinue = true;
+      var uploadContent = rawContent;
       if (existingBackup != null) {
         final result = await _importCloudBackupForMerge(
           backup: existingBackup,
           askBackupAfterMerge: true,
         );
         shouldContinue = result != _CloudMergeOutcome.cancelled;
+        if (shouldContinue) {
+          uploadContent = await _vaultService.readRawVaultFile(
+            filePath: _vaultFilePath,
+          );
+        }
       }
       if (!shouldContinue) return;
       startCloudBusy('Uploading cloud backup...');
-      final finalContent = await _vaultService.readRawVaultFile(
-        filePath: _vaultFilePath,
-      );
+      final finalContent = uploadContent;
       _updateBusyStep('Sending vault to cloud storage...', 0.55);
       final backedUp = await _vaultPortability.backupVaultToCloud(
         vaultId: vaultId,
         suggestedName: suggestedName,
         content: finalContent,
+        forceAccountChooser: false,
       );
       _updateBusyStep('Finishing cloud backup...', 0.95);
       stopCloudBusy();
       if (!mounted) return;
       if (!backedUp) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cloud backup cancelled.')),
-        );
+        _showOperationSnackBar('Cloud backup cancelled.');
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Cloud backup completed.')));
+      _showOperationSnackBar('Cloud backup completed.');
     } catch (error, stackTrace) {
       stopCloudBusy();
       _logOperationError('backupCurrentVaultToCloud', error, stackTrace);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to prepare cloud backup. ${_errorHint(error)}'),
-        ),
+      _showOperationSnackBar(
+        'Failed to prepare cloud backup. ${_errorHint(error)}',
       );
     } finally {
       stopCloudBusy();
@@ -2840,7 +3983,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         message,
         timeout: const Duration(minutes: 2),
         timeoutMessage:
-            'Cloud restore is taking longer than expected. Please check your connection and retry.',
+            'Cloud restore is still working. This can take longer on slow connections.',
       );
       busyActive = true;
     }
@@ -2852,6 +3995,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     try {
+      final signedIn = await _ensureCloudBackupGoogleAccountSelected();
+      if (!signedIn || !mounted) return;
+
       startCloudBusy('Preparing cloud restore...');
       final rawContent = await _vaultService.readRawVaultFile(
         filePath: _vaultFilePath,
@@ -2863,15 +4009,32 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         throw StateError('Vault metadata is missing vaultId');
       }
       _updateBusyStep('Downloading cloud backup...', 0.45);
-      final backup = await _vaultPortability.readCloudBackup(vaultId: vaultId);
-      _updateBusyStep('Preparing backup restore...', 0.75);
-      stopCloudBusy();
+      var backup = await _vaultPortability.readCloudBackup(
+        vaultId: vaultId,
+        forceAccountChooser: false,
+      );
       if (backup == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('No cloud backup found.')));
-        return;
+        _updateBusyStep('Searching all cloud backups...', 0.60);
+        final allBackups = await _vaultPortability.listCloudBackups(
+          forceAccountChooser: false,
+        );
+        stopCloudBusy();
+        if (allBackups.isEmpty) {
+          if (!mounted) return;
+          _showOperationSnackBar(
+            'No cloud backup found. If you backed up on mobile, open Backup there once, then retry.',
+          );
+          return;
+        }
+        backup = await _pickCloudBackupFromList(
+          allBackups,
+          title: AppStrings.importVaultFromCloud,
+          returnOnCancel: OnboardingStep.app,
+        );
+        if (backup == null || !mounted) return;
+      } else {
+        _updateBusyStep('Preparing backup restore...', 0.75);
+        stopCloudBusy();
       }
       await _importCloudBackupForMerge(
         backup: backup,
@@ -2881,13 +4044,28 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       stopCloudBusy();
       _logOperationError('restoreCurrentVaultFromCloud', error, stackTrace);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to restore cloud backup. ${_errorHint(error)}'),
-        ),
+      _showOperationSnackBar(
+        'Failed to restore cloud backup. ${_errorHint(error)}',
       );
     } finally {
       stopCloudBusy();
+    }
+  }
+
+  Future<CloudVaultBackupFile> _ensureCloudBackupContent(
+    CloudVaultBackupFile backup,
+  ) async {
+    if (backup.hasContent) return backup;
+    _startBusy(
+      'Downloading cloud backup...',
+      timeout: const Duration(minutes: 2),
+      timeoutMessage:
+          'Cloud import is still working. This can take longer on slow connections.',
+    );
+    try {
+      return await _vaultPortability.hydrateCloudBackupContent(backup);
+    } finally {
+      _stopBusy();
     }
   }
 
@@ -2895,20 +4073,22 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     required CloudVaultBackupFile backup,
     required bool askBackupAfterMerge,
   }) async {
-    final backupFilePath = await _localPathForCloudBackup(backup.storageId);
+    final hydrated = await _ensureCloudBackupContent(backup);
+    final backupFilePath = await _localPathForCloudBackup(hydrated.storageId);
     await _vaultService.writeRawVaultFile(
       filePath: backupFilePath,
-      rawContent: backup.content,
+      rawContent: hydrated.content,
     );
     var credential = _passwordController.text.trim();
     if (credential.isEmpty) {
       final prompted = await _promptImportVaultCredential(
         title: 'Unlock cloud backup',
+        allowRecovery: false,
       );
-      if (prompted == null || prompted.isEmpty) {
+      if (prompted == null || prompted.password.isEmpty) {
         return _CloudMergeOutcome.cancelled;
       }
-      credential = prompted;
+      credential = prompted.password;
     }
     var result = await _vaultService.importNijaFile(
       filePath: backupFilePath,
@@ -2919,11 +4099,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         title: 'Unlock cloud backup',
         message:
             'The cloud backup did not unlock with the active vault password. Enter the password that was valid when it was backed up.',
+        allowRecovery: false,
       );
-      if (prompted == null || prompted.isEmpty || prompted == credential) {
+      if (prompted == null ||
+          prompted.password.isEmpty ||
+          prompted.password == credential) {
         return _CloudMergeOutcome.cancelled;
       }
-      credential = prompted;
+      credential = prompted.password;
       result = await _vaultService.importNijaFile(
         filePath: backupFilePath,
         unlockCredential: credential,
@@ -2931,9 +4114,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
     if (result.status == ImportStatus.alreadyUpToDate) {
       if (!mounted) return _CloudMergeOutcome.cancelled;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
+      _showOperationSnackBar(result.userSafeMessage);
       return _CloudMergeOutcome.noMergeNeeded;
     }
     if (result.status == ImportStatus.imported) {
@@ -2942,9 +4123,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       await _loadVaultData(credential);
       await _refreshVaultSize();
       if (!mounted) return _CloudMergeOutcome.cancelled;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Cloud backup restored.')));
+      _showOperationSnackBar('Cloud backup restored.');
       return _CloudMergeOutcome.noMergeNeeded;
     }
     if (result.status == ImportStatus.conflictCreated) {
@@ -2955,16 +4134,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       await _reviewAndMergeVaultConflict(
         conflictVaultId: conflictVaultId,
         importedPassword: credential,
-        resolvedVaultVersionId: await _vaultVersionIdFromRaw(backup.content),
+        resolvedVaultVersionId: await _vaultVersionIdFromRaw(hydrated.content),
         askBackupAfterMerge: askBackupAfterMerge,
         importedSourceLabel: 'Cloud backup',
       );
       return _CloudMergeOutcome.merged;
     }
     if (!mounted) return _CloudMergeOutcome.cancelled;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(result.userSafeMessage)));
+    _showOperationSnackBar(result.userSafeMessage);
     return _CloudMergeOutcome.cancelled;
   }
 
@@ -2975,6 +4152,34 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (kIsWeb) return safeName;
     final tempDir = await getTemporaryDirectory();
     return '${tempDir.path}/$safeName';
+  }
+
+  Future<String> _localPathForImportedVault(ImportedVaultFile imported) async {
+    final contentName = _importStagingNameFromRaw(imported.content);
+    final fallbackName = imported.storageId
+        .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
+    final safeName = contentName.isNotEmpty ? contentName : fallbackName;
+    if (kIsWeb) return safeName;
+    final tempDir = await getTemporaryDirectory();
+    return '${tempDir.path}/$safeName';
+  }
+
+  String _importStagingNameFromRaw(String raw) {
+    try {
+      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final vaultId = decoded['vaultId']?.toString().trim() ?? '';
+      final versionId = decoded['vaultVersionId']?.toString().trim() ?? '';
+      final base = [vaultId, versionId]
+          .where((part) => part.isNotEmpty)
+          .join('-')
+          .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_')
+          .replaceAll(RegExp(r'_+'), '_');
+      if (base.isEmpty) return '';
+      return 'import_$base.nija';
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<String?> _vaultVersionIdFromRaw(String raw) async {
@@ -3017,20 +4222,44 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<bool> _changeCloudBackupAccount() {
-    return _vaultPortability.changeCloudBackupAccount();
+    return _ensureCloudBackupGoogleAccountSelected();
   }
 
   Future<void> _refreshVaultSize() async {
+    var size = 0;
+    var revision = 0;
+    var versionId = '';
+    var updatedAt = '';
+
     try {
-      final size = await _vaultService.readVaultSizeBytes(
+      size = await _vaultService.readVaultSizeBytes(filePath: _vaultFilePath);
+    } catch (_) {
+      size = 0;
+    }
+
+    try {
+      final raw = await _vaultService.readRawVaultFile(
         filePath: _vaultFilePath,
       );
-      if (!mounted) return;
-      setState(() => _activeVaultSizeBytes = size);
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        revision = int.tryParse(decoded['revision']?.toString() ?? '') ?? 0;
+        versionId = decoded['vaultVersionId']?.toString().trim() ?? '';
+        updatedAt = decoded['updatedAt']?.toString().trim() ?? '';
+      }
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _activeVaultSizeBytes = 0);
+      revision = 0;
+      versionId = '';
+      updatedAt = '';
     }
+
+    if (!mounted) return;
+    setState(() {
+      _activeVaultSizeBytes = size;
+      _activeVaultRevision = revision;
+      _activeVaultVersionId = versionId;
+      _activeVaultUpdatedAt = updatedAt;
+    });
   }
 
   Future<Map<String, dynamic>> _readVaultInternals() async {
@@ -3112,62 +4341,28 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     await WidgetsBinding.instance.endOfFrame;
   }
 
-  Future<String?> _promptImportVaultCredential({
-    String title = 'Unlock imported vault',
+  Future<_ImportVaultCredentialChoice?> _promptImportVaultCredential({
+    String? title,
     String? message,
+    String? vaultLabel,
+    bool allowRecovery = true,
   }) async {
-    final controller = TextEditingController();
-    try {
-      final result = await showDialog<String>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setLocalState) {
-            final canContinue = controller.text.trim().isNotEmpty;
-            return AlertDialog(
-              title: Text(title),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (message != null && message.trim().isNotEmpty) ...[
-                    Text(message),
-                    const SizedBox(height: 10),
-                  ],
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    obscureText: true,
-                    onChanged: (_) => setLocalState(() {}),
-                    decoration: InputDecoration(
-                      labelText: AppStrings.masterPassword,
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: canContinue
-                      ? () {
-                          FocusManager.instance.primaryFocus?.unfocus();
-                          Navigator.of(context).pop(controller.text.trim());
-                        }
-                      : null,
-                  child: const Text('Import'),
-                ),
-              ],
-            );
-          },
-        ),
-      );
-      await _waitForDialogTeardown();
-      return result;
-    } finally {
-      controller.dispose();
+    if (!mounted) return null;
+    final completer = Completer<_ImportVaultCredentialChoice?>();
+    _importCredentialCompleter = completer;
+    _importCredentialAllowRecovery = allowRecovery;
+
+    if (_step != OnboardingStep.unlock) {
+      await _presentUnlockStep(vaultLabel: vaultLabel);
+    } else if (mounted) {
+      setState(() {
+        if (vaultLabel != null && vaultLabel.trim().isNotEmpty) {
+          _activeVaultName = vaultLabel.trim();
+        }
+      });
     }
+
+    return completer.future;
   }
 
   Future<bool> _confirmReplaceNewerImportedVault(ImportResult result) async {
@@ -3197,12 +4392,19 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   void _clearSensitiveSessionState() {
+    final vaultPath = _vaultFilePath.trim();
+    if (vaultPath.isNotEmpty) {
+      _vaultService.clearUnlockedSession(filePath: vaultPath);
+    }
     _passwordController.clear();
+    _sessionMasterPassword = null;
+    _biometricAuthService.clearWebAuthentication();
   }
 
   Future<void> _resetBiometricForVault(String vaultId) async {
     try {
       await Future.wait<void>([
+        _pinCredentialStore.remove(vaultId: vaultId),
         _biometricCredentialStore.removeMasterPassword(vaultId: vaultId),
         _biometricEnrollmentStore.setEnrolledForVault(
           vaultId: vaultId,
@@ -3213,11 +4415,56 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       // Biometric cleanup should not block vault creation, import, or unlock.
     }
     if (!mounted || vaultId != _vaultFilePath) return;
-    setState(() => _biometricEnabled = false);
+    setState(() {
+      _pinEnabled = false;
+      _biometricEnabled = false;
+    });
   }
 
   Future<void> _enableBiometricForCurrentVault() async {
     final vaultId = _vaultFilePath;
+    if (kIsWeb) {
+      final pin = await _ensurePinForCurrentVault();
+      if (pin == null || !mounted || _vaultFilePath != vaultId) {
+        await _refreshBiometricStateForActiveVault();
+        return;
+      }
+      final webAuthnSupported = await _biometricAuthService
+          .canAttemptWebBiometricEnrollment();
+      if (!webAuthnSupported) {
+        if (!mounted || _vaultFilePath != vaultId) return;
+        await showWebBiometricUnavailableDialog(
+          context,
+          reason: WebBiometricUnavailableReason.browserUnsupported,
+        );
+        await _refreshBiometricStateForActiveVault();
+        return;
+      }
+      if (!mounted || _vaultFilePath != vaultId) return;
+      final enabled = await showWebBiometricEnableDialog(
+        context,
+        onConfirm: () => _biometricCredentialStore.saveMasterPassword(
+          vaultId: vaultId,
+          password: pin,
+          displayName: _activeVaultName,
+          newEnrollment: true,
+        ),
+      );
+      if (!enabled || !mounted || _vaultFilePath != vaultId) {
+        await _refreshBiometricStateForActiveVault();
+        return;
+      }
+      await _biometricEnrollmentStore.setEnrolledForVault(
+        vaultId: vaultId,
+        enrolled: true,
+      );
+      await _refreshBiometricStateForActiveVault();
+      if (!mounted || _vaultFilePath != vaultId) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Biometric unlock enabled.')),
+      );
+      return;
+    }
     final canUse = await _biometricAuthService.canUseBiometrics();
     if (!canUse) {
       if (!mounted) return;
@@ -3228,10 +4475,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       return;
     }
-    final authenticated = await _biometricAuthService.authenticateForUnlock();
-    if (!authenticated || !mounted || _vaultFilePath != vaultId) return;
-    final password = _passwordController.text.trim();
-    if (password.isEmpty) {
+    final password = await _resolveMasterPasswordForBiometricEnrollment();
+    if (password == null || password.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -3242,10 +4487,30 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       return;
     }
-    await _biometricCredentialStore.saveMasterPassword(
+    final authenticated = await _biometricAuthService.authenticateForUnlock(
+      localizedReason: AppStrings.biometricAuthenticateReason,
       vaultId: vaultId,
-      password: password,
     );
+    if (!authenticated) {
+      if (!mounted || _vaultFilePath != vaultId) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.webBiometricEnableFailed)),
+      );
+      return;
+    }
+    try {
+      await _biometricCredentialStore.saveMasterPassword(
+        vaultId: vaultId,
+        password: password,
+        displayName: _activeVaultName,
+      );
+    } catch (error) {
+      if (!mounted || _vaultFilePath != vaultId) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.webBiometricEnableFailed)),
+      );
+      return;
+    }
     await _biometricEnrollmentStore.setEnrolledForVault(
       vaultId: vaultId,
       enrolled: true,
@@ -3265,19 +4530,135 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       enrolled: false,
     );
     if (!mounted || _vaultFilePath != vaultId) return;
-    setState(() => _biometricEnabled = false);
+    setState(() {
+      _biometricEnabled = false;
+    });
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Biometric unlock disabled.')));
   }
 
+  Future<String?> _ensurePinForCurrentVault() async {
+    final vaultId = _vaultFilePath;
+    final hasPin = await _pinCredentialStore.hasPin(vaultId: vaultId);
+    if (!hasPin) {
+      return _setOrChangePinForCurrentVault(returnPin: true);
+    }
+    final pin = await _promptForPin(title: AppStrings.appPinUnlockTitle);
+    if (pin == null || !mounted || _vaultFilePath != vaultId) return null;
+    final password = await _pinCredentialStore.readMasterPassword(
+      vaultId: vaultId,
+      pin: pin,
+    );
+    if (password == null || password.isEmpty) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.appPinInvalidMessage)));
+      return null;
+    }
+    return pin;
+  }
+
+  Future<String?> _setOrChangePinForCurrentVault({
+    bool returnPin = false,
+  }) async {
+    final vaultId = _vaultFilePath;
+    final wasPinEnabled = _pinEnabled;
+    String? password;
+    if (_pinEnabled) {
+      final currentPin = await _promptForPin(
+        title: AppStrings.appPinUnlockTitle,
+      );
+      if (currentPin == null || !mounted || _vaultFilePath != vaultId) {
+        return null;
+      }
+      password = await _pinCredentialStore.readMasterPassword(
+        vaultId: vaultId,
+        pin: currentPin,
+      );
+      if (password == null || password.isEmpty) {
+        if (!mounted) return null;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppStrings.appPinInvalidMessage)),
+        );
+        return null;
+      }
+    } else {
+      password = await _resolveMasterPasswordForPinSetup();
+      if (password == null || password.isEmpty) return null;
+    }
+    final pin = await _promptForNewPin(
+      title: _pinEnabled
+          ? AppStrings.appPinChangeTitle
+          : AppStrings.appPinSetupTitle,
+    );
+    if (pin == null || !mounted || _vaultFilePath != vaultId) return null;
+    await _pinCredentialStore.saveMasterPassword(
+      vaultId: vaultId,
+      pin: pin,
+      password: password,
+    );
+    await _refreshPinStateForActiveVault();
+    if (!mounted || _vaultFilePath != vaultId) return null;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          wasPinEnabled
+              ? AppStrings.appPinChangedMessage
+              : AppStrings.appPinEnabledMessage,
+        ),
+      ),
+    );
+    return returnPin ? pin : null;
+  }
+
   Future<void> _refreshBiometricStateForActiveVault() async {
     final vaultId = _vaultFilePath;
-    final hasSavedCredential =
-        (await _biometricCredentialStore.readMasterPassword(
+    await _refreshPinStateForActiveVault();
+    if (kIsWeb) {
+      final purgedLegacy = await _biometricCredentialStore
+          .purgeLegacyWebEnrollment(vaultId: vaultId);
+      final hasPin = await _pinCredentialStore.hasPin(vaultId: vaultId);
+      final hasSavedCredential = await _biometricCredentialStore
+          .hasStoredCredential(vaultId: vaultId);
+      var enrolled = await _biometricEnrollmentStore.isEnrolledForVault(
+        vaultId,
+      );
+      if (purgedLegacy) {
+        await _biometricEnrollmentStore.setEnrolledForVault(
           vaultId: vaultId,
-        ))?.isNotEmpty ==
-        true;
+          enrolled: false,
+        );
+        enrolled = false;
+      }
+      if (!enrolled && hasSavedCredential) {
+        await _biometricEnrollmentStore.setEnrolledForVault(
+          vaultId: vaultId,
+          enrolled: true,
+        );
+        enrolled = true;
+      }
+      final canUseBiometrics = await _biometricAuthService.canUseBiometrics();
+      final presentation = await _biometricAuthService
+          .describeUnlockPresentation(
+            genericLabel: AppStrings.useBiometricUnlock,
+            fingerprintLabel: AppStrings.useFingerprintUnlock,
+            faceIdLabel: AppStrings.useFaceIdUnlock,
+            deviceLockLabel: AppStrings.useDeviceLockUnlock,
+          );
+      if (!mounted || _vaultFilePath != vaultId) return;
+      setState(() {
+        _biometricAvailable = hasPin && canUseBiometrics;
+        _biometricEnabled =
+            hasPin && enrolled && hasSavedCredential && canUseBiometrics;
+        _biometricUnlockLabel = presentation.label;
+        _biometricUnlockIcon = presentation.icon;
+      });
+      return;
+    }
+    final hasSavedCredential = await _biometricCredentialStore
+        .hasStoredCredential(vaultId: vaultId);
     var enrolled = await _biometricEnrollmentStore.isEnrolledForVault(vaultId);
     if (!enrolled && hasSavedCredential) {
       await _biometricEnrollmentStore.setEnrolledForVault(
@@ -3287,14 +4668,149 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       enrolled = true;
     }
     final canUseBiometrics = await _biometricAuthService.canUseBiometrics();
+    final presentation = await _biometricAuthService.describeUnlockPresentation(
+      genericLabel: AppStrings.useBiometricUnlock,
+      fingerprintLabel: AppStrings.useFingerprintUnlock,
+      faceIdLabel: AppStrings.useFaceIdUnlock,
+      deviceLockLabel: AppStrings.useDeviceLockUnlock,
+    );
     if (!mounted || _vaultFilePath != vaultId) return;
     setState(() {
+      _biometricAvailable = canUseBiometrics;
       _biometricEnabled = enrolled && hasSavedCredential && canUseBiometrics;
+      _biometricUnlockLabel = presentation.label;
+      _biometricUnlockIcon = presentation.icon;
     });
+  }
+
+  Future<void> _refreshPinStateForActiveVault() async {
+    final vaultId = _vaultFilePath;
+    final hasPin = await _pinCredentialStore.hasPin(vaultId: vaultId);
+    if (!mounted || _vaultFilePath != vaultId) return;
+    setState(() => _pinEnabled = hasPin);
+  }
+
+  Future<String?> _resolveMasterPasswordForBiometricEnrollment() async {
+    final fromField = _passwordController.text.trim();
+    if (fromField.isNotEmpty) return fromField;
+    if (_sessionMasterPassword != null &&
+        _sessionMasterPassword!.trim().isNotEmpty) {
+      return _sessionMasterPassword!.trim();
+    }
+    if (!mounted || _step != OnboardingStep.app) return null;
+    return _promptForMasterPassword(
+      title: AppStrings.biometricEnableConfirmTitle,
+      message: AppStrings.biometricEnableConfirmMessage,
+    );
+  }
+
+  Future<String?> _resolveMasterPasswordForPinSetup() async {
+    final fromField = _passwordController.text.trim();
+    if (fromField.isNotEmpty) return fromField;
+    if (_sessionMasterPassword != null &&
+        _sessionMasterPassword!.trim().isNotEmpty) {
+      return _sessionMasterPassword!.trim();
+    }
+    if (!mounted || _step != OnboardingStep.app) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppStrings.appPinUnavailableMessage)),
+      );
+      return null;
+    }
+    return _promptForMasterPassword(
+      title: AppStrings.appPinSetupTitle,
+      message: AppStrings.appPinSetupMessage,
+    );
+  }
+
+  Future<String?> _promptForMasterPassword({
+    required String title,
+    required String message,
+  }) async {
+    final controller = TextEditingController();
+    final password = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(message),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: AppStrings.masterPassword,
+                ),
+                onSubmitted: (value) =>
+                    Navigator.of(dialogContext).pop(value.trim()),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(AppStrings.cancel),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(controller.text.trim()),
+              child: Text(AppStrings.enable),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (password == null || password.isEmpty || !mounted) return null;
+    try {
+      await _vaultService
+          .unlockVault(
+            filePath: _vaultFilePath,
+            password: password,
+            onProgress: (_) {},
+          )
+          .timeout(_vaultOpTimeout);
+      _sessionMasterPassword = password;
+      return password;
+    } catch (_) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.wrongVaultPassword)));
+      return null;
+    }
+  }
+
+  Future<String?> _promptForPin({required String title}) async {
+    final pin = await showDialog<String>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      builder: (dialogContext) => _NijaPinEntryDialog(title: title),
+    );
+    if (pin == null || pin.isEmpty) return null;
+    return pin;
+  }
+
+  Future<String?> _promptForNewPin({required String title}) async {
+    final pin = await showDialog<String>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      builder: (dialogContext) => _NijaPinSetupDialog(title: title),
+    );
+    return pin;
   }
 
   Future<void> _confirmAndEnableBiometricForCurrentVault() async {
     if (!mounted) return;
+    if (kIsWeb) {
+      await _enableBiometricForCurrentVault();
+      return;
+    }
     final decision = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -3345,7 +4861,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     await _refreshBiometricStateForActiveVault();
   }
 
-  Future<bool> _showMandatoryMasterPasswordReset(String recoveryPhrase) async {
+  Future<bool> _showMandatoryMasterPasswordReset(
+    String recoveryPhrase, {
+    String? filePath,
+  }) async {
     final newPasswordController = TextEditingController();
     final confirmPasswordController = TextEditingController();
 
@@ -3413,7 +4932,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
       if (action != 'submit') return false;
 
-      final vaultId = _vaultFilePath;
+      final vaultId = filePath ?? _vaultFilePath;
       _startBusy('Resetting master password...');
       try {
         await _vaultService
@@ -3869,12 +5388,638 @@ class RecoveryScreen extends StatelessWidget {
   }
 }
 
+class KnownVaultSelectionScreen extends StatelessWidget {
+  const KnownVaultSelectionScreen({
+    super.key,
+    required this.knownVaults,
+    required this.themeMode,
+    this.onThemeModeChanged,
+    this.onBack,
+    this.onVaultSelected,
+    this.onImportFromDevice,
+    this.onImportFromCloud,
+    this.sectionLabel,
+    this.heading,
+    this.description,
+    this.showImportFromDevice = true,
+    this.useCloudBackupCards = false,
+  });
+
+  final List<VaultReference> knownVaults;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final VoidCallback? onBack;
+  final ValueChanged<VaultReference>? onVaultSelected;
+  final Future<void> Function()? onImportFromDevice;
+  final Future<void> Function()? onImportFromCloud;
+  final String? sectionLabel;
+  final String? heading;
+  final String? description;
+  final bool showImportFromDevice;
+  final bool useCloudBackupCards;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final resolvedSectionLabel = sectionLabel ?? AppStrings.knownVaults;
+    final resolvedHeading = heading ?? AppStrings.chooseWhatToOpen;
+    final resolvedDescription =
+        description ?? AppStrings.knownVaultsDescription;
+    return OnboardingScaffold(
+      fullWidth: true,
+      child: Column(
+        children: [
+          _KnownVaultHeader(
+            themeMode: themeMode,
+            onThemeModeChanged: onThemeModeChanged,
+            onBack: onBack,
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 28, 16, 40),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - 68,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      key: const ValueKey('known-vault-shell'),
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: Column(
+                        key: const ValueKey('known-vault-selection-screen'),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            resolvedSectionLabel.toUpperCase(),
+                            style: EntryTypography.sectionLabel(
+                              colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          Text(
+                            resolvedHeading,
+                            style: EntryTypography.pageHeading(
+                              colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            resolvedDescription,
+                            style: EntryTypography.pageDescription(
+                              colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          if (knownVaults.isEmpty)
+                            useCloudBackupCards
+                                ? _CloudVaultEmptyState()
+                                : _KnownVaultEmptyState()
+                          else
+                            ...knownVaults.map(
+                              (entry) => Padding(
+                                padding: const EdgeInsets.only(bottom: 9),
+                                child: _KnownVaultCard(
+                                  entry: entry,
+                                  useCloudBackupIcon: useCloudBackupCards,
+                                  useLastUpdatedLabel: useCloudBackupCards,
+                                  onSelected: onVaultSelected == null
+                                      ? null
+                                      : () => onVaultSelected!(entry),
+                                ),
+                              ),
+                            ),
+                          if (showImportFromDevice) ...[
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton(
+                                key: const ValueKey('known-vault-open-file'),
+                                onPressed: () {
+                                  if (onImportFromDevice != null) {
+                                    unawaited(onImportFromDevice!());
+                                    return;
+                                  }
+                                  Navigator.of(
+                                    context,
+                                  ).pop(_VaultPickerAction.importFromDevice);
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(44),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  side: BorderSide(
+                                    color: colorScheme.outlineVariant,
+                                  ),
+                                  textStyle: EntryTypography.restoreButton(
+                                    colorScheme.onSurface,
+                                  ),
+                                ),
+                                child: Text(
+                                  AppStrings.selectDifferentVaultFile,
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (onImportFromCloud != null) ...[
+                            const SizedBox(height: 16),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                AppStrings.restoreFromStorage.toUpperCase(),
+                                style: EntryTypography.sectionLabel(
+                                  colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                key: const ValueKey(
+                                  'known-vault-restore-cloud',
+                                ),
+                                onPressed: () =>
+                                    unawaited(onImportFromCloud!()),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(44),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  side: BorderSide(
+                                    color: colorScheme.outlineVariant,
+                                  ),
+                                  textStyle: EntryTypography.restoreButton(
+                                    colorScheme.onSurface,
+                                  ),
+                                ),
+                                icon: const Icon(Icons.cloud_download_outlined),
+                                label: Text(AppStrings.restoreFromStorage),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _KnownVaultHeader extends StatelessWidget {
+  const _KnownVaultHeader({
+    required this.themeMode,
+    this.onThemeModeChanged,
+    this.onBack,
+  });
+
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final VoidCallback? onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            key: const ValueKey('known-vault-back'),
+            tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+            onPressed: onBack ?? () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.arrow_back),
+          ),
+          Expanded(
+            child: Text(
+              AppStrings.selectVault,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: EntryTypography.headerTitle(colorScheme.onSurface),
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('known-vault-theme-toggle'),
+            tooltip: 'Change theme',
+            onPressed: onThemeModeChanged == null
+                ? null
+                : () => onThemeModeChanged!(
+                    isDark ? ThemeMode.light : ThemeMode.dark,
+                  ),
+            icon: Icon(
+              isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _KnownVaultCard extends StatelessWidget {
+  const _KnownVaultCard({
+    required this.entry,
+    this.onSelected,
+    this.useCloudBackupIcon = false,
+    this.useLastUpdatedLabel = false,
+  });
+
+  final VaultReference entry;
+  final VoidCallback? onSelected;
+  final bool useCloudBackupIcon;
+  final bool useLastUpdatedLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: colorScheme.surface,
+      borderRadius: BorderRadius.circular(13),
+      child: InkWell(
+        key: ValueKey('known-vault-card-${entry.id}'),
+        borderRadius: BorderRadius.circular(13),
+        hoverColor: colorScheme.surfaceContainerHighest,
+        onTap: onSelected ?? () => Navigator.of(context).pop(entry),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          constraints: const BoxConstraints(minHeight: 86),
+          padding: const EdgeInsets.all(13),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: colorScheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  useCloudBackupIcon
+                      ? Icons.cloud_done_outlined
+                      : Icons.shield_outlined,
+                  size: 22,
+                  color: colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: EntryTypography.vaultCardTitle(
+                        colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      entry.sourceDescription.trim().isEmpty
+                          ? AppStrings.localVaultReference
+                          : entry.sourceDescription.trim(),
+                      style: EntryTypography.vaultCardMeta(
+                        colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _activityText(
+                        entry.lastOpenedAtEpochMs,
+                        useLastUpdatedLabel: useLastUpdatedLabel,
+                      ),
+                      style: EntryTypography.vaultCardMeta(
+                        colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _activityText(int epochMs, {required bool useLastUpdatedLabel}) {
+    if (epochMs <= 0) {
+      return useLastUpdatedLabel
+          ? AppStrings.lastUpdated
+          : AppStrings.neverOpened;
+    }
+    final opened = DateTime.fromMillisecondsSinceEpoch(epochMs).toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final openedDay = DateTime(opened.year, opened.month, opened.day);
+    final timeLabel = _formatClock(opened);
+    if (useLastUpdatedLabel) {
+      if (openedDay == today) {
+        return '${AppStrings.lastUpdated} · $timeLabel';
+      }
+      if (openedDay == today.subtract(const Duration(days: 1))) {
+        return '${AppStrings.lastUpdated} · Yesterday';
+      }
+      return '${AppStrings.lastUpdated} · ${_formatShortDate(opened)}';
+    }
+    if (openedDay == today) return 'Today · $timeLabel';
+    if (openedDay == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday';
+    }
+    return _formatShortDate(opened);
+  }
+
+  String _formatClock(DateTime value) {
+    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    final minute = value.minute.toString().padLeft(2, '0');
+    final period = value.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  String _formatShortDate(DateTime value) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[value.month - 1]} ${value.day}';
+  }
+}
+
+class _KnownVaultEmptyState extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            AppStrings.noSavedVaultLocations,
+            style: EntryTypography.emptyStateTitle(colorScheme.onSurface),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            AppStrings.importVaultToContinue,
+            style: EntryTypography.emptyStateBody(colorScheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CloudVaultEmptyState extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            AppStrings.importVaultFromCloud,
+            style: EntryTypography.emptyStateTitle(colorScheme.onSurface),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            AppStrings.cloudVaultsDescription,
+            style: EntryTypography.emptyStateBody(colorScheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VaultPickerSurface extends StatelessWidget {
+  const _VaultPickerSurface({required this.knownVaults});
+
+  final List<VaultReference> knownVaults;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  AppStrings.selectVaultToOpen,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (knownVaults.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colorScheme.outlineVariant),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppStrings.noSavedVaultLocations,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    AppStrings.importVaultToContinue,
+                    style: TextStyle(color: colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: knownVaults.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final entry = knownVaults[index];
+                  return _VaultPickerTile(
+                    icon: Icons.lock_outline,
+                    title: entry.label,
+                    subtitle: entry.id,
+                    onTap: () => Navigator.of(context).pop(entry),
+                  );
+                },
+              ),
+            ),
+          ...[
+            const SizedBox(height: 12),
+            _VaultPickerTile(
+              icon: Icons.file_open_outlined,
+              title: AppStrings.importVaultFromDevice,
+              onTap: () => Navigator.of(
+                context,
+              ).pop(_VaultPickerAction.importFromDevice),
+            ),
+            const SizedBox(height: 8),
+            _VaultPickerTile(
+              icon: Icons.cloud_download_outlined,
+              title: AppStrings.importVaultFromCloud,
+              onTap: () =>
+                  Navigator.of(context).pop(_VaultPickerAction.importFromCloud),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _VaultPickerTile extends StatelessWidget {
+  const _VaultPickerTile({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+    this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class UnlockScreen extends StatefulWidget {
   const UnlockScreen({
     super.key,
+    required this.vaultName,
+    required this.guardianProfile,
     required this.passwordController,
+    this.pinEnabled = false,
     required this.biometricEnabled,
+    required this.biometricUnlockLabel,
+    required this.biometricUnlockIcon,
+    this.showRecoveryAction = true,
+    this.themeMode = ThemeMode.system,
+    this.onThemeModeChanged,
+    required this.onBack,
     required this.onUnlock,
+    this.onPinUnlock,
     required this.onBiometricUnlock,
     required this.onRecover,
     required this.onSelectDifferentVault,
@@ -3882,9 +6027,19 @@ class UnlockScreen extends StatefulWidget {
     required this.onCreateVault,
   });
 
+  final String vaultName;
+  final GuardianProfile guardianProfile;
   final TextEditingController passwordController;
+  final bool pinEnabled;
   final bool biometricEnabled;
+  final String biometricUnlockLabel;
+  final IconData biometricUnlockIcon;
+  final bool showRecoveryAction;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final Future<void> Function() onBack;
   final Future<void> Function() onUnlock;
+  final Future<void> Function()? onPinUnlock;
   final Future<void> Function() onBiometricUnlock;
   final Future<void> Function() onRecover;
   final Future<void> Function() onSelectDifferentVault;
@@ -3897,153 +6052,359 @@ class UnlockScreen extends StatefulWidget {
 
 class _UnlockScreenState extends State<UnlockScreen> {
   bool _obscurePassword = true;
+  bool _autoPinAttempted = false;
+  bool _autoBiometricAttempted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _schedulePreferredQuickUnlock();
+  }
+
+  @override
+  void didUpdateWidget(covariant UnlockScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.biometricEnabled &&
+        !oldWidget.biometricEnabled &&
+        !_autoBiometricAttempted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _autoBiometricAttempted) return;
+        _autoBiometricAttempted = true;
+        unawaited(widget.onBiometricUnlock());
+      });
+    }
+    if (widget.pinEnabled &&
+        !oldWidget.pinEnabled &&
+        !widget.biometricEnabled &&
+        !_autoPinAttempted) {
+      _schedulePreferredQuickUnlock();
+    }
+  }
+
+  void _schedulePreferredQuickUnlock() {
+    if (widget.biometricEnabled && !_autoBiometricAttempted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _autoBiometricAttempted) return;
+        _autoBiometricAttempted = true;
+        unawaited(widget.onBiometricUnlock());
+      });
+      return;
+    }
+    if (widget.pinEnabled &&
+        widget.onPinUnlock != null &&
+        !widget.biometricEnabled &&
+        !_autoPinAttempted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _autoPinAttempted) return;
+        _autoPinAttempted = true;
+        unawaited(widget.onPinUnlock!());
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final accent = colorScheme.primary;
+    final isDark = theme.brightness == Brightness.dark;
+    final protectedBy =
+        'Protected by ${widget.guardianProfile.displayName} Guardian';
 
     return OnboardingScaffold(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
-            children: [
-              ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: (constraints.maxHeight - 52).clamp(520.0, 720.0),
+      fullWidth: true,
+      child: Column(
+        key: const ValueKey('unlock-screen'),
+        children: [
+          Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              border: Border(
+                bottom: BorderSide(color: colorScheme.outlineVariant),
+              ),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  key: const ValueKey('unlock-back'),
+                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                  onPressed: () => unawaited(widget.onBack()),
+                  icon: const Icon(Icons.arrow_back),
                 ),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 18),
-                    Image.asset(
-                      'assets/branding/nija_mark.png',
-                      width: 72,
-                      height: 72,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      AppStrings.appName,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'yourself, secure.',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 30),
-                    Icon(
-                      Icons.lock_outline,
-                      color: colorScheme.onSurfaceVariant,
-                      size: 28,
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      AppStrings.unlockHelper,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: widget.passwordController,
-                      obscureText: _obscurePassword,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _unlockIfReady(),
-                      decoration: InputDecoration(
-                        labelText: AppStrings.masterPassword,
-                        suffixIcon: IconButton(
-                          onPressed: () => setState(
-                            () => _obscurePassword = !_obscurePassword,
+                Expanded(
+                  child: Text(
+                    AppStrings.unlockVault,
+                    textAlign: TextAlign.center,
+                    style: EntryTypography.headerTitle(colorScheme.onSurface),
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('unlock-theme-toggle'),
+                  tooltip: 'Change theme',
+                  onPressed: widget.onThemeModeChanged == null
+                      ? null
+                      : () => widget.onThemeModeChanged!(
+                          isDark ? ThemeMode.light : ThemeMode.dark,
+                        ),
+                  icon: Icon(
+                    isDark
+                        ? Icons.light_mode_outlined
+                        : Icons.dark_mode_outlined,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 28, 16, 40),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - 68,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 64,
+                            height: 64,
+                            decoration: BoxDecoration(
+                              color: colorScheme.primary.withValues(
+                                alpha: 0.12,
+                              ),
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              widget.guardianProfile.icon,
+                              style: const TextStyle(fontSize: 26),
+                            ),
                           ),
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
+                          const SizedBox(height: 14),
+                          Text(
+                            widget.vaultName,
+                            textAlign: TextAlign.center,
+                            style: EntryTypography.unlockTitle(
+                              colorScheme.onSurface,
+                            ),
                           ),
-                          tooltip: _obscurePassword
-                              ? 'Show password'
-                              : 'Hide password',
-                        ),
+                          const SizedBox(height: 8),
+                          Text(
+                            protectedBy,
+                            textAlign: TextAlign.center,
+                            style: EntryTypography.unlockSubtitle(
+                              colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 22),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  AppStrings.masterPassword.toUpperCase(),
+                                  style: EntryTypography.fieldLabel(
+                                    colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 7),
+                                TextField(
+                                  key: const ValueKey('unlock-password-field'),
+                                  controller: widget.passwordController,
+                                  obscureText: _obscurePassword,
+                                  textInputAction: TextInputAction.done,
+                                  onSubmitted: (_) => _unlockIfReady(),
+                                  decoration: InputDecoration(
+                                    hintText: AppStrings.masterPassword,
+                                    filled: true,
+                                    fillColor: colorScheme.surface,
+                                    suffixIcon: IconButton(
+                                      onPressed: () => setState(
+                                        () => _obscurePassword =
+                                            !_obscurePassword,
+                                      ),
+                                      icon: Icon(
+                                        _obscurePassword
+                                            ? Icons.visibility_outlined
+                                            : Icons.visibility_off_outlined,
+                                      ),
+                                      tooltip: _obscurePassword
+                                          ? 'Show password'
+                                          : 'Hide password',
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      borderSide: BorderSide(
+                                        color: colorScheme.outlineVariant,
+                                      ),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      borderSide: BorderSide(
+                                        color: colorScheme.outlineVariant,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      borderSide: BorderSide(
+                                        color: colorScheme.primary,
+                                      ),
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              key: const ValueKey('unlock-submit-button'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: colorScheme.onSurface,
+                                foregroundColor: colorScheme.surface,
+                                minimumSize: const Size.fromHeight(44),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                textStyle: EntryTypography.restoreButton(
+                                  colorScheme.surface,
+                                ),
+                              ),
+                              onPressed: _unlockIfReady,
+                              child: Text(AppStrings.unlock),
+                            ),
+                          ),
+                          if (widget.pinEnabled &&
+                              widget.onPinUnlock != null) ...[
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                key: const ValueKey('unlock-pin-button'),
+                                onPressed: () =>
+                                    unawaited(widget.onPinUnlock!()),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(44),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  side: BorderSide(
+                                    color: colorScheme.outlineVariant,
+                                  ),
+                                ),
+                                icon: const Icon(Icons.pin_outlined),
+                                label: Text(AppStrings.unlockWithPin),
+                              ),
+                            ),
+                          ],
+                          if (widget.biometricEnabled) ...[
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                key: const ValueKey('unlock-biometric-button'),
+                                onPressed: () =>
+                                    unawaited(widget.onBiometricUnlock()),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(44),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  side: BorderSide(
+                                    color: colorScheme.outlineVariant,
+                                  ),
+                                ),
+                                icon: Icon(widget.biometricUnlockIcon),
+                                label: Text(widget.biometricUnlockLabel),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 10),
+                          if (widget.showRecoveryAction)
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton(
+                                onPressed: widget.onRecover,
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(44),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  side: BorderSide(
+                                    color: colorScheme.outlineVariant,
+                                  ),
+                                  textStyle: EntryTypography.restoreButton(
+                                    colorScheme.onSurface,
+                                  ),
+                                ),
+                                child: Text(AppStrings.webRecoverWithPhrase),
+                              ),
+                            ),
+                          if (widget.showRecoveryAction)
+                            const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              onPressed: widget.onSelectDifferentVault,
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(44),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                side: BorderSide(
+                                  color: colorScheme.outlineVariant,
+                                ),
+                                textStyle: EntryTypography.restoreButton(
+                                  colorScheme.onSurface,
+                                ),
+                              ),
+                              child: Text(AppStrings.selectDifferentVault),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            spacing: 8,
+                            runSpacing: 2,
+                            children: [
+                              TextButton(
+                                onPressed: widget.onOpenEncryptedSecret,
+                                child: Text(AppStrings.openEncryptedSecret),
+                              ),
+                              TextButton(
+                                onPressed: widget.onCreateVault,
+                                child: Text(AppStrings.createVault),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 28),
+                          Text(
+                            AppStrings.webLocalYours,
+                            textAlign: TextAlign.center,
+                            style: EntryTypography.unlockFooter(
+                              colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _unlockIfReady,
-                        child: Text(AppStrings.unlock),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (widget.biometricEnabled)
-                      TextButton.icon(
-                        onPressed: widget.onBiometricUnlock,
-                        icon: Icon(Icons.fingerprint, color: accent),
-                        label: Text(AppStrings.useBiometricUnlock),
-                      ),
-                    if (!widget.biometricEnabled)
-                      Text(
-                        AppStrings.unlockVault,
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    const SizedBox(height: 24),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 6,
-                      runSpacing: 2,
-                      children: [
-                        TextButton(
-                          onPressed: widget.onRecover,
-                          child: const Text('Recover with phrase'),
-                        ),
-                        TextButton(
-                          onPressed: widget.onSelectDifferentVault,
-                          child: Text(AppStrings.selectDifferentVault),
-                        ),
-                        TextButton(
-                          onPressed: widget.onOpenEncryptedSecret,
-                          child: Text(AppStrings.openEncryptedSecret),
-                        ),
-                        TextButton(
-                          onPressed: widget.onCreateVault,
-                          child: Text(AppStrings.createVault),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 34),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 24),
-                      child: Text(
-                        '100% local. 100% yours.',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -5125,6 +7486,246 @@ String _formatDocumentByteCount(int bytes) {
   return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
 }
 
+class _NijaPinDialog extends StatelessWidget {
+  const _NijaPinDialog({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Dialog(
+      backgroundColor: colorScheme.surface,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: colorScheme.outlineVariant),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+          child: IconTheme(
+            data: IconThemeData(color: colorScheme.primary),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NijaPinEntryDialog extends StatefulWidget {
+  const _NijaPinEntryDialog({required this.title});
+
+  final String title;
+
+  @override
+  State<_NijaPinEntryDialog> createState() => _NijaPinEntryDialogState();
+}
+
+class _NijaPinEntryDialogState extends State<_NijaPinEntryDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() => Navigator.of(context).pop(_controller.text.trim());
+
+  @override
+  Widget build(BuildContext context) {
+    return _NijaPinDialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.pin_outlined, size: 28),
+          const SizedBox(height: 12),
+          _NijaPinDialogTitle(widget.title),
+          const SizedBox(height: 16),
+          TextField(
+            key: const ValueKey('app-pin-field'),
+            controller: _controller,
+            obscureText: true,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(labelText: AppStrings.appPinLabel),
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 20),
+          _NijaPinDialogActions(
+            primaryLabel: AppStrings.unlock,
+            onCancel: () => Navigator.of(context).pop(),
+            onPrimary: _submit,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NijaPinSetupDialog extends StatefulWidget {
+  const _NijaPinSetupDialog({required this.title});
+
+  final String title;
+
+  @override
+  State<_NijaPinSetupDialog> createState() => _NijaPinSetupDialogState();
+}
+
+class _NijaPinSetupDialogState extends State<_NijaPinSetupDialog> {
+  final _pinController = TextEditingController();
+  final _confirmController = TextEditingController();
+  String? _errorText;
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final candidate = _pinController.text.trim();
+    final confirm = _confirmController.text.trim();
+    if (candidate.length < 6 || candidate != confirm) {
+      setState(() {
+        _errorText = candidate.length < 6
+            ? AppStrings.appPinTooShortMessage
+            : AppStrings.appPinMismatchMessage;
+      });
+      return;
+    }
+    Navigator.of(context).pop(candidate);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return _NijaPinDialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.pin_outlined, size: 28),
+          const SizedBox(height: 12),
+          _NijaPinDialogTitle(widget.title),
+          const SizedBox(height: 12),
+          Text(
+            AppStrings.appPinSetupMessage,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('app-pin-new-field'),
+            controller: _pinController,
+            obscureText: true,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(
+              labelText: AppStrings.appPinLabel,
+              errorText: _errorText,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('app-pin-confirm-field'),
+            controller: _confirmController,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(
+              labelText: AppStrings.appPinConfirmLabel,
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 20),
+          _NijaPinDialogActions(
+            primaryLabel: AppStrings.enable,
+            onCancel: () => Navigator.of(context).pop(),
+            onPrimary: _submit,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NijaPinDialogTitle extends StatelessWidget {
+  const _NijaPinDialogTitle(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Text(
+      text,
+      textAlign: TextAlign.center,
+      style: EntryTypography.unlockTitle(colorScheme.onSurface),
+    );
+  }
+}
+
+class _NijaPinDialogActions extends StatelessWidget {
+  const _NijaPinDialogActions({
+    required this.primaryLabel,
+    required this.onCancel,
+    required this.onPrimary,
+  });
+
+  final String primaryLabel;
+  final VoidCallback onCancel;
+  final VoidCallback onPrimary;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: onCancel,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(44),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              side: BorderSide(color: colorScheme.outlineVariant),
+            ),
+            child: Text(AppStrings.cancel),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FilledButton(
+            onPressed: onPrimary,
+            style: FilledButton.styleFrom(
+              backgroundColor: colorScheme.onSurface,
+              foregroundColor: colorScheme.surface,
+              minimumSize: const Size.fromHeight(44),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: Text(primaryLabel),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _VaultMergeScreen extends StatefulWidget {
   const _VaultMergeScreen({
     required this.plan,
@@ -5274,8 +7875,8 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
                       Expanded(
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: colorScheme.primary,
-                            side: BorderSide(color: colorScheme.primary),
+                            foregroundColor: colorScheme.onSurface,
+                            side: BorderSide(color: colorScheme.outline),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -5289,9 +7890,8 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
                       Expanded(
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: colorScheme.onPrimary,
-                            backgroundColor: colorScheme.primary,
-                            side: BorderSide(color: colorScheme.primary),
+                            foregroundColor: colorScheme.onSurface,
+                            side: BorderSide(color: colorScheme.outline),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -5309,10 +7909,13 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
                         backgroundColor: colorScheme.primary,
                         foregroundColor: colorScheme.onPrimary,
+                        disabledBackgroundColor:
+                            colorScheme.surfaceContainerHighest,
+                        disabledForegroundColor: colorScheme.onSurfaceVariant,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -5340,21 +7943,36 @@ class _VaultMergeScreenState extends State<_VaultMergeScreen> {
     final selected = _filter == value;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        showCheckmark: false,
-        labelStyle: TextStyle(
-          color: selected ? colorScheme.onPrimary : colorScheme.onSurface,
-          fontWeight: FontWeight.w700,
+      child: Material(
+        color: selected
+            ? colorScheme.primary
+            : colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _filter = value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected
+                    ? colorScheme.primary
+                    : colorScheme.outlineVariant,
+              ),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected
+                    ? colorScheme.onPrimary
+                    : colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ),
         ),
-        selectedColor: colorScheme.primary,
-        backgroundColor: colorScheme.surface,
-        side: BorderSide(
-          color: selected ? colorScheme.primary : colorScheme.outlineVariant,
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        onSelected: (_) => setState(() => _filter = value),
       ),
     );
   }
@@ -5635,11 +8253,14 @@ class _MergeEntryCard extends StatelessWidget {
             if (expanded) ...[
               const SizedBox(height: 10),
               if (entry.current != null)
-                _MergeChoiceRow(
-                  title: 'Current Vault',
-                  subtitle: _metadataLine(entry.current!),
-                  selected: selected == VaultMergeSource.current,
-                  onTap: () => onSelected(VaultMergeSource.current),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _MergeChoiceRow(
+                    title: 'Current Vault',
+                    subtitle: _metadataLine(entry.current!),
+                    selected: selected == VaultMergeSource.current,
+                    onTap: () => onSelected(VaultMergeSource.current),
+                  ),
                 ),
               if (entry.imported != null)
                 _MergeChoiceRow(
@@ -5743,61 +8364,126 @@ class _MergeChoiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final backgroundColor = selected
+        ? colorScheme.primary.withValues(alpha: 0.1)
+        : colorScheme.surface;
+    final borderColor = selected
+        ? colorScheme.primary
+        : colorScheme.outlineVariant;
+    final foregroundColor = selected
+        ? colorScheme.onSurface
+        : colorScheme.onSurface;
+    final subtitleColor = selected
+        ? colorScheme.onSurfaceVariant
+        : colorScheme.onSurfaceVariant;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
-        decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: colorScheme.outlineVariant),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: colorScheme.onSurface,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor, width: selected ? 2 : 1),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: colorScheme.primary.withValues(alpha: 0.16),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: colorScheme.onSurfaceVariant,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                color: selected ? colorScheme.primary : Colors.transparent,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: selected ? colorScheme.primary : colorScheme.outline,
-                  width: 2,
+                  ]
+                : const [],
+          ),
+          child: Row(
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                width: 4,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: selected ? colorScheme.primary : Colors.transparent,
+                  borderRadius: BorderRadius.circular(99),
                 ),
               ),
-              child: selected
-                  ? Icon(Icons.check, color: colorScheme.onPrimary, size: 15)
-                  : null,
-            ),
-          ],
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              color: foregroundColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        if (selected)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colorScheme.primary,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'Selected',
+                              style: TextStyle(
+                                color: colorScheme.onPrimary,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: subtitleColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: selected ? colorScheme.primary : Colors.transparent,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? colorScheme.primary : colorScheme.outline,
+                    width: 2,
+                  ),
+                ),
+                child: selected
+                    ? Icon(Icons.check, color: colorScheme.onPrimary, size: 14)
+                    : null,
+              ),
+            ],
+          ),
         ),
       ),
     );

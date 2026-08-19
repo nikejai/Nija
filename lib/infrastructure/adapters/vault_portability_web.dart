@@ -4,19 +4,30 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:html' as html;
 
+import 'google_drive_vault_portability.dart';
 import 'vault_portability_base.dart';
 import 'vault_portability_model.dart';
 
 class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
+  const VaultPortabilityAdapterImpl();
+
+  static const _googleDrive = GoogleDriveVaultPortability();
+
   @override
   Future<ImportedVaultFile?> importVaultFromLocal() async {
     final input = html.FileUploadInputElement()..accept = '.nija,.json,.txt';
     final completer = Completer<ImportedVaultFile?>();
 
+    void complete(ImportedVaultFile? file) {
+      if (!completer.isCompleted) {
+        completer.complete(file);
+      }
+    }
+
     input.onChange.first.then((_) {
       final file = input.files?.isNotEmpty == true ? input.files!.first : null;
       if (file == null) {
-        completer.complete(null);
+        complete(null);
         return;
       }
       final reader = html.FileReader();
@@ -24,21 +35,23 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       reader.onLoad.first.then((_) {
         final content = reader.result?.toString();
         if (content == null || content.isEmpty) {
-          completer.complete(null);
+          complete(null);
           return;
         }
         final timestamp = DateTime.now().millisecondsSinceEpoch;
-        completer.complete(
+        complete(
           ImportedVaultFile(
             storageId: 'web_imported_${timestamp}_${file.name}',
             label: _importLabel(file.name, content),
             content: content,
+            sourceDescription: file.name,
           ),
         );
       });
-      reader.onError.first.then((_) => completer.complete(null));
+      reader.onError.first.then((_) => complete(null));
     });
 
+    input.addEventListener('cancel', (_) => complete(null));
     input.click();
     return completer.future;
   }
@@ -90,29 +103,63 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     required String vaultId,
     required String suggestedName,
     required String content,
-  }) async {
-    final result = await exportVaultToLocal(
+    bool forceAccountChooser = true,
+  }) {
+    return _googleDrive.backupVaultToCloud(
+      vaultId: vaultId,
       suggestedName: suggestedName,
       content: content,
+      forceAccountChooser: forceAccountChooser,
     );
-    return result != null && result.isNotEmpty;
   }
 
   @override
-  Future<List<CloudVaultBackupFile>> listCloudBackups() async {
-    return const <CloudVaultBackupFile>[];
+  Future<List<CloudVaultBackupFile>> listCloudBackups({
+    bool forceAccountChooser = false,
+  }) {
+    return _googleDrive.listCloudBackups(
+      forceAccountChooser: forceAccountChooser,
+    );
+  }
+
+  @override
+  Future<CloudVaultBackupFile> hydrateCloudBackupContent(
+    CloudVaultBackupFile listing, {
+    bool forceAccountChooser = false,
+  }) {
+    return _googleDrive.hydrateCloudBackupContent(
+      listing,
+      forceAccountChooser: forceAccountChooser,
+    );
   }
 
   @override
   Future<CloudVaultBackupFile?> readCloudBackup({
     required String vaultId,
-  }) async {
-    return null;
+    bool forceAccountChooser = true,
+  }) {
+    return _googleDrive.readCloudBackup(
+      vaultId: vaultId,
+      forceAccountChooser: forceAccountChooser,
+    );
   }
 
   @override
-  Future<String?> getCloudBackupAccountLabel() async => 'Browser download';
+  Future<String?> getCloudBackupAccountLabel() {
+    return _googleDrive.getCloudBackupAccountLabel();
+  }
 
   @override
-  Future<bool> changeCloudBackupAccount() async => false;
+  Future<bool> changeCloudBackupAccount() {
+    return _googleDrive.changeCloudBackupAccount();
+  }
+
+  @override
+  Future<bool> ensureCloudBackupAccountSelected({
+    bool forceAccountChooser = false,
+  }) {
+    return _googleDrive.ensureCloudBackupAccountSelected(
+      forceAccountChooser: forceAccountChooser,
+    );
+  }
 }

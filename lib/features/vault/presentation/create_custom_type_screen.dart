@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'widgets/vault_page_heading.dart';
+import 'widgets/vault_surface_menu.dart';
 
 class CreateCustomTypeScreen extends StatefulWidget {
   const CreateCustomTypeScreen({super.key, this.initialTemplate});
@@ -77,151 +78,266 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final title = _isEditing ? 'Edit template' : 'New template';
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEditing ? 'Edit Template' : 'New Template'),
-      ),
+      backgroundColor: colorScheme.surface,
       body: SafeArea(
-        child: _step == 0 ? _buildTemplateDetails() : _buildFieldsStep(),
+        bottom: false,
+        child: Column(
+          children: [
+            Container(
+              height: 64,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                border: Border(
+                  bottom: BorderSide(color: colorScheme.outlineVariant),
+                ),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: MaterialLocalizations.of(
+                      context,
+                    ).backButtonTooltip,
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: colorScheme.onSurface,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          _step == 0 ? 'Template details' : 'Template fields',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  FilledButton(
+                    onPressed: _step == 0
+                        ? (_canContinue
+                              ? () => setState(() => _step = 1)
+                              : null)
+                        : (_canSave ? _save : null),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: colorScheme.onSurface,
+                      foregroundColor: colorScheme.surface,
+                      disabledBackgroundColor:
+                          colorScheme.surfaceContainerHighest,
+                      disabledForegroundColor: colorScheme.onSurfaceVariant,
+                      minimumSize: const Size(84, 40),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      _step == 0
+                          ? (_isEditing ? 'Edit fields' : 'Continue')
+                          : (_isEditing ? 'Save' : 'Create'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: 860,
+                          minHeight: constraints.maxHeight - 32,
+                        ),
+                        child: _step == 0
+                            ? _buildTemplateDetails()
+                            : _buildFieldsStep(),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildTemplateDetails() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final accent = _colorForKey(_colorKey);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          _isEditing ? 'Edit custom template' : 'Create custom template',
-          style: vaultPageHeadingStyle(context),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Choose the template name, icon, color, and fields used for new vault items.',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+        _CustomTypePanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _isEditing ? 'Edit custom template' : 'Create custom template',
+                style: vaultPageHeadingStyle(context),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Choose the template name, icon, color, and fields used for new vault items.',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 12),
-        Center(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(64),
-            onTap: _pickIcon,
-            child: Container(
-              width: 78,
-              height: 78,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF5F3FF),
-                shape: BoxShape.circle,
-                border: Border.all(color: _colorForKey(_colorKey)),
-              ),
-              child: Icon(
-                _iconForKey(_iconKey),
-                color: _colorForKey(_colorKey),
-                size: 28,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Center(
-          child: InkWell(
-            key: const ValueKey('custom-template-add-icon'),
-            borderRadius: BorderRadius.circular(8),
-            onTap: _pickIcon,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Text(
-                'Add Icon',
-                style: TextStyle(
-                  color: Color(0xFF6366F1),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _nameController,
-          decoration: const InputDecoration(
-            labelText: 'Template Name',
-            hintText: 'e.g. Car Details',
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _descriptionController,
-          maxLength: 120,
-          decoration: const InputDecoration(
-            labelText: 'Description (optional)',
-            hintText: 'Add a short description',
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Category Color',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 10,
-          runSpacing: 8,
-          children: _availableTemplateColors.map((option) {
-            final selected = _colorKey == option.key;
-            return InkWell(
-              onTap: () => setState(() => _colorKey = option.key),
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: selected
-                        ? const Color(0xFF6366F1)
-                        : const Color(0xFFD1D5DB),
-                    width: selected ? 2 : 1,
-                  ),
-                ),
-                padding: const EdgeInsets.all(3),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: option.color,
-                    shape: BoxShape.circle,
+        _CustomTypePanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: _pickIcon,
+                  child: Container(
+                    width: 78,
+                    height: 78,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: accent),
+                    ),
+                    child: Icon(_iconForKey(_iconKey), color: accent, size: 28),
                   ),
                 ),
               ),
-            );
-          }).toList(),
+              const SizedBox(height: 4),
+              Center(
+                child: TextButton.icon(
+                  key: const ValueKey('custom-template-add-icon'),
+                  onPressed: _pickIcon,
+                  icon: const Icon(Icons.apps_outlined, size: 18),
+                  label: const Text('Add Icon'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Template Name',
+                  hintText: 'e.g. Car Details',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _descriptionController,
+                maxLength: 120,
+                decoration: const InputDecoration(
+                  labelText: 'Description (optional)',
+                  hintText: 'Add a short description',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _CustomTypePanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Category color',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _availableTemplateColors.map((option) {
+                  final selected = _colorKey == option.key;
+                  return Tooltip(
+                    message: option.key,
+                    child: InkWell(
+                      onTap: () => setState(() => _colorKey = option.key),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: selected
+                                ? colorScheme.onSurface
+                                : colorScheme.outlineVariant,
+                            width: selected ? 2 : 1,
+                          ),
+                        ),
+                        padding: const EdgeInsets.all(4),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: option.color,
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _canContinue ? () => setState(() => _step = 1) : null,
-            child: Text(_isEditing ? 'Edit fields' : 'Next'),
-          ),
+        FilledButton(
+          onPressed: _canContinue ? () => setState(() => _step = 1) : null,
+          child: Text(_isEditing ? 'Continue' : 'Next'),
         ),
       ],
     );
   }
 
   Widget _buildFieldsStep() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          _isEditing ? 'Edit template fields' : 'Template fields',
-          style: vaultPageHeadingStyle(context),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Add the fields this custom item type should collect.',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+        _CustomTypePanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _isEditing ? 'Edit template fields' : 'Template fields',
+                style: vaultPageHeadingStyle(context),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Add the fields this custom item type should collect.',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 8),
@@ -249,63 +365,56 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
 
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: row.keyController,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: 'Field key (example: Expiry date)',
+            child: _CustomTypePanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: row.keyController,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Field key (example: Expiry date)',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: row.valueType,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontSize: 14,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'text',
+                        child: Text('String text'),
+                      ),
+                      DropdownMenuItem(value: 'number', child: Text('Number')),
+                      DropdownMenuItem(value: 'date', child: Text('Date')),
+                      DropdownMenuItem(
+                        value: 'password',
+                        child: Text('Password / secret'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() => row.valueType = value);
+                    },
+                    decoration: const InputDecoration(labelText: 'Value type'),
+                  ),
+                  if (_rows.length > 1)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _rows.removeAt(index).keyController.dispose();
+                          });
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Remove field'),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<String>(
-                      initialValue: row.valueType,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontSize: 14,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'text',
-                          child: Text('String text'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'number',
-                          child: Text('Number'),
-                        ),
-                        DropdownMenuItem(value: 'date', child: Text('Date')),
-                        DropdownMenuItem(
-                          value: 'password',
-                          child: Text('Password / secret'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setState(() => row.valueType = value);
-                      },
-                      decoration: const InputDecoration(
-                        labelText: 'Value type',
-                      ),
-                    ),
-                    if (_rows.length > 1)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
-                          onPressed: () {
-                            setState(() {
-                              _rows.removeAt(index).keyController.dispose();
-                            });
-                          },
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Remove field'),
-                        ),
-                      ),
-                  ],
-                ),
+                ],
               ),
             ),
           );
@@ -333,9 +442,11 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
   }
 
   Future<void> _pickIcon() async {
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showVaultSurfaceSheet<String>(
       context: context,
+      scrollControlled: true,
       builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
         return SafeArea(
           child: SizedBox(
             height: 420,
@@ -365,21 +476,20 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                     itemBuilder: (context, index) {
                       final option = _availableTemplateIcons[index];
                       final selected = _iconKey == option.key;
+                      final selectedColor = _colorForKey(_colorKey);
                       return InkWell(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(8),
                         onTap: () => Navigator.of(context).pop(option.key),
                         child: Container(
                           decoration: BoxDecoration(
                             color: selected
-                                ? const Color(0xFFE0E7FF)
-                                : const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(12),
+                                ? selectedColor.withValues(alpha: 0.12)
+                                : colorScheme.surface,
+                            borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: selected
-                                  ? const Color(0xFF6366F1)
-                                  : Theme.of(
-                                      context,
-                                    ).colorScheme.outlineVariant,
+                                  ? selectedColor
+                                  : colorScheme.outlineVariant,
                               width: selected ? 2 : 1,
                             ),
                           ),
@@ -393,10 +503,8 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                               Icon(
                                 option.icon,
                                 color: selected
-                                    ? const Color(0xFF4F46E5)
-                                    : Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
+                                    ? selectedColor
+                                    : colorScheme.onSurfaceVariant,
                               ),
                               const SizedBox(height: 6),
                               Text(
@@ -404,7 +512,10 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                                 textAlign: TextAlign.center,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 11),
+                                style: TextStyle(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontSize: 11,
+                                ),
                               ),
                             ],
                           ),
@@ -468,6 +579,27 @@ class _FieldRow {
 
   final TextEditingController keyController;
   String valueType;
+}
+
+class _CustomTypePanel extends StatelessWidget {
+  const _CustomTypePanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: child,
+    );
+  }
 }
 
 class _TemplateIconOption {

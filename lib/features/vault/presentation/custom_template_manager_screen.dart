@@ -28,136 +28,229 @@ class _CustomTemplateManagerScreenState
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Custom templates'),
-        actions: [
-          IconButton(
-            key: const ValueKey('custom-template-add'),
-            tooltip: 'Add custom template',
-            onPressed: _addTemplate,
-            icon: const Icon(Icons.add),
-          ),
-        ],
-      ),
+      backgroundColor: colorScheme.surface,
       body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              border: Border(
+                bottom: BorderSide(color: colorScheme.outlineVariant),
+              ),
+            ),
+            child: Row(
               children: [
-                Text('Custom templates', style: vaultPageHeadingStyle(context)),
-                const SizedBox(height: 4),
-                Text(
-                  'Create reusable item types with your own fields.',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                IconButton(
+                  tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Custom templates',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: colorScheme.onSurface,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Text(
+                        'Reusable item types',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                FilledButton.icon(
+                  key: const ValueKey('custom-template-add'),
+                  onPressed: _addTemplate,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Add'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colorScheme.onSurface,
+                    foregroundColor: colorScheme.surface,
+                    minimumSize: const Size(82, 40),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
           Expanded(
-            child: _workingDefinitions.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: 860,
+                        minHeight: constraints.maxHeight - 32,
+                      ),
                       child: Column(
-                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Text(
-                            'No custom templates yet.',
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
+                          _CustomTemplatePanel(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Custom templates',
+                                  style: vaultPageHeadingStyle(context),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Create reusable item types with your own fields.',
+                                  style: TextStyle(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           const SizedBox(height: 12),
-                          FilledButton.icon(
-                            onPressed: _addTemplate,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Add template'),
-                          ),
+                          if (_workingDefinitions.isEmpty)
+                            _CustomTemplatePanel(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'No custom templates yet.',
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                          color: colorScheme.onSurface,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Add a template to create a custom vault category.',
+                                    style: TextStyle(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  FilledButton.icon(
+                                    onPressed: _addTemplate,
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('Add template'),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            ..._workingDefinitions.asMap().entries.map((entry) {
+                              final index = entry.key;
+                              final definition = entry.value;
+                              final iconKey = definition['iconKey']?.toString();
+                              final colorKey = definition['colorKey']
+                                  ?.toString();
+                              final accent = _colorForCustomTemplateColorKey(
+                                colorKey,
+                              );
+                              final name =
+                                  definition['name']?.toString() ?? 'Custom';
+                              final fields =
+                                  (definition['fields'] as List<dynamic>? ??
+                                          const <dynamic>[])
+                                      .length;
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _CustomTemplatePanel(
+                                  padding: EdgeInsets.zero,
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: ListTile(
+                                      onTap: () => _editTemplate(index),
+                                      contentPadding: const EdgeInsets.fromLTRB(
+                                        14,
+                                        10,
+                                        8,
+                                        10,
+                                      ),
+                                      leading: Container(
+                                        width: 38,
+                                        height: 38,
+                                        decoration: BoxDecoration(
+                                          color: accent.withValues(alpha: 0.14),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          _iconForCustomTemplateKey(iconKey),
+                                          color: accent,
+                                          size: 21,
+                                        ),
+                                      ),
+                                      title: Text(
+                                        name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: colorScheme.onSurface,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        '$fields fields',
+                                        style: TextStyle(
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'Edit template',
+                                            icon: const Icon(
+                                              Icons.edit_outlined,
+                                            ),
+                                            onPressed: () =>
+                                                _editTemplate(index),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Delete template',
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                            ),
+                                            onPressed: () =>
+                                                _confirmDeleteTemplate(index),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }),
                         ],
                       ),
                     ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
-                    itemCount: _workingDefinitions.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final definition = _workingDefinitions[index];
-                      final iconKey = definition['iconKey']?.toString();
-                      final colorKey = definition['colorKey']?.toString();
-                      final accent = _colorForCustomTemplateColorKey(colorKey);
-                      final name = definition['name']?.toString() ?? 'Custom';
-                      final fields =
-                          (definition['fields'] as List<dynamic>? ??
-                                  const <dynamic>[])
-                              .length;
-                      final colorScheme = Theme.of(context).colorScheme;
-                      return Material(
-                        color: colorScheme.surface,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(color: colorScheme.outlineVariant),
-                        ),
-                        child: ListTile(
-                          onTap: () => _editTemplate(index),
-                          contentPadding: const EdgeInsets.fromLTRB(
-                            12,
-                            8,
-                            8,
-                            8,
-                          ),
-                          leading: Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              color: accent.withValues(alpha: 0.16),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              _iconForCustomTemplateKey(iconKey),
-                              color: accent,
-                              size: 20,
-                            ),
-                          ),
-                          title: Text(
-                            name,
-                            style: TextStyle(
-                              color: colorScheme.onSurface,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          subtitle: Text(
-                            '$fields fields',
-                            style: TextStyle(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined),
-                                onPressed: () => _editTemplate(index),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline),
-                                onPressed: () => _confirmDeleteTemplate(index),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
                   ),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -200,63 +293,12 @@ class _CustomTemplateManagerScreenState
   Future<void> _confirmDeleteTemplate(int index) async {
     final definition = _workingDefinitions[index];
     final name = definition['name']?.toString() ?? 'Custom';
-    final confirmed = await showModalBottomSheet<bool>(
+    final confirmed = await showVaultConfirmSheet(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Container(
-            decoration: BoxDecoration(
-              color: Theme.of(sheetContext).colorScheme.surface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(22),
-              ),
-            ),
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.delete_outline,
-                  size: 34,
-                  color: Color(0xFFEF4444),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Move to Trash?',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '"$name" will be moved to trash.\nThis action can be undone.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFEF4444),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: () => Navigator.of(sheetContext).pop(true),
-                    child: const Text('Move to Trash'),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(sheetContext).pop(false),
-                  child: const Text('Cancel'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+      title: 'Move to Trash?',
+      message: '"$name" will be moved to trash.\nThis action can be undone.',
+      confirmLabel: 'Move to Trash',
+      destructive: true,
     );
     if (!mounted || confirmed != true) return;
     setState(() => _workingDefinitions.removeAt(index));
@@ -282,5 +324,30 @@ class _CustomTemplateManagerScreenState
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(AppStrings.customTypeExists)));
+  }
+}
+
+class _CustomTemplatePanel extends StatelessWidget {
+  const _CustomTemplatePanel({
+    required this.child,
+    this.padding = const EdgeInsets.all(14),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: child,
+    );
   }
 }

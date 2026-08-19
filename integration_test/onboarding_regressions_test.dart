@@ -37,6 +37,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Wrong vault password.'), findsOneWidget);
   });
+
+  testWidgets('known vault selection opens a page before the unlock flow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnboardingFlow(
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          vaultService: DefaultVaultService(
+            storageAdapter: InMemoryVaultStorageAdapter(),
+            cryptoAdapter: PrototypeCryptoAdapter(),
+          ),
+          vaultFilePath: 'integration-regression.nija',
+          firstInstallWalkthroughCompletedOverride: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('entry-select-vault')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('known-vault-selection-screen')),
+      findsOneWidget,
+    );
+    expect(find.byType(Dialog), findsNothing);
+    expect(find.text('Select different vault file'), findsOneWidget);
+  });
 }
 
 Future<void> _goToUnlockScreen(WidgetTester tester) async {

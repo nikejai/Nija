@@ -20,6 +20,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     required String vaultId,
     required String suggestedName,
     required String content,
+    bool forceAccountChooser = true,
   }) {
     throw UnsupportedError(
       'Cloud vault backup is not supported on this platform.',
@@ -27,12 +28,28 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
   }
 
   @override
-  Future<List<CloudVaultBackupFile>> listCloudBackups() async {
+  Future<List<CloudVaultBackupFile>> listCloudBackups({
+    bool forceAccountChooser = true,
+  }) async {
     return const <CloudVaultBackupFile>[];
   }
 
   @override
-  Future<CloudVaultBackupFile?> readCloudBackup({required String vaultId}) {
+  Future<CloudVaultBackupFile> hydrateCloudBackupContent(
+    CloudVaultBackupFile listing, {
+    bool forceAccountChooser = false,
+  }) async {
+    if (listing.hasContent) return listing;
+    throw UnsupportedError(
+      'Cloud vault restore is not supported on this platform.',
+    );
+  }
+
+  @override
+  Future<CloudVaultBackupFile?> readCloudBackup({
+    required String vaultId,
+    bool forceAccountChooser = true,
+  }) {
     throw UnsupportedError(
       'Cloud vault restore is not supported on this platform.',
     );
@@ -43,4 +60,11 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
 
   @override
   Future<bool> changeCloudBackupAccount() async => false;
+
+  @override
+  Future<bool> ensureCloudBackupAccountSelected({
+    bool forceAccountChooser = false,
+  }) async {
+    return true;
+  }
 }

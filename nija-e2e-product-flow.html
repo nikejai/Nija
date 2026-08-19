@@ -1,0 +1,1090 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Nija — End-to-End Product Flow</title>
+<style>
+:root{
+  --bg:#ffffff;
+  --surface:#ffffff;
+  --surface-2:#f2f1f6;
+  --surface-3:#e9e8ef;
+  --line:#d5d4de;
+  --text:#202126;
+  --muted:#666873;
+  --accent:#5967aa;
+  --accent-2:#6b5df3;
+  --accent-soft:#e2e6fb;
+  --green:#2fa777;
+  --red:#d55d66;
+  --shadow:0 10px 28px rgba(48,49,66,.07);
+}
+html[data-theme="dark"]{
+  --bg:#0b1118;
+  --surface:#111923;
+  --surface-2:#17212d;
+  --surface-3:#202b38;
+  --line:#2c3847;
+  --text:#f7f8fb;
+  --muted:#9da6b3;
+  --accent:#8a80ff;
+  --accent-2:#765cf4;
+  --accent-soft:#292444;
+  --green:#66c996;
+  --red:#ef7b83;
+  --shadow:0 12px 30px rgba(0,0,0,.24);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  min-height:100vh;
+  background:var(--bg);
+  color:var(--text);
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+button,input,select,textarea{font:inherit}
+button{color:inherit}
+a{color:inherit;text-decoration:none}
+.hidden{display:none!important}
+.muted{color:var(--muted)}
+.micro{
+  font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--muted);
+}
+.btn{
+  min-height:44px;
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:10px;
+  padding:0 14px;
+  cursor:pointer;
+  font-weight:700;
+  font-size:13px;
+}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--accent-2);border-color:var(--accent-2);color:white}
+.btn.dark{background:var(--text);border-color:var(--text);color:var(--bg)}
+.icon-btn{
+  width:44px;height:44px;
+  display:grid;place-items:center;
+  border:1px solid transparent;
+  background:transparent;
+  border-radius:10px;
+  cursor:pointer;
+  font-size:18px;
+}
+.icon-btn:hover{background:var(--surface-2);border-color:var(--line)}
+.card{
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:14px;
+}
+.input,.select,.textarea{
+  width:100%;
+  border:1px solid var(--line);
+  background:var(--surface);
+  color:var(--text);
+  border-radius:10px;
+  min-height:44px;
+  padding:0 12px;
+  outline:none;
+}
+.textarea{padding:12px;min-height:100px}
+.input:focus,.select:focus,.textarea:focus{border-color:var(--accent)}
+.field{display:grid;gap:7px}
+.field label{
+  font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--muted);
+}
+
+/* ===== product entry ===== */
+.entry-page{
+  min-height:100vh;
+  display:grid;
+  grid-template-rows:64px 1fr;
+}
+.entry-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 18px;
+  border-bottom:1px solid var(--line);
+  background:var(--surface);
+}
+.brand{
+  display:flex;align-items:center;gap:10px;
+  font-weight:800;
+}
+.brand-mark{
+  width:34px;height:34px;
+  display:grid;place-items:center;
+  background:linear-gradient(145deg,var(--accent-2),#9b8fff);
+  color:white;border-radius:10px;font-weight:900;
+}
+.entry-main{
+  display:grid;
+  place-items:center;
+  padding:28px 16px 40px;
+}
+.entry-shell{
+  width:min(100%,460px);
+}
+.hero{text-align:center;margin-bottom:26px}
+.hero-logo{
+  width:90px;height:90px;
+  margin:0 auto 16px;
+  border:1px solid var(--line);
+  border-radius:24px;
+  display:grid;place-items:center;
+  background:var(--surface);
+  box-shadow:var(--shadow);
+  font-size:34px;
+}
+.hero h1{font-size:34px;margin:0;letter-spacing:-.045em}
+.hero p{margin:10px auto 0;max-width:360px;color:var(--muted);line-height:1.55;font-size:14px}
+.flow-card{
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:16px;
+  overflow:hidden;
+}
+.flow-option{
+  width:100%;
+  min-height:76px;
+  display:grid;
+  grid-template-columns:36px 1fr auto;
+  gap:12px;
+  align-items:center;
+  padding:13px 15px;
+  border:0;
+  border-bottom:1px solid var(--line);
+  background:transparent;
+  text-align:left;
+  cursor:pointer;
+}
+.flow-option:last-child{border-bottom:0}
+.flow-option:hover{background:var(--surface-2)}
+.flow-option .code{
+  color:var(--accent);
+  font:10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.flow-option strong{display:block;font-size:14px}
+.flow-option small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.storage-row{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+  margin-top:12px;
+}
+.storage-btn{
+  min-height:44px;
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:10px;
+  cursor:pointer;
+  font-size:12px;
+}
+
+/* ===== select vault ===== */
+.vault-list{display:grid;gap:9px}
+.vault-card{
+  width:100%;
+  min-height:86px;
+  border:1px solid var(--line);
+  border-radius:13px;
+  background:var(--surface);
+  display:grid;
+  grid-template-columns:44px 1fr auto;
+  gap:12px;
+  align-items:center;
+  padding:13px;
+  text-align:left;
+  cursor:pointer;
+}
+.vault-card:hover{border-color:var(--accent)}
+.vault-icon{
+  width:42px;height:42px;border-radius:12px;
+  display:grid;place-items:center;
+  background:var(--accent-soft);
+  color:var(--accent);
+}
+.vault-card strong{display:block;font-size:14px}
+.vault-card small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+
+/* ===== unlock ===== */
+.unlock-panel{text-align:center}
+.guardian-icon{
+  width:64px;height:64px;
+  margin:0 auto 14px;
+  border-radius:18px;
+  background:var(--accent-soft);
+  color:var(--accent);
+  display:grid;place-items:center;
+  font-size:26px;
+}
+.unlock-panel h2{margin:0;font-size:24px}
+.unlock-panel p{color:var(--muted);font-size:12px;margin:8px 0 22px}
+.unlock-actions{display:grid;gap:10px}
+
+/* ===== app shell ===== */
+.app-shell{min-height:100vh}
+.mobile-top{
+  position:sticky;top:0;z-index:40;
+  height:58px;
+  display:grid;
+  grid-template-columns:1fr auto 1fr;
+  align-items:center;
+  padding:0 12px;
+  border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--surface) 96%,transparent);
+  backdrop-filter:blur(12px);
+}
+.mobile-top .center{text-align:center;font-weight:800;font-size:14px}
+.mobile-top .left{justify-self:start}
+.mobile-top .right{justify-self:end;display:flex;gap:3px}
+.app-content{
+  width:min(100%,1160px);
+  margin:0 auto;
+  padding:18px 14px 108px;
+}
+.mobile-nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;
+  min-height:74px;
+  padding:8px 8px max(8px,env(safe-area-inset-bottom));
+  border-top:1px solid var(--line);
+  background:color-mix(in srgb,var(--surface) 96%,transparent);
+  backdrop-filter:blur(12px);
+  display:grid;
+  grid-template-columns:1fr 1fr 70px 1fr 1fr;
+  align-items:end;
+}
+.mobile-nav a,.mobile-nav button{
+  border:0;background:transparent;
+  min-height:54px;
+  display:grid;place-items:center;
+  gap:3px;
+  color:var(--muted);
+  font-size:10px;
+}
+.mobile-nav a.active{color:var(--accent);font-weight:800}
+.fab{
+  width:54px;height:54px;
+  border:0;border-radius:18px;
+  background:var(--text);color:var(--bg);
+  font-size:28px;
+  margin-top:-20px;
+  box-shadow:0 12px 26px rgba(0,0,0,.18);
+  cursor:pointer;
+}
+.desktop-rail,.desktop-sidebar,.desktop-header{display:none}
+
+/* ===== home ===== */
+.home-brand-row{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  gap:14px;margin-bottom:18px;
+}
+.home-brand-row h1{font-size:26px;margin:0;letter-spacing:-.045em}
+.home-brand-row p{font-size:13px;line-height:1.45;margin:6px 0 0;color:var(--muted)}
+.search-row{
+  display:grid;
+  grid-template-columns:1fr 48px;
+  gap:8px;
+  margin-bottom:16px;
+}
+.search-box{
+  min-height:48px;
+  background:var(--surface-2);
+  border:1px solid transparent;
+  border-radius:12px;
+  display:flex;align-items:center;gap:10px;
+  padding:0 13px;
+}
+.search-box input{border:0;background:transparent;outline:none;color:var(--text);width:100%}
+.category-grid{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:10px;
+}
+.category-card{
+  min-height:116px;
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:14px;
+  padding:14px;
+  text-align:left;
+  cursor:pointer;
+}
+.category-card strong{display:block;font-size:14px;margin-top:16px}
+.category-card small{display:block;color:var(--muted);margin-top:4px}
+.type-icon{
+  width:36px;height:36px;
+  display:grid;place-items:center;
+  border-radius:10px;
+  background:var(--accent-soft);
+  color:var(--accent);
+  font:10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.section{margin-top:24px}
+.section-head{
+  display:flex;align-items:end;justify-content:space-between;gap:10px;
+  margin-bottom:10px;
+}
+.section-head h2{font-size:19px;margin:0}
+.text-link{border:0;background:transparent;color:var(--accent);font-weight:800;cursor:pointer;font-size:12px}
+.item-list{display:grid;gap:8px}
+.item-row{
+  min-height:74px;
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:12px;
+  display:grid;
+  grid-template-columns:42px 1fr auto;
+  gap:11px;
+  align-items:center;
+  padding:12px;
+  cursor:pointer;
+}
+.item-row strong{display:block;font-size:13px}
+.item-row small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+
+/* ===== all items ===== */
+.filter-row{
+  display:flex;gap:7px;overflow:auto;
+  padding-bottom:4px;margin-bottom:10px;
+}
+.chip{
+  white-space:nowrap;
+  min-height:32px;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:0 11px;
+  background:var(--surface);
+  color:var(--muted);
+  cursor:pointer;
+  font-size:11px;
+}
+.chip.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.sort-line{display:flex;justify-content:space-between;color:var(--muted);font-size:11px;margin-bottom:10px}
+
+/* ===== detail ===== */
+.detail-screen .mobile-nav{display:none}
+.detail-hero{text-align:center;padding:8px 0 18px}
+.detail-hero .type-icon{width:58px;height:58px;margin:0 auto 10px;border-radius:16px}
+.detail-hero h1{font-size:24px;margin:0 0 5px}
+.detail-hero p{color:var(--muted);font-size:12px}
+.detail-panel{overflow:hidden}
+.detail-field{
+  min-height:70px;
+  padding:13px 14px;
+  border-bottom:1px solid var(--line);
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px;
+  align-items:center;
+}
+.detail-field:last-child{border-bottom:0}
+.detail-field label{
+  display:block;
+  color:var(--muted);
+  font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  margin-bottom:5px;
+}
+.detail-field strong{font-size:14px}
+.detail-bottom{
+  position:fixed;left:0;right:0;bottom:0;z-index:55;
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+  padding:10px 12px max(10px,env(safe-area-inset-bottom));
+  border-top:1px solid var(--line);
+  background:var(--surface);
+}
+.meta-toggle{
+  width:100%;
+  min-height:48px;
+  margin-top:12px;
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:12px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;
+  cursor:pointer;
+  font-weight:800;
+}
+.meta-card{display:none;margin-top:10px}
+.meta-card.open{display:block}
+.meta-row{
+  min-height:45px;
+  display:grid;grid-template-columns:110px 1fr;
+  align-items:center;
+  padding:0 14px;
+  border-bottom:1px solid var(--line);
+  font-size:11px;
+}
+.meta-row:last-child{border-bottom:0}
+.meta-row span:first-child{color:var(--muted)}
+
+/* ===== folders / settings ===== */
+.folder-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.folder-card{
+  min-height:122px;
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:14px;
+  padding:14px;
+  text-align:left;
+  cursor:pointer;
+}
+.folder-card h3{font-size:15px;margin:24px 0 5px}
+.folder-card p{font-size:11px;color:var(--muted);line-height:1.4}
+.settings-group{margin-top:18px}
+.settings-group:first-child{margin-top:0}
+.settings-group h2{font-size:15px;color:var(--muted);margin:0 0 8px}
+.setting-list{overflow:hidden}
+.setting-row{
+  min-height:72px;
+  padding:12px 14px;
+  border-bottom:1px solid var(--line);
+  display:grid;grid-template-columns:42px 1fr auto;
+  gap:12px;align-items:center;
+}
+.setting-row:last-child{border-bottom:0}
+.setting-icon{
+  width:38px;height:38px;border-radius:10px;
+  background:var(--accent-soft);
+  color:var(--accent);
+  display:grid;place-items:center;
+  font-size:11px;
+}
+.setting-row strong{display:block;font-size:13px}
+.setting-row small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+
+/* ===== overlay ===== */
+.overlay{
+  position:fixed;inset:0;z-index:100;
+  background:rgba(18,20,25,.38);
+  display:flex;align-items:flex-end;
+}
+.sheet{
+  width:100%;
+  max-height:92vh;overflow:auto;
+  background:var(--surface);
+  border-radius:20px 20px 0 0;
+}
+.sheet-handle{width:42px;height:4px;border-radius:999px;background:var(--line);margin:8px auto 0}
+.sheet-head{
+  padding:14px 16px;
+  border-bottom:1px solid var(--line);
+  display:flex;justify-content:space-between;gap:10px;
+}
+.sheet-head h3{font-size:19px;margin:5px 0 0}
+.sheet-body{padding:16px}
+.sheet-foot{
+  padding:12px 16px max(12px,env(safe-area-inset-bottom));
+  border-top:1px solid var(--line);
+  display:flex;justify-content:flex-end;gap:8px;
+}
+.toast{
+  position:fixed;right:16px;bottom:92px;z-index:120;
+  background:var(--text);color:var(--bg);
+  padding:11px 14px;border-radius:10px;
+  font-size:12px;
+}
+
+/* ===== desktop ===== */
+@media(min-width:760px){
+  .mobile-top,.mobile-nav{display:none}
+  .app-shell{
+    display:grid;
+    grid-template-columns:76px 220px 1fr;
+  }
+  .desktop-rail{
+    display:flex;
+    position:sticky;top:0;height:100vh;
+    background:var(--surface);
+    border-right:1px solid var(--line);
+    flex-direction:column;align-items:center;justify-content:space-between;
+    padding:18px 0;
+  }
+  .vertical{
+    writing-mode:vertical-rl;
+    transform:rotate(180deg);
+    font:10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    color:var(--muted);
+  }
+  .desktop-sidebar{
+    display:flex;
+    position:sticky;top:0;height:100vh;
+    border-right:1px solid var(--line);
+    background:var(--surface);
+    flex-direction:column;
+    padding:20px 12px;
+  }
+  .vault-label{
+    padding:0 10px 16px;
+    border-bottom:1px solid var(--line);
+  }
+  .vault-label strong{display:block;margin-top:7px}
+  .vault-label small{display:block;color:var(--muted);margin-top:4px}
+  .desktop-nav{display:grid;gap:4px;padding-top:14px}
+  .desktop-nav a{
+    min-height:42px;
+    display:grid;
+    grid-template-columns:28px 1fr;
+    align-items:center;
+    padding:0 10px;
+    border:1px solid transparent;
+    border-radius:10px;
+    color:var(--muted);
+    font-size:12px;
+  }
+  .desktop-nav a.active{background:var(--surface-2);border-color:var(--line);color:var(--text);font-weight:800}
+  .desktop-nav .code{font:9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent)}
+  .desktop-header{
+    display:flex;
+    position:sticky;top:0;z-index:35;
+    height:68px;
+    align-items:center;justify-content:space-between;
+    padding:0 24px;
+    border-bottom:1px solid var(--line);
+    background:var(--surface);
+  }
+  .desktop-header h1{font-size:19px;margin:4px 0 0}
+  .app-content{
+    padding:24px;
+    width:min(100%,1180px);
+    margin:0;
+  }
+  .desktop-home{
+    display:grid!important;
+  }
+  .mobile-home{display:none!important}
+  .desktop-dashboard-head{
+    display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px
+  }
+  .desktop-dashboard-head h1{font-size:26px;margin:5px 0 5px}
+  .desktop-dashboard-head p{margin:0;color:var(--muted);font-size:12px}
+  .desktop-stats{
+    display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px
+  }
+  .desktop-stat{
+    min-height:88px;border:1px solid var(--line);background:var(--surface);
+    border-radius:12px;padding:13px
+  }
+  .desktop-stat strong{display:block;font-size:22px}
+  .desktop-stat small{display:block;color:var(--muted);font-size:10px;margin-top:5px}
+  .desktop-grid{
+    display:grid;grid-template-columns:minmax(0,1.35fr) 300px;gap:14px
+  }
+  .desktop-panel{border:1px solid var(--line);background:var(--surface);border-radius:13px;overflow:hidden}
+  .desktop-panel-head{min-height:50px;padding:0 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+  .desktop-recent-row{
+    min-height:64px;width:100%;
+    display:grid;grid-template-columns:38px 1fr 130px 24px;gap:10px;align-items:center;
+    padding:9px 13px;border:0;border-bottom:1px solid var(--line);background:transparent;text-align:left;cursor:pointer
+  }
+  .desktop-recent-row:last-child{border-bottom:0}
+  .desktop-recent-row:hover{background:var(--surface-2)}
+  .quick-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;padding:12px}
+  .quick-grid button{
+    min-height:72px;border:1px solid var(--line);background:var(--surface);
+    border-radius:10px;cursor:pointer
+  }
+  .quick-grid button:hover{background:var(--surface-2)}
+  .folder-grid{grid-template-columns:repeat(3,1fr)}
+  .detail-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:16px;align-items:start}
+  .meta-toggle{display:none}
+  .meta-card{display:block;margin-top:0}
+  .detail-bottom{position:static;border:0;padding:0;margin-top:12px;background:transparent}
+  .overlay{align-items:center;justify-content:center;padding:24px}
+  .sheet{width:min(620px,100%);border-radius:18px}
+  .sheet-handle{display:none}
+}
+@media(min-width:760px) and (max-width:1050px){
+  .desktop-stats{grid-template-columns:repeat(3,1fr)}
+  .desktop-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<template id="sheet-template">
+  <div class="overlay">
+    <section class="sheet" onclick="event.stopPropagation()">
+      <div class="sheet-handle"></div>
+      <header class="sheet-head">
+        <div><div class="micro" id="sheet-eyebrow"></div><h3 id="sheet-title"></h3></div>
+        <button class="icon-btn" data-close>×</button>
+      </header>
+      <div class="sheet-body" id="sheet-body"></div>
+      <footer class="sheet-foot" id="sheet-foot"></footer>
+    </section>
+  </div>
+</template>
+
+<script>
+const app=document.getElementById('app');
+const $=(q,r=document)=>r.querySelector(q);
+const $$=(q,r=document)=>[...r.querySelectorAll(q)];
+
+const state={
+  theme:'light',
+  selectedVault:null,
+  unlocked:false,
+  vaults:[
+    {id:'v1',name:'Personal Vault',guardian:'Owl',items:12,modified:'Today · 9:41 PM',location:'This device'},
+    {id:'v2',name:'Family Documents',guardian:'Lion',items:28,modified:'Yesterday',location:'External file'}
+  ],
+  folders:[
+    {id:'f1',name:'Personal',count:5},
+    {id:'f2',name:'Work',count:3},
+    {id:'f3',name:'Finance',count:2},
+    {id:'f4',name:'Travel',count:2}
+  ],
+  items:[
+    {id:'i1',type:'Login',title:'GitHub',subtitle:'nitesh@example.com',folder:'Work',favorite:true,modified:'Today · 9:41 PM',username:'nitesh@example.com',password:'demo-secret',url:'github.com'},
+    {id:'i2',type:'Secure Note',title:'Recovery Phrase',subtitle:'Private recovery record',folder:'Personal',favorite:true,modified:'Today · 8:10 PM',notes:'summit aster breeze forge lantern onyx circle maple'},
+    {id:'i3',type:'Identity',title:'Passport',subtitle:'India · expires 2031',folder:'Travel',favorite:true,modified:'Yesterday',fullName:'Nitesh Jain',documentNumber:'P7X4-92K1',country:'India',expiry:'12 Aug 2031'},
+    {id:'i4',type:'Card',title:'Primary Card',subtitle:'Visa · •••• 4821',folder:'Finance',favorite:false,modified:'Aug 10',cardNumber:'4111 1111 1111 4821',expiry:'08/29'},
+    {id:'i5',type:'Document',title:'Health Insurance',subtitle:'Policy ending 2814',folder:'Personal',favorite:false,modified:'Aug 9',notes:'Annual policy PDF'},
+    {id:'i6',type:'Login',title:'AWS',subtitle:'work@example.com',folder:'Work',favorite:false,modified:'Aug 8',username:'work@example.com',password:'aws-demo',url:'aws.amazon.com'}
+  ]
+};
+let currentRoute='entry';
+let filterType='all';
+
+function escapeHtml(v=''){return String(v).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function code(t){return ({Login:'LG','Secure Note':'NT',Identity:'ID',Card:'CC',Document:'DC'})[t]||'IT'}
+function toggleTheme(){state.theme=state.theme==='light'?'dark':'light';document.documentElement.dataset.theme=state.theme;render()}
+function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2200)}
+function showSheet({eyebrow='',title,body,actions=[]}){
+  const frag=document.getElementById('sheet-template').content.cloneNode(true);
+  const overlay=$('.overlay',frag);
+  $('#sheet-eyebrow',frag).textContent=eyebrow;
+  $('#sheet-title',frag).textContent=title;
+  $('#sheet-body',frag).innerHTML=body;
+  const foot=$('#sheet-foot',frag);
+  actions.forEach(a=>{
+    const b=document.createElement('button');
+    b.className='btn '+(a.className||'');
+    b.textContent=a.label;
+    b.onclick=()=>a.onClick(overlay);
+    foot.appendChild(b);
+  });
+  overlay.onclick=()=>overlay.remove();
+  $('[data-close]',frag).onclick=()=>overlay.remove();
+  document.body.appendChild(frag);
+  return overlay;
+}
+function go(r){currentRoute=r;render()}
+
+/* ===== Entry ===== */
+function renderEntry(){
+  app.innerHTML=`<section class="entry-page">
+    <header class="entry-header">
+      <div class="brand"><div class="brand-mark">N</div><span>Nija</span></div>
+      <button class="icon-btn" id="theme">${state.theme==='light'?'◐':'☼'}</button>
+    </header>
+    <main class="entry-main">
+      <div class="entry-shell">
+        <div class="hero">
+          <div class="hero-logo">▣</div>
+          <h1>Your private vault</h1>
+          <p>Your data stays local by default. Open a vault you already own or create a new encrypted vault.</p>
+        </div>
+        <div class="flow-card">
+          ${flow('01','Select a vault','Choose from vaults already known on this device.','select-vault','→')}
+          ${flow('02','Open vault file','Choose an encrypted Nija vault file.','open-file','↗')}
+          ${flow('03','Create a vault','Start a fresh local vault.','create-vault','＋')}
+          ${flow('04','Import data','Create a vault from supported exports.','import-data','↘')}
+        </div>
+        <div style="margin-top:16px">
+          <div class="micro">Restore from storage</div>
+          <div class="storage-row">
+            <button class="storage-btn" data-provider="Google Drive">Google Drive</button>
+            <button class="storage-btn" data-provider="OneDrive">OneDrive</button>
+            <button class="storage-btn" data-provider="Dropbox">Dropbox</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </section>`;
+  $('#theme').onclick=toggleTheme;
+  $('#select-vault').onclick=()=>go('vault-select');
+  $('#open-file').onclick=()=>openVaultFile();
+  $('#create-vault').onclick=createVaultFlow;
+  $('#import-data').onclick=()=>toast('Import flow opened');
+  $$('[data-provider]').forEach(b=>b.onclick=()=>toast(`${b.dataset.provider} file picker opened`));
+}
+function flow(c,t,s,id,a){return `<button class="flow-option" id="${id}"><span class="code">${c}</span><span><strong>${t}</strong><small>${s}</small></span><span>${a}</span></button>`}
+
+/* ===== vault selection ===== */
+function renderVaultSelect(){
+  app.innerHTML=`<section class="entry-page">
+    <header class="entry-header">
+      <button class="icon-btn" id="back">←</button>
+      <strong>Select vault</strong>
+      <button class="icon-btn" id="theme">${state.theme==='light'?'◐':'☼'}</button>
+    </header>
+    <main class="entry-main">
+      <div class="entry-shell">
+        <div style="margin-bottom:18px">
+          <div class="micro">Known vaults</div>
+          <h1 style="font-size:28px;margin:7px 0 6px">Choose what to open</h1>
+          <p class="muted" style="font-size:13px;line-height:1.5">These vaults are local references. Nija does not require an account.</p>
+        </div>
+        <div class="vault-list">
+          ${state.vaults.map(v=>`<button class="vault-card" data-vault="${v.id}">
+            <span class="vault-icon">▣</span>
+            <span><strong>${escapeHtml(v.name)}</strong><small>${v.items} items · ${v.guardian} Guardian · ${v.location}</small><small>${v.modified}</small></span>
+            <span>›</span>
+          </button>`).join('')}
+        </div>
+        <button class="btn" style="width:100%;margin-top:12px" id="different-vault">Select different vault file</button>
+      </div>
+    </main>
+  </section>`;
+  $('#back').onclick=()=>go('entry');
+  $('#theme').onclick=toggleTheme;
+  $('#different-vault').onclick=openVaultFile;
+  $$('[data-vault]').forEach(b=>b.onclick=()=>{
+    state.selectedVault=state.vaults.find(v=>v.id===b.dataset.vault);
+    go('unlock');
+  });
+}
+function openVaultFile(){
+  toast('Vault file picker opened');
+}
+
+/* ===== unlock ===== */
+function renderUnlock(){
+  const v=state.selectedVault||state.vaults[0];
+  app.innerHTML=`<section class="entry-page">
+    <header class="entry-header">
+      <button class="icon-btn" id="back">←</button>
+      <strong>Unlock vault</strong>
+      <button class="icon-btn" id="theme">${state.theme==='light'?'◐':'☼'}</button>
+    </header>
+    <main class="entry-main">
+      <div class="entry-shell unlock-panel">
+        <div class="guardian-icon">🦉</div>
+        <h2>${escapeHtml(v.name)}</h2>
+        <p>Protected by ${escapeHtml(v.guardian)} Guardian</p>
+        <div class="field" style="text-align:left;margin-bottom:12px">
+          <label>Master password</label>
+          <input class="input" id="unlock-pass" type="password" placeholder="Master password">
+        </div>
+        <div class="unlock-actions">
+          <button class="btn dark" id="unlock">Unlock</button>
+          <button class="btn" id="recover">Recover with phrase</button>
+          <button class="btn" id="switch-vault">Select different vault</button>
+        </div>
+        <div class="muted" style="margin-top:28px;font-size:11px">100% local. 100% yours.</div>
+      </div>
+    </main>
+  </section>`;
+  $('#back').onclick=()=>go('vault-select');
+  $('#theme').onclick=toggleTheme;
+  $('#unlock').onclick=()=>{state.unlocked=true;go('home')};
+  $('#switch-vault').onclick=()=>go('vault-select');
+  $('#recover').onclick=()=>toast('Recovery flow opened');
+}
+
+/* ===== create vault ===== */
+function createVaultFlow(){
+  showSheet({
+    eyebrow:'New vault',
+    title:'Create a vault',
+    body:`<div style="display:grid;gap:14px">
+      <div class="field"><label>Vault name</label><input class="input" id="new-vault-name" value="Personal Vault"></div>
+      <div class="field"><label>Guardian</label><select class="select" id="new-guardian"><option>Owl · Recommended</option><option>Lion · Strongest</option><option>Falcon · Faster</option></select></div>
+      <div class="field"><label>Master password</label><input class="input" type="password" value="demo123"></div>
+      <div class="field"><label>Confirm password</label><input class="input" type="password" value="demo123"></div>
+    </div>`,
+    actions:[
+      {label:'Cancel',onClick:o=>o.remove()},
+      {label:'Continue',className:'primary',onClick:o=>{
+        o.remove();
+        recoveryPhraseFlow();
+      }}
+    ]
+  })
+}
+function recoveryPhraseFlow(){
+  const words=['haze','opal','lotus','aster','sky','zephyr','lagoon','hearth','river','pine','wave','reef'];
+  showSheet({
+    eyebrow:'Recovery',
+    title:'Save your recovery phrase',
+    body:`<p class="muted" style="font-size:12px;line-height:1.5">Write these words down and keep them offline.</p>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+        ${words.map((w,i)=>`<div class="card" style="padding:12px;font-size:12px">${i+1}. ${w}</div>`).join('')}
+      </div>
+      <div class="field" style="margin-top:14px"><label>Confirm word #3</label><input class="input" id="confirm-word" placeholder="lotus"></div>`,
+    actions:[
+      {label:'Back',onClick:o=>{o.remove();createVaultFlow()}},
+      {label:'Create vault',className:'primary',onClick:o=>{
+        if($('#confirm-word').value.trim().toLowerCase()!=='lotus'){toast('Enter word #3: lotus');return}
+        o.remove();
+        state.selectedVault=state.vaults[0];
+        state.unlocked=true;
+        go('home');
+      }}
+    ]
+  })
+}
+
+/* ===== shared app shell ===== */
+const nav=[
+  ['HM','home','Home'],
+  ['AI','items','All Items'],
+  ['FD','folders','Folders'],
+  ['FV','favorites','Favorites'],
+  ['ST','settings','Settings']
+];
+function appShell(route,title,content,{detail=false}={}){
+  const v=state.selectedVault||state.vaults[0];
+  return `<div class="app-shell ${detail?'detail-screen':''}">
+    <aside class="desktop-rail">
+      <div class="brand-mark">N</div>
+      <div class="vertical">private archive</div>
+      <button class="icon-btn" id="rail-theme">${state.theme==='light'?'◐':'☼'}</button>
+    </aside>
+
+    <aside class="desktop-sidebar">
+      <div class="vault-label">
+        <div class="micro">Active vault</div>
+        <strong>${escapeHtml(v.name)}</strong>
+        <small>${state.items.length} items · local</small>
+      </div>
+      <nav class="desktop-nav">
+        ${nav.map(([c,r,l])=>`<a href="#" data-route="${r}" class="${route===r?'active':''}"><span class="code">${c}</span><span>${l}</span></a>`).join('')}
+      </nav>
+      <div style="margin-top:auto">
+        <button class="btn" style="width:100%" id="switch-vault">Switch vault</button>
+      </div>
+    </aside>
+
+    <section>
+      <header class="mobile-top">
+        <div class="left">${detail?'<button class="icon-btn" id="back-detail">←</button>':''}</div>
+        <div class="center">${title}</div>
+        <div class="right"><button class="icon-btn" id="mobile-theme">${state.theme==='light'?'◐':'☼'}</button></div>
+      </header>
+      <header class="desktop-header">
+        <div><div class="micro">Nija vault</div><h1>${title}</h1></div>
+        <button class="icon-btn" id="desktop-theme">${state.theme==='light'?'◐':'☼'}</button>
+      </header>
+      <main class="app-content">${content}</main>
+    </section>
+    ${detail?'':mobileNav(route)}
+  </div>`
+}
+function mobileNav(route){
+  return `<nav class="mobile-nav">
+    <a href="#" data-route="home" class="${route==='home'?'active':''}"><span>⌂</span><span>Home</span></a>
+    <a href="#" data-route="items" class="${route==='items'?'active':''}"><span>▦</span><span>All Items</span></a>
+    <div style="display:grid;place-items:center"><button class="fab" id="fab">＋</button></div>
+    <a href="#" data-route="favorites" class="${route==='favorites'?'active':''}"><span>☆</span><span>Favorites</span></a>
+    <a href="#" data-route="settings" class="${route==='settings'?'active':''}"><span>⚙</span><span>Settings</span></a>
+  </nav>`
+}
+function bindShell(){
+  ['rail-theme','mobile-theme','desktop-theme'].forEach(id=>{const el=$('#'+id);if(el)el.onclick=toggleTheme});
+  $$('[data-route]').forEach(a=>a.onclick=e=>{e.preventDefault();go(a.dataset.route)});
+  const fab=$('#fab');if(fab)fab.onclick=addItemFlow;
+  const sw=$('#switch-vault');if(sw)sw.onclick=()=>{state.unlocked=false;go('vault-select')};
+  const back=$('#back-detail');if(back)back.onclick=()=>go('items');
+}
+
+/* ===== home ===== */
+function renderHome(){
+  const content=`
+    <section class="mobile-home">
+      <div class="home-brand-row">
+        <div><h1>Nija</h1><p>All your important information,<br>in one secure place.</p></div>
+        <button class="icon-btn" id="lock-home">▣</button>
+      </div>
+      ${searchBox()}
+      <div class="category-grid">
+        ${category('NT','Notes',1,'Secure Note')}
+        ${category('LG','Logins',2,'Login')}
+        ${category('ID','Identities',1,'Identity')}
+        ${category('DC','Documents',1,'Document')}
+      </div>
+      <section class="section">
+        <div class="section-head"><h2>Recent</h2><button class="text-link" data-route="items">View all</button></div>
+        <div class="item-list">${state.items.slice(0,4).map(itemRow).join('')}</div>
+      </section>
+    </section>
+
+    <section class="desktop-home hidden">
+      <div class="desktop-dashboard-head">
+        <div><div class="micro">Dashboard</div><h1>Good evening, Nija User 👋</h1><p>Here's what's happening with your vault.</p></div>
+        <button class="btn primary" id="desktop-add">+ Add Item</button>
+      </div>
+      <div style="max-width:720px;margin-bottom:16px">${searchBox('desktop-search')}</div>
+      <div class="desktop-stats">
+        ${desktopStat('Total Items',state.items.length)}
+        ${desktopStat('Folders',state.folders.length)}
+        ${desktopStat('Logins',state.items.filter(i=>i.type==='Login').length)}
+        ${desktopStat('Notes',state.items.filter(i=>i.type==='Secure Note').length)}
+        ${desktopStat('Identities',state.items.filter(i=>i.type==='Identity').length)}
+        ${desktopStat('Documents',state.items.filter(i=>i.type==='Document').length)}
+      </div>
+      <div class="desktop-grid">
+        <section class="desktop-panel">
+          <div class="desktop-panel-head"><strong>Recent Items</strong><button class="text-link" data-route="items">View all</button></div>
+          ${state.items.slice(0,5).map(i=>`<button class="desktop-recent-row" data-item="${i.id}">
+            <span class="type-icon">${code(i.type)}</span>
+            <span><strong>${escapeHtml(i.title)}</strong><small class="muted">${escapeHtml(i.subtitle)}</small></span>
+            <span class="muted">${escapeHtml(i.modified)}</span>
+            <span>${i.favorite?'★':'›'}</span>
+          </button>`).join('')}
+        </section>
+        <aside style="display:grid;gap:14px;align-content:start">
+          <section class="desktop-panel">
+            <div class="desktop-panel-head"><strong>Quick Actions</strong></div>
+            <div class="quick-grid">
+              <button id="qa-add">＋<br><small>Add Item</small></button>
+              <button data-route="folders">□<br><small>Folders</small></button>
+              <button id="qa-import">⇩<br><small>Import</small></button>
+              <button id="qa-switch">▣<br><small>Switch Vault</small></button>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </section>`;
+  app.innerHTML=appShell('home','Home',content);
+  bindShell();
+  bindItemClicks();
+  $('#lock-home')?.addEventListener('click',()=>{state.unlocked=false;go('unlock')});
+  $('#desktop-add')?.addEventListener('click',addItemFlow);
+  $('#qa-add')?.addEventListener('click',addItemFlow);
+  $('#qa-import')?.addEventListener('click',()=>toast('Import flow opened'));
+  $('#qa-switch')?.addEventListener('click',()=>go('vault-select'));
+  $$('[data-category]').forEach(b=>b.onclick=()=>{filterType=b.dataset.category;go('items')});
+}
+function searchBox(id=''){return `<div class="search-row"><label class="search-box"><span>⌕</span><input ${id?`id="${id}"`:''} placeholder="Search your data…"></label><button class="icon-btn" style="background:var(--surface-2);border:1px solid var(--line)" data-route="items">☷</button></div>`}
+function category(c,l,n,t){return `<button class="category-card" data-category="${t}"><span class="type-icon">${c}</span><strong>${l}</strong><small>${n}</small></button>`}
+function desktopStat(l,v){return `<div class="desktop-stat"><strong>${v}</strong><small>${l}</small></div>`}
+function itemRow(i){return `<button class="item-row" data-item="${i.id}"><span class="type-icon">${code(i.type)}</span><span><strong>${escapeHtml(i.title)}</strong><small>${escapeHtml(i.type)} · ${escapeHtml(i.subtitle)}</small></span><span>${i.favorite?'★':'›'}</span></button>`}
+function bindItemClicks(){$$('[data-item]').forEach(b=>b.onclick=()=>go('item/'+b.dataset.item))}
+
+/* ===== items ===== */
+function renderItems(favorites=false){
+  const items=state.items.filter(i=>(filterType==='all'||i.type===filterType)&&(!favorites||i.favorite));
+  const content=`
+    ${searchBox()}
+    <div class="filter-row">
+      ${['all','Login','Secure Note','Identity','Card','Document'].map(t=>`<button class="chip ${filterType===t?'active':''}" data-filter="${t}">${t==='all'?'All':t}</button>`).join('')}
+    </div>
+    <div class="sort-line"><span>Sort by: Modified (newest)</span><span>${items.length} items</span></div>
+    <div class="item-list">${items.map(itemRow).join('')}</div>`;
+  app.innerHTML=appShell(favorites?'favorites':'items',favorites?'Favorites':'All Items',content);
+  bindShell();bindItemClicks();
+  $$('[data-filter]').forEach(b=>b.onclick=()=>{filterType=b.dataset.filter;renderItems(favorites)});
+}
+
+/* ===== detail ===== */
+function renderDetail(id){
+  const item=state.items.find(i=>i.id===id);
+  if(!item){go('items');return}
+  const fields=detailFields(item).filter(([,v])=>v);
+  const action=primaryAction(item);
+  const content=`
+    <div class="detail-hero"><div class="type-icon">${code(item.type)}</div><h1>${escapeHtml(item.title)}</h1><p>${escapeHtml(item.subtitle)}</p></div>
+    <div class="detail-layout">
+      <div>
+        <section class="card detail-panel">
+          ${fields.map(([k,v,s])=>`<div class="detail-field"><div><label>${k}</label><strong>${s?'••••••••':escapeHtml(v)}</strong></div><div><button class="icon-btn">${s?'◉':'⧉'}</button></div></div>`).join('')}
+        </section>
+        <button class="meta-toggle" id="meta-toggle"><span>Item details</span><span>⌄</span></button>
+      </div>
+      <aside>
+        <section class="card meta-card" id="meta-card">
+          ${meta('Category',item.type)}${meta('Folder',item.folder)}${meta('Modified',item.modified)}${meta('Device','Web · demo')}
+        </section>
+        <div class="detail-bottom"><button class="btn primary" id="primary-action">${action}</button><button class="btn" id="share">Share securely</button></div>
+      </aside>
+    </div>`;
+  app.innerHTML=appShell('items',item.type,content,{detail:true});
+  bindShell();
+  $('#meta-toggle').onclick=()=>{$('#meta-card').classList.toggle('open')};
+  $('#primary-action').onclick=()=>toast(action+' · copied');
+  $('#share').onclick=()=>toast('Secure share opened');
+}
+function detailFields(i){
+  if(i.type==='Login')return [['Username',i.username],['Password',i.password,true],['Website',i.url]];
+  if(i.type==='Identity')return [['Full name',i.fullName],['Document number',i.documentNumber,true],['Country',i.country],['Expiry',i.expiry]];
+  if(i.type==='Card')return [['Card number',i.cardNumber,true],['Expiry',i.expiry]];
+  if(i.type==='Secure Note')return [['Note',i.notes]];
+  if(i.type==='Document')return [['Description',i.notes],['Attachment','health-insurance.pdf']];
+  return [];
+}
+function primaryAction(i){return ({Login:'Copy password',Identity:'Copy document number',Card:'Copy card number','Secure Note':'Copy note',Document:'Open document'})[i.type]||'Copy'}
+function meta(k,v){return `<div class="meta-row"><span>${k}</span><strong>${escapeHtml(v)}</strong></div>`}
+
+/* ===== folders ===== */
+function renderFolders(){
+  const content=`<div class="section-head"><div><h2>Folders</h2></div><button class="btn primary" id="new-folder">New Folder</button></div>
+    <div class="folder-grid">${state.folders.map((f,i)=>`<button class="folder-card"><span class="micro">F${i+1}</span><h3>${f.name}</h3><p>${f.count} items in this folder.</p></button>`).join('')}</div>`;
+  app.innerHTML=appShell('folders','Folders',content);bindShell();
+  $('#new-folder').onclick=()=>toast('New folder flow opened');
+}
+
+/* ===== settings ===== */
+function settingGroup(title,rows){return `<section class="settings-group"><h2>${title}</h2><div class="card setting-list">${rows.join('')}</div></section>`}
+function setting(c,t,s,v){return `<button class="setting-row" style="width:100%;border:0;background:transparent;text-align:left"><span class="setting-icon">${c}</span><span><strong>${t}</strong><small>${s}</small></span><span>${v}</span></button>`}
+function renderSettings(){
+  const content=`
+    ${settingGroup('Vault',[setting('VA','Vault details','Name, version and local ID','›'),setting('DF','Default folder','Choose where new items go','Personal')])}
+    ${settingGroup('Security',[setting('PW','Master Password','Change your master password','›'),setting('AL','Auto Lock','Lock Nija automatically','300 sec'),setting('BI','Biometric Unlock','Use fingerprint or face','Off'),setting('SE','Security & Encryption','Guardian and technical details','›')])}
+    ${settingGroup('Backup & Portability',[setting('EX','Export vault','Create encrypted portable copy','›'),setting('IM','Import data','Bring data into this vault','›'),setting('CL','Cloud backup','Optional encrypted backup','Paid')])}
+    ${settingGroup('Appearance',[setting('TH','Theme','Light or dark',state.theme==='light'?'Light':'Dark')])}`;
+  app.innerHTML=appShell('settings','Settings',content);bindShell();
+  $$('.setting-row').forEach(r=>r.onclick=()=>toast('Settings sub-flow opened'));
+}
+
+/* ===== add item ===== */
+function addItemFlow(){
+  const types=['Login','Secure Note','Card','Identity','Document','Password','Bank Account','Passport','Driver License','SSH Key'];
+  showSheet({
+    eyebrow:'New item',
+    title:'What are you storing?',
+    body:`<div class="item-list">${types.map(t=>`<button class="item-row" data-new-type="${t}"><span class="type-icon">${t.slice(0,2).toUpperCase()}</span><span><strong>${t}</strong><small>${typeDescription(t)}</small></span><span>›</span></button>`).join('')}</div>`,
+    actions:[{label:'Cancel',onClick:o=>o.remove()}]
+  });
+  setTimeout(()=>$$('[data-new-type]').forEach(b=>b.onclick=()=>{document.querySelector('.overlay').remove();addItemEditor(b.dataset.newType)}),0)
+}
+function typeDescription(t){return ({Login:'Website, app and Wi-Fi access','Secure Note':'Private notes and memos',Card:'Payment card details',Identity:'Personal identity information',Document:'Encrypted files and records',Password:'Standalone secret','Bank Account':'Account and banking details',Passport:'Travel identity','Driver License':'License information','SSH Key':'Developer key material'})[t]||'Secure item'}
+function addItemEditor(type){
+  showSheet({
+    eyebrow:'Add item',
+    title:type,
+    body:`<div style="display:grid;gap:13px"><div class="field"><label>Title</label><input class="input" id="new-title"></div><div class="field"><label>Folder</label><select class="select">${state.folders.map(f=>`<option>${f.name}</option>`).join('')}</select></div><div class="field"><label>Primary value</label><input class="input" id="new-value"></div><div class="field"><label>Notes</label><textarea class="textarea"></textarea></div></div>`,
+    actions:[{label:'Cancel',onClick:o=>o.remove()},{label:'Save',className:'primary',onClick:o=>{o.remove();toast('Item saved');go('items')}}]
+  })
+}
+
+/* ===== render ===== */
+function render(){
+  document.documentElement.dataset.theme=state.theme;
+  if(currentRoute==='entry')return renderEntry();
+  if(currentRoute==='vault-select')return renderVaultSelect();
+  if(currentRoute==='unlock')return renderUnlock();
+  if(currentRoute==='home')return renderHome();
+  if(currentRoute==='items')return renderItems(false);
+  if(currentRoute==='favorites')return renderItems(true);
+  if(currentRoute==='folders')return renderFolders();
+  if(currentRoute==='settings')return renderSettings();
+  if(currentRoute.startsWith('item/'))return renderDetail(currentRoute.split('/')[1]);
+  renderEntry();
+}
+render();
+</script>
+</body>
+</html>

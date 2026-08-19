@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/application/services/default_vault_service.dart';
 import 'package:nija/core/config/guardian_profiles.dart';
 import 'package:nija/domain/models/vault_payload.dart';
 import 'package:nija/domain/models/vault_transfer_result.dart';
+import 'package:nija/infrastructure/adapters/file_vault_storage_adapter.dart';
 import 'package:nija/infrastructure/adapters/private_vault_store.dart';
 import 'package:nija/infrastructure/adapters/in_memory_vault_storage_adapter.dart';
 import 'package:nija/infrastructure/adapters/secure_crypto_adapter.dart';
@@ -480,6 +482,9 @@ void main() {
     final sizeWithDocument = await service.readVaultSizeBytes(
       filePath: 'document-sections.nija',
     );
+    final exportedVault = await service.readRawVaultFile(
+      filePath: 'document-sections.nija',
+    );
     final decryptedDocument = await service.readVaultDocument(
       filePath: 'document-sections.nija',
       password: 'CorrectPass123',
@@ -503,8 +508,289 @@ void main() {
       sizeWithDocument,
       greaterThan(documentBytes.length + chunkBytes.length),
     );
+    expect(sizeWithDocument, utf8.encode(exportedVault).length);
     expect(utf8.decode(decryptedDocument), 'plain document bytes');
   });
+
+  test(
+    'exported vault imports with same password and document sections',
+    () async {
+      final storage = InMemoryVaultStorageAdapter();
+      final service = DefaultVaultService(
+        storageAdapter: storage,
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: InMemoryPrivateVaultStore(),
+      );
+
+      await service.createVault(
+        filePath: 'export-source.nija',
+        vaultId: 'export-source-id',
+        vaultName: 'Export Source',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'CorrectPass123',
+        recoveryPhrase: basePhrase,
+      );
+      final documentSection = await service.persistVaultDocument(
+        filePath: 'export-source.nija',
+        password: 'CorrectPass123',
+        documentId: 'doc-1',
+        bytes: utf8.encode('exported document bytes'),
+      );
+      await service.persistVaultPayload(
+        filePath: 'export-source.nija',
+        password: 'CorrectPass123',
+        payload: VaultPayload(
+          schemaVersion: 1,
+          items: [
+            {
+              'id': 'doc-1',
+              'type': 'Documents',
+              'title': 'Exported Document',
+              'documentSection': documentSection,
+            },
+          ],
+          notes: const [],
+          tags: const [],
+          settings: const {},
+          audit: const [],
+        ),
+      );
+
+      final exportResult = await service.exportVault(
+        vaultId: 'export-source-id',
+        destinationPath: 'exported-copy.nija',
+      );
+      final importResult = await service.importNijaFile(
+        filePath: 'exported-copy.nija',
+        unlockCredential: 'CorrectPass123',
+      );
+      final exportedPayload = await service.readVaultPayload(
+        filePath: 'exported-copy.nija',
+        password: 'CorrectPass123',
+      );
+      final exportedDocument = await service.readVaultDocument(
+        filePath: 'exported-copy.nija',
+        password: 'CorrectPass123',
+        sectionName: documentSection,
+      );
+
+      expect(exportResult.status, ExportStatus.exported);
+      expect(importResult.status, ImportStatus.alreadyUpToDate);
+      expect(exportedPayload.items.single['title'], 'Exported Document');
+      expect(utf8.decode(exportedDocument), 'exported document bytes');
+    },
+  );
+
+  test(
+    'exported file path imports with same password without rewrite',
+    () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'nija-export-import-',
+      );
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+      final service = DefaultVaultService(
+        storageAdapter: const FileVaultStorageAdapter(),
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: FilePrivateVaultStore(baseDirectory: tempDir),
+      );
+      final sourcePath = '${tempDir.path}/source.nija';
+      final exportPath = '${tempDir.path}/exported.nija';
+
+      await service.createVault(
+        filePath: sourcePath,
+        vaultId: 'file-export-source-id',
+        vaultName: 'File Export Source',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'CorrectPass123',
+        recoveryPhrase: basePhrase,
+      );
+      await service.persistVaultPayload(
+        filePath: sourcePath,
+        password: 'CorrectPass123',
+        payload: const VaultPayload(
+          schemaVersion: 1,
+          items: [
+            {'id': 'login-1', 'type': 'Login', 'title': 'Exported Login'},
+          ],
+          notes: [],
+          tags: [],
+          settings: {},
+          audit: [],
+        ),
+      );
+
+      final rawContent = await service.readRawVaultFile(filePath: sourcePath);
+      await File(exportPath).writeAsString(rawContent, flush: true);
+      final importResult = await service.importNijaFile(
+        filePath: exportPath,
+        unlockCredential: 'CorrectPass123',
+      );
+
+      expect(importResult.status, ImportStatus.alreadyUpToDate);
+    },
+  );
+
+  test(
+    'same vault imported from cloud then local staged copy is up to date',
+    () async {
+      final storage = InMemoryVaultStorageAdapter();
+      final service = DefaultVaultService(
+        storageAdapter: storage,
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: InMemoryPrivateVaultStore(),
+      );
+
+      await service.createVault(
+        filePath: 'source-for-cloud.nija',
+        vaultId: 'same-vault-id',
+        vaultName: 'Same Vault',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'CorrectPass123',
+        recoveryPhrase: basePhrase,
+      );
+      await service.persistVaultPayload(
+        filePath: 'source-for-cloud.nija',
+        password: 'CorrectPass123',
+        payload: const VaultPayload(
+          schemaVersion: 1,
+          items: [
+            {'id': 'login-1', 'type': 'Login', 'title': 'Synced Login'},
+          ],
+          notes: [],
+          tags: [],
+          settings: {},
+          audit: [],
+        ),
+      );
+      final raw = await service.readRawVaultFile(
+        filePath: 'source-for-cloud.nija',
+      );
+      await storage.write(filePath: 'cloud-stage.nija', content: raw);
+      await storage.write(filePath: 'local-stage.nija', content: raw);
+
+      final cloudImport = await service.importNijaFile(
+        filePath: 'cloud-stage.nija',
+        unlockCredential: 'CorrectPass123',
+      );
+      final localImport = await service.importNijaFile(
+        filePath: 'local-stage.nija',
+        unlockCredential: 'CorrectPass123',
+      );
+
+      expect(cloudImport.status, ImportStatus.alreadyUpToDate);
+      expect(localImport.status, ImportStatus.alreadyUpToDate);
+    },
+  );
+
+  test(
+    'payload commits prune unreferenced and stale document section files',
+    () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'nija-private-store-',
+      );
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+      final privateStore = FilePrivateVaultStore(baseDirectory: tempDir);
+      final service = DefaultVaultService(
+        storageAdapter: InMemoryVaultStorageAdapter(),
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: privateStore,
+      );
+
+      await service.createVault(
+        filePath: 'prune-documents.nija',
+        vaultId: 'prune-documents-id',
+        vaultName: 'Prune Documents',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'CorrectPass123',
+        recoveryPhrase: basePhrase,
+      );
+
+      final documentSection = await service.persistVaultDocument(
+        filePath: 'prune-documents.nija',
+        password: 'CorrectPass123',
+        documentId: 'doc-1',
+        bytes: List<int>.filled(1024 * 1024 + 8, 7),
+      );
+      await service.persistVaultDocument(
+        filePath: 'prune-documents.nija',
+        password: 'CorrectPass123',
+        documentId: 'doc-1',
+        bytes: utf8.encode('short'),
+      );
+
+      var files = Map<String, dynamic>.from(
+        (await privateStore.describeVault('prune-documents-id'))['files']
+            as Map,
+      );
+      expect(
+        files.keys.where((name) => name.startsWith('document_')),
+        unorderedEquals([
+          'document_doc-1.manifest.enc',
+          'document_doc-1_chunk_000000.enc',
+        ]),
+      );
+
+      await service.persistVaultPayload(
+        filePath: 'prune-documents.nija',
+        password: 'CorrectPass123',
+        payload: VaultPayload(
+          schemaVersion: 1,
+          items: [
+            {
+              'id': 'doc-1',
+              'type': 'Documents',
+              'title': 'Short Document',
+              'documentSection': documentSection,
+              'documentSizeBytes': 5,
+            },
+          ],
+          notes: const [],
+          tags: const [],
+          settings: const {},
+          audit: const [],
+        ),
+      );
+
+      files = Map<String, dynamic>.from(
+        (await privateStore.describeVault('prune-documents-id'))['files']
+            as Map,
+      );
+      expect(
+        files.keys.where((name) => name.startsWith('document_')),
+        unorderedEquals([
+          'document_doc-1.manifest.enc',
+          'document_doc-1_chunk_000000.enc',
+        ]),
+      );
+
+      await service.persistVaultPayload(
+        filePath: 'prune-documents.nija',
+        password: 'CorrectPass123',
+        payload: const VaultPayload(
+          schemaVersion: 1,
+          items: [],
+          notes: [],
+          tags: [],
+          settings: {},
+          audit: [],
+        ),
+      );
+
+      files = Map<String, dynamic>.from(
+        (await privateStore.describeVault('prune-documents-id'))['files']
+            as Map,
+      );
+      expect(files.keys.where((name) => name.startsWith('document_')), isEmpty);
+    },
+  );
 
   test(
     'same revision with different vaultVersionId creates conflict copy',
@@ -689,6 +975,87 @@ void main() {
       header = await privateStore.readHeader('resolved-marker-id');
       expect(header.resolvedFromVersionIds, isEmpty);
       expect(header.revision, resolvedRevision + 1);
+    },
+  );
+
+  test(
+    'staged imported vault can reset password with its own recovery phrase',
+    () async {
+      const importedRecovery =
+          'amber arcade aspen basket blade bloom canyon comet coral drift ember galaxy';
+      final storage = InMemoryVaultStorageAdapter();
+      final service = DefaultVaultService(
+        storageAdapter: storage,
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: InMemoryPrivateVaultStore(),
+      );
+
+      await service.createVault(
+        filePath: 'active-vault.nija',
+        vaultId: 'active-vault-id',
+        vaultName: 'Active Vault',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'ActivePass123',
+        recoveryPhrase: basePhrase,
+      );
+      await service.createVault(
+        filePath: 'import-source.nija',
+        vaultId: 'import-source-id',
+        vaultName: 'Import Source',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'OldImportPass123',
+        recoveryPhrase: importedRecovery,
+      );
+      await service.persistVaultPayload(
+        filePath: 'import-source.nija',
+        password: 'OldImportPass123',
+        payload: const VaultPayload(
+          schemaVersion: 1,
+          items: [
+            {'id': 'imported-login', 'type': 'Login', 'title': 'Imported'},
+          ],
+          notes: [],
+          tags: [],
+          settings: {},
+          audit: [],
+        ),
+      );
+
+      final importedRaw = await service.readRawVaultFile(
+        filePath: 'import-source.nija',
+      );
+      await service.writeRawVaultFile(
+        filePath: 'import-stage.nija',
+        rawContent: importedRaw,
+      );
+      await service.resetMasterPasswordAfterRecovery(
+        filePath: 'import-stage.nija',
+        recoveryPhrase: importedRecovery,
+        newPassword: 'NewImportPass123',
+      );
+      final importResult = await service.importNijaFile(
+        filePath: 'import-stage.nija',
+        unlockCredential: 'NewImportPass123',
+      );
+
+      expect(importResult.vaultId, 'import-source-id');
+      await expectLater(
+        service.unlockVault(
+          filePath: 'active-vault.nija',
+          password: 'NewImportPass123',
+        ),
+        throwsA(isA<Object>()),
+      );
+      final activeUnlocked = await service.unlockVault(
+        filePath: 'active-vault.nija',
+        password: 'ActivePass123',
+      );
+      expect(activeUnlocked.id, 'active-vault-id');
+      final importedPayload = await service.readVaultPayload(
+        filePath: 'import-source-id',
+        password: 'NewImportPass123',
+      );
+      expect(importedPayload.items.single['title'], 'Imported');
     },
   );
 }

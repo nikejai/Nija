@@ -30,7 +30,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
   late final TextEditingController _titleController;
   late final TextEditingController _tagsController;
   late final TextEditingController _descriptionController;
-  PlatformFile? _selectedFile;
+  final List<PlatformFile> _selectedFiles = <PlatformFile>[];
   String? _errorText;
   bool _uploading = false;
   double _progress = 0;
@@ -56,14 +56,14 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
 
   bool get _canUpload =>
       !_uploading &&
-      _selectedFile != null &&
-      (_selectedFile!.readStream != null || _selectedFile!.bytes != null);
+      _selectedFiles.isNotEmpty &&
+      _selectedFiles.every(
+        (file) => file.readStream != null || file.bytes != null,
+      );
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final file = _selectedFile;
-    final extension = _extensionFor(file);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Upload Document'),
@@ -133,7 +133,11 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                               OutlinedButton.icon(
                                 onPressed: _uploading ? null : _pickFile,
                                 icon: const Icon(Icons.attach_file),
-                                label: const Text('Choose document'),
+                                label: Text(
+                                  _selectedFiles.isEmpty
+                                      ? 'Choose document'
+                                      : 'Add another document',
+                                ),
                               ),
                               const SizedBox(height: 8),
                               Text(
@@ -162,13 +166,17 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                                 ),
                               ],
                               const SizedBox(height: 14),
-                              if (file == null)
+                              if (_selectedFiles.isEmpty)
                                 _EmptyDocumentPicker(colorScheme: colorScheme)
                               else
-                                _SelectedDocumentSummary(
-                                  name: file.name,
-                                  extension: extension,
-                                  size: _formatBytes(file.size),
+                                _SelectedDocumentsList(
+                                  files: _selectedFiles,
+                                  onRemove: _uploading
+                                      ? null
+                                      : (index) => setState(() {
+                                          _selectedFiles.removeAt(index);
+                                          _errorText = null;
+                                        }),
                                 ),
                               const SizedBox(height: 14),
                               TextField(
@@ -256,55 +264,66 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     final FilePickerResult? result;
     try {
       result = await FilePicker.platform.pickFiles(
-        allowMultiple: false,
+        allowMultiple: true,
         withData: false,
         withReadStream: true,
       );
     } finally {
       widget.onLifecycleLockSuppressed?.call(false);
     }
-    final file = result?.files.single;
-    if (file == null) return;
-    if (file.size > widget.maxDocumentBytes) {
-      setState(() {
-        _selectedFile = null;
-        _errorText =
-            'Document must be ${_formatBytes(widget.maxDocumentBytes)} or smaller.';
-      });
-      return;
+    final files = result?.files ?? const <PlatformFile>[];
+    if (files.isEmpty) return;
+    for (final file in files) {
+      if (file.size > widget.maxDocumentBytes) {
+        setState(() {
+          _errorText =
+              '${file.name} must be ${_formatBytes(widget.maxDocumentBytes)} or smaller.';
+        });
+        return;
+      }
+      if (file.readStream == null && file.bytes == null) {
+        setState(() {
+          _errorText = 'Could not read ${file.name}.';
+        });
+        return;
+      }
     }
-    if (widget.currentVaultSizeBytes + file.size > widget.maxVaultBytes) {
+    final selectedBytes = _selectedFiles.fold<int>(
+      0,
+      (sum, file) => sum + file.size,
+    );
+    final addedBytes = files.fold<int>(0, (sum, file) => sum + file.size);
+    if (widget.currentVaultSizeBytes + selectedBytes + addedBytes >
+        widget.maxVaultBytes) {
       setState(() {
-        _selectedFile = null;
         _errorText =
             'Not enough vault space. Limit is ${_formatBytes(widget.maxVaultBytes)}.';
       });
       return;
     }
-    if (file.readStream == null && file.bytes == null) {
-      setState(() {
-        _selectedFile = null;
-        _errorText = 'Could not read the selected document.';
-      });
-      return;
-    }
     setState(() {
-      _selectedFile = file;
+      _selectedFiles.addAll(files);
       _errorText = null;
       if (_titleController.text.trim().isEmpty) {
-        _titleController.text = _fileNameWithoutExtension(file.name);
+        _titleController.text = _fileNameWithoutExtension(files.first.name);
       }
     });
   }
 
   Future<void> _uploadDocument() async {
-    final file = _selectedFile;
-    if (file == null) return;
-    if (file.size > widget.maxDocumentBytes ||
-        widget.currentVaultSizeBytes + file.size > widget.maxVaultBytes) {
+    if (_selectedFiles.isEmpty) return;
+    final oversized = _selectedFiles
+        .where((file) => file.size > widget.maxDocumentBytes)
+        .toList();
+    final selectedBytes = _selectedFiles.fold<int>(
+      0,
+      (sum, file) => sum + file.size,
+    );
+    if (oversized.isNotEmpty ||
+        widget.currentVaultSizeBytes + selectedBytes > widget.maxVaultBytes) {
       setState(() {
-        _errorText = file.size > widget.maxDocumentBytes
-            ? 'Document must be ${_formatBytes(widget.maxDocumentBytes)} or smaller.'
+        _errorText = oversized.isNotEmpty
+            ? '${oversized.first.name} must be ${_formatBytes(widget.maxDocumentBytes)} or smaller.'
             : 'Not enough vault space. Limit is ${_formatBytes(widget.maxVaultBytes)}.';
       });
       return;
@@ -317,6 +336,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     if (!mounted) return;
     setState(() => _progress = 0.45);
 
+    final file = _selectedFiles.first;
     final extension = _extensionFor(file);
     final description = _descriptionController.text.trim();
     final title = _titleController.text.trim().isEmpty
@@ -360,7 +380,29 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
       'documentFileName': file.name,
       'documentUploadedAt': uploadedAt,
       'documentStorage': 'pending',
+      if (_selectedFiles.length > 1)
+        'attachments': _selectedFiles
+            .skip(1)
+            .map((file) => _attachmentFromFile(file, uploadedAt))
+            .toList(),
     });
+  }
+
+  Map<String, dynamic> _attachmentFromFile(
+    PlatformFile file,
+    String uploadedAt,
+  ) {
+    return {
+      'id': 'attachment-${DateTime.now().microsecondsSinceEpoch}-${file.name}',
+      'title': _fileNameWithoutExtension(file.name),
+      'documentFileName': file.name,
+      'documentExtension': _extensionFor(file),
+      'documentSizeBytes': file.size,
+      'documentUploadedAt': uploadedAt,
+      'documentStorage': 'pending',
+      if (file.readStream != null) '__documentReadStream__': file.readStream,
+      if (file.bytes != null) '__documentBytes__': file.bytes,
+    };
   }
 }
 
@@ -388,16 +430,11 @@ class _EmptyDocumentPicker extends StatelessWidget {
   }
 }
 
-class _SelectedDocumentSummary extends StatelessWidget {
-  const _SelectedDocumentSummary({
-    required this.name,
-    required this.extension,
-    required this.size,
-  });
+class _SelectedDocumentsList extends StatelessWidget {
+  const _SelectedDocumentsList({required this.files, required this.onRemove});
 
-  final String name;
-  final String extension;
-  final String size;
+  final List<PlatformFile> files;
+  final ValueChanged<int>? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -409,47 +446,51 @@ class _SelectedDocumentSummary extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: const Color(0xFFFB7185).withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: const Icon(
-              Icons.insert_drive_file_outlined,
-              color: Color(0xFFFB7185),
-              size: 19,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
+      child: Column(
+        children: List.generate(files.length, (index) {
+          final file = files[index];
+          return Material(
+            color: Colors.transparent,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFB7185).withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(9),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '$extension · $size',
-                  style: TextStyle(
-                    color: colorScheme.onSurfaceVariant,
-                    fontSize: 12,
-                  ),
+                child: const Icon(
+                  Icons.insert_drive_file_outlined,
+                  color: Color(0xFFFB7185),
+                  size: 19,
                 ),
-              ],
+              ),
+              title: Text(
+                file.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              subtitle: Text(
+                '${_extensionFor(file)} · ${_formatBytes(file.size)}',
+                style: TextStyle(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
+              ),
+              trailing: IconButton(
+                key: ValueKey('document-upload-remove-$index'),
+                onPressed: onRemove == null ? null : () => onRemove!(index),
+                icon: const Icon(Icons.close),
+                tooltip: 'Remove document',
+              ),
             ),
-          ),
-        ],
+          );
+        }),
       ),
     );
   }

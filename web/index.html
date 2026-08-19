@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -18,29 +18,45 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <!--
+    CSP baseline for the web vault. Flutter CanvasKit and Material fonts load from
+    gstatic.com unless you self-host them at build time. Mirror on your CDN/host.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://apis.google.com; connect-src 'self' https://www.gstatic.com https://fonts.gstatic.com https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com wss: blob:; img-src 'self' data: blob: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; frame-src https://accounts.google.com; worker-src 'self' blob: https://www.gstatic.com;">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta name="description" content="Your private, local-first digital vault.">
+  <meta name="theme-color" content="#27272A">
+  <meta name="google-signin-client_id" content="698262730675-ui2upcjqi4c3mpu8lm9ci3bv1okrbp2v.apps.googleusercontent.com">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="nija">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Nija">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>nija</title>
+  <title>Nija</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    /* Match app scaffold; Flutter replaces the body once the first frame renders. */
+    html, body {
+      background: #f4f4f5;
+      height: 100%;
+      margin: 0;
+    }
+    @media (prefers-color-scheme: dark) {
+      html, body {
+        background: #27272a;
+      }
+    }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
+  <script src="pwa_install.js"></script>
+  <script src="webauthn_quick_unlock.js"></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
