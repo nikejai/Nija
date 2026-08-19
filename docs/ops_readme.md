@@ -9,7 +9,7 @@ Nija is local-first. The encrypted `.nija` vault file is the source of truth. Cl
 - Keep the app usable without a backend.
 - Treat cloud backup as encrypted-file portability, not sync.
 - Use the same vault crypto model on Android, iOS, and Web.
-- Keep paid feature access centralized. Current paid behavior is build-gated by `NIJA_PAID_BUILD`; runtime entitlement and Play Billing remain release work.
+- Keep paid feature access centralized. Android expanded vault storage and cloud backup are unlocked by the Google Play product `nija_expanded_vault_lifetime` and cached locally for offline starts. `NIJA_PAID_BUILD` is a development override only.
 - Store operational secrets outside git:
   - Android release keystore
   - `android/key.properties`
@@ -190,7 +190,17 @@ keyAlias=nija-release
 storeFile=/Users/<you>/nija-release.jks
 ```
 
-Keep `android/key.properties` and the keystore out of git.
+Keep `android/key.properties` and the keystore out of git. Back up both
+securely, ideally in a password manager plus an encrypted offline backup. If the
+release keystore is lost, future app updates can be blocked unless Play App
+Signing key recovery has been configured and approved.
+
+Verify the local files exist before building:
+
+```bash
+test -f android/key.properties
+test -f /Users/<you>/nija-release.jks
+```
 
 Verify signing:
 
@@ -200,6 +210,39 @@ cd android
 ```
 
 Copy the release SHA-1 into the Google Cloud Android OAuth client used for Drive backup.
+
+For the current local release keystore, `./gradlew signingReport` reports:
+
+```text
+Package name: com.nija
+Debug SHA-1: 97:E7:92:C9:81:E0:30:74:18:96:81:F4:52:10:16:F0:80:02:6D:F3
+Release SHA-1: 8B:3D:36:2F:FF:EA:44:19:C5:C5:A3:89:56:CB:57:E8:36:25:C2:50
+Release SHA-256: 7E:AB:F5:34:40:C7:52:A5:49:ED:81:CB:B8:6B:C7:38:8E:A1:A3:B4:29:31:A2:33:97:06:A0:12:5B:90:B4:1C
+```
+
+If Google Drive backup/restore shows a message like `retry after selecting the
+google account on signed application`, treat it as a Google Sign-In OAuth
+configuration failure. Verify every installed build's signing SHA-1 is
+registered on an Android OAuth client for `com.nija`: debug SHA-1 for
+`flutter run`, release SHA-1 for locally signed APK/AAB installs, and Play App
+Signing SHA-1 for Play/internal-testing installs. Wait for propagation, uninstall
+the old app build, install the newly signed build, and select the same tester
+Google account that is allowed by the OAuth consent screen.
+
+If both debug and release builds fail after SHA-1 registration, pass the Web
+OAuth client id from the same Google Cloud project as the native server client:
+
+```bash
+flutter run -d <android-device-id> \
+  --dart-define=NIJA_GOOGLE_NATIVE_SERVER_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+```
+
+Use the same define for release builds when validating Drive backup/restore:
+
+```bash
+flutter build apk --release \
+  --dart-define=NIJA_GOOGLE_NATIVE_SERVER_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+```
 
 ### Run Locally
 
@@ -224,13 +267,165 @@ flutter install -d <android-device-id>
 
 For Google Drive backup testing, use a device or emulator build signed with a key whose SHA-1 is registered in the Google Cloud Android OAuth client.
 
+### Android SDK Toolchain Repair
+
+If `flutter build appbundle --release` reports:
+
+```text
+Release app bundle failed to strip debug symbols from native libraries.
+```
+
+first confirm `android/app/build.gradle.kts` keeps release native symbol handling
+enabled:
+
+```kotlin
+buildTypes {
+    release {
+        ndk {
+            debugSymbolLevel = "SYMBOL_TABLE"
+        }
+    }
+}
+```
+
+This lets Android Gradle strip native `.so` files from the delivered app bundle
+while placing native symbol tables in AAB metadata for Play/native crash
+symbolication. Do not add `--extra-gen-snapshot-options=--strip` to the AAB
+command; that can remove Dart AOT debug metadata before Flutter verifies the
+bundle.
+
+Then check the Android toolchain:
+
+```bash
+flutter doctor -v
+```
+
+The Android section must show command-line tools installed and all Android
+licenses accepted. If doctor reports `cmdline-tools component is missing` or
+`Android license status unknown`, install the SDK Command-line Tools from
+Android Studio:
+
+1. Open Android Studio.
+2. Open `Settings` -> `Languages & Frameworks` -> `Android SDK`.
+3. Open `SDK Tools`.
+4. Enable `Android SDK Command-line Tools (latest)`.
+5. Ensure `NDK (Side by side)` is installed.
+6. Apply changes.
+
+Then accept licenses:
+
+```bash
+flutter doctor --android-licenses
+flutter doctor -v
+```
+
+For command-line-only setup, install the current command-line tools ZIP from
+Google into:
+
+```text
+~/Library/Android/sdk/cmdline-tools/latest
+```
+
+Then run:
+
+```bash
+~/Library/Android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+flutter doctor -v
+```
+
+If the strip failure persists, verify the NDK strip tool exists:
+
+```bash
+find ~/Library/Android/sdk/ndk -name llvm-strip
+```
+
+Reinstall `NDK (Side by side)` from Android Studio if no `llvm-strip` binary is
+found.
+
 ### Release Builds
+
+Before building:
+
+1. Confirm the release version in `pubspec.yaml`:
+
+```yaml
+version: 0.1.0+1
+```
+
+The part before `+` is the user-visible version name. The number after `+`
+is the Android version code and must increase for every Play Console upload.
+
+2. Confirm release signing is configured:
+
+```bash
+test -f android/key.properties
+test -f /Users/<you>/nija-release.jks
+```
+
+The file must contain:
+
+```properties
+storePassword=YOUR_STORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=nija-release
+storeFile=/Users/<you>/nija-release.jks
+```
+
+3. Run the release gate:
+
+```bash
+./scripts/release_hardening_gate.sh
+```
+
+Build the signed Android App Bundle for Play Console. Use this default command
+when Google Drive backup/restore already works with the registered Android OAuth
+client SHA-1:
+
+```bash
+flutter clean
+flutter pub get
+flutter build appbundle --release \
+  --obfuscate \
+  --split-debug-info=build/symbols/android
+```
+
+If native Google Sign-In needs an explicit server client id, pass the Web OAuth
+client id from the same Google Cloud project:
+
+```bash
+flutter build appbundle --release \
+  --dart-define=NIJA_GOOGLE_NATIVE_SERVER_CLIENT_ID=<web-client-id>.apps.googleusercontent.com \
+  --obfuscate \
+  --split-debug-info=build/symbols/android
+```
+
+Expected signed AAB output:
+
+```text
+build/app/outputs/bundle/release/app-release.aab
+```
+
+Verify the AAB exists:
+
+```bash
+ls -lh build/app/outputs/bundle/release/app-release.aab
+```
+
+Optional local release APK for device smoke testing:
 
 APK:
 
 ```bash
 flutter build apk --release \
-  --dart-define=NIJA_PAID_BUILD=true \
+  --obfuscate \
+  --split-debug-info=build/symbols/android
+```
+
+APK with explicit native Google Sign-In server client id:
+
+```bash
+flutter build apk --release \
+  --dart-define=NIJA_GOOGLE_NATIVE_SERVER_CLIENT_ID=<web-client-id>.apps.googleusercontent.com \
   --obfuscate \
   --split-debug-info=build/symbols/android
 ```
@@ -239,12 +434,13 @@ App Bundle:
 
 ```bash
 flutter build appbundle --release \
-  --dart-define=NIJA_PAID_BUILD=true \
   --obfuscate \
   --split-debug-info=build/symbols/android
 ```
 
-Archive `build/symbols/android` privately for crash symbolication. Do not publish symbol maps.
+The Android release Gradle config also generates native symbol tables for AAB
+metadata. Archive `build/symbols/android` privately for Dart crash
+symbolication. Do not publish Dart symbol maps.
 
 Build outputs:
 
@@ -253,11 +449,36 @@ build/app/outputs/flutter-apk/app-release.apk
 build/app/outputs/bundle/release/app-release.aab
 ```
 
+After building:
+
+1. Archive `build/symbols/android` privately with the release version and build
+   number.
+2. Upload `build/app/outputs/bundle/release/app-release.aab` to Play Console
+   internal testing first.
+3. If Play App Signing is enabled, copy the Play signing SHA-1 into the Google
+   Cloud Android OAuth client before validating Drive backup.
+4. Install or distribute the same signed build for final real-device validation.
+
 ### Deploy / Release Options
 
-- Local device install from APK:
+You cannot install an `.aab` directly on a device. Use Play Console internal
+testing for the real release path, or build/install a release APK for a quick
+local smoke test.
+
+- Local device install from release APK:
+
+Build the APK:
 
 ```bash
+flutter build apk --release \
+  --obfuscate \
+  --split-debug-info=build/symbols/android
+```
+
+Install the APK:
+
+```bash
+flutter devices
 flutter install -d <android-device-id> --use-application-binary build/app/outputs/flutter-apk/app-release.apk
 ```
 
@@ -268,6 +489,108 @@ flutter install -d <android-device-id> --use-application-binary build/app/output
   4. Add tester emails or Google Groups.
   5. Roll out to internal testers.
   6. Verify Google Drive backup with the Play signing SHA-1 if Play App Signing is enabled.
+
+- Local AAB validation with bundletool:
+
+Use this when you want to validate the exact `.aab` locally without waiting for
+Play Console delivery. Install `bundletool` first if it is not already available.
+
+```bash
+bundletool build-apks \
+  --bundle=build/app/outputs/bundle/release/app-release.aab \
+  --output=build/app/outputs/bundle/release/nija.apks \
+  --ks=/Users/<you>/nija-release.jks \
+  --ks-key-alias=nija-release
+```
+
+Then install to the connected device:
+
+```bash
+bundletool install-apks \
+  --apks=build/app/outputs/bundle/release/nija.apks
+```
+
+If the device is not detected, reconnect USB, approve the device debugging
+prompt, and check:
+
+```bash
+adb devices
+```
+
+- Real-device validation checklist:
+  1. Create a vault.
+  2. Unlock with the master password.
+  3. Set and change the app PIN.
+  4. Validate biometric unlock/gate where available.
+  5. Lock, background the app, return, and unlock again.
+  6. Recover with phrase and reset the master password.
+  7. Add, edit, search, favorite, and delete vault items.
+  8. Create, edit, share, and delete notes.
+  9. Import, preview, save, and export documents.
+  10. Import/export encrypted vault data.
+  11. Purchase/restore expanded storage from Settings -> Storage when using a Play test install.
+  12. Backup and restore if the paid/cloud build is enabled.
+  13. Restart the app and verify encrypted vault persistence.
+
+### Android Google Play Billing Setup
+
+Nija uses Google Play Billing for the Android expanded-storage entitlement.
+
+Product:
+
+```text
+nija_expanded_vault_lifetime
+```
+
+Entitlement behavior:
+
+- free/default vault limit: 100 MB,
+- Google Play product owned: 1 GB,
+- entitlement is restored from Play on app start/session refresh,
+- last verified purchased entitlement is cached in app-local secure storage for offline starts,
+- pending purchases do not unlock storage,
+- successful purchased/restored transactions are completed/acknowledged through the Billing plugin.
+
+Play Console setup:
+
+1. Confirm the app package is `com.nija`.
+2. Upload at least one signed AAB to an internal, closed, or production track. Play Billing products are not fully testable from a purely sideloaded APK.
+3. Open Play Console -> Monetize with Play -> Products -> In-app products.
+4. Create a managed in-app product with product id:
+
+```text
+nija_expanded_vault_lifetime
+```
+
+5. Product type: one-time/non-consumable managed product.
+6. Add name/description, for example:
+   - name: `Expanded Vault Storage`
+   - description: `Unlock up to 1 GB vault storage on Android.`
+7. Set price and tax/distribution settings.
+8. Activate the product.
+9. Add license testers in Play Console -> Setup -> License testing.
+10. Add the tester accounts to the internal/closed test track.
+11. Install Nija from the Play testing link with the same tester Google account.
+12. Open Nija -> Settings -> Storage -> Upgrade storage.
+13. Complete the test purchase.
+14. Confirm Settings -> Storage shows the 1 GB limit and Google Play entitlement source.
+15. Restart the app offline and confirm the 1 GB limit remains available from the cached entitlement.
+16. Reinstall from Play with the same Google account and use Restore purchase to confirm the entitlement is restored.
+
+What is needed before validation:
+
+- Play Console app access for `com.nija`,
+- Play payments/merchant setup completed,
+- an uploaded signed AAB on an internal or closed testing track,
+- product `nija_expanded_vault_lifetime` activated,
+- at least one license tester Google account,
+- tester installed app from Play, not only `adb install`.
+
+Notes:
+
+- Local debug/sideload builds can compile the Billing code, but real purchase and restore validation should use a Play-installed test build.
+- Without a backend, Google Play is the online source of truth and the app-local cache is an offline convenience. Do not store entitlement state inside a vault file.
+- Android cloud backup uses the same expanded-storage entitlement. Do not add `NIJA_PAID_BUILD=true` to normal Play release builds.
 
 - Production Play Store release:
   1. Complete store listing, privacy policy, data safety, content rating, and app access forms.
@@ -403,6 +726,9 @@ Security assumptions:
 - browser storage must only hold encrypted vault data and non-secret preferences,
 - service worker/cache must never cache decrypted payloads,
 - plaintext secrets must not appear in URLs, logs, history, analytics, or crash payloads.
+- until runtime paid entitlement exists, web storage limits are client-enforced:
+  new/small vaults are capped at 100 MB, while existing encrypted vaults already above 100 MB can continue up to 1 GB.
+  This is product behavior, not an anti-tamper licensing control; durable paid enforcement requires a server-side entitlement or signed receipt.
 
 ### Run Locally
 
@@ -483,12 +809,15 @@ For mobile device testing on the same network, serve from the host machine and o
   5. Set cache headers carefully:
      - long cache for hashed Flutter assets,
      - short/no-cache for `index.html`, `flutter_bootstrap.js`, manifest, and service-worker files.
-  6. Validate online load, offline reload, install/add-to-home-screen, and vault persistence.
+  6. Apply the production security headers from `web/_headers` or translate the same policy to the host/CDN.
+  7. Validate online load, offline reload, install/add-to-home-screen, and vault persistence.
 
 - Firebase Hosting:
   1. Configure hosting with public directory `build/web`.
   2. Build the app.
-  3. Deploy with Firebase CLI.
+  3. Use the checked-in `firebase.json` headers, cache controls, and SPA rewrite.
+  4. Confirm the privacy policy is reachable at `/privacy.html`.
+  5. Deploy with Firebase CLI.
 
 ```bash
 flutter build web --release
@@ -498,9 +827,38 @@ firebase deploy --only hosting
 - Any CDN/object storage host:
   1. Upload `build/web`.
   2. Enable HTTPS.
-  3. Configure security headers.
+  3. Configure security headers equivalent to `web/_headers`.
   4. Configure fallback routing to `index.html`.
-  5. Purge CDN cache after release.
+  5. Confirm the privacy policy is served directly at `/privacy.html` and is not rewritten to the Flutter app shell.
+  6. Purge CDN cache after release.
+
+### Web Security Headers
+
+The production web build includes two deployable header configurations:
+
+- `web/_headers` for hosts that copy Flutter web assets directly, including Netlify and Cloudflare Pages style deployments.
+- `firebase.json` for Firebase Hosting, using `build/web` as the public directory.
+
+Required production headers:
+
+```text
+Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://apis.google.com; connect-src 'self' https://www.gstatic.com https://fonts.gstatic.com https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://www.google.com wss: blob:; img-src 'self' data: blob: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; frame-src https://accounts.google.com; worker-src 'self' blob: https://www.gstatic.com; manifest-src 'self'
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: accelerometer=(), autoplay=(), bluetooth=(), camera=(), clipboard-read=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), hid=(), idle-detection=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-get=(self), screen-wake-lock=(), serial=(), usb=(), xr-spatial-tracking=()
+Cross-Origin-Opener-Policy: same-origin-allow-popups
+Cross-Origin-Resource-Policy: same-origin
+```
+
+Policy notes:
+
+- Flutter web currently requires inline/eval/WebAssembly allowances for its bootstrap/runtime. Keep these allowances scoped to the app origin and Google origins needed for Identity/Drive.
+- Keep `Cross-Origin-Opener-Policy` at `same-origin-allow-popups` so Google OAuth popup flows continue to work.
+- Do not enable `Cross-Origin-Embedder-Policy` until Google sign-in, fonts, CanvasKit, service-worker behavior, and OAuth popups are validated with that isolation mode.
+- Keep HSTS only on HTTPS production domains. Do not preload a domain until all subdomains are HTTPS-ready.
+- Mirror header changes in both `web/_headers` and `firebase.json`.
 
 ### Web Google Drive Backup Setup
 
@@ -595,13 +953,13 @@ Flutter web release builds are minified and tree-shaken. Flutter's native `--obf
 
 Current state:
 
-- Paid cloud backup is controlled by `NIJA_PAID_BUILD`.
+- Android cloud backup and expanded storage are controlled by Google Play Billing product `nija_expanded_vault_lifetime`.
 - Free builds show paid backup controls disabled.
-- Runtime entitlements and Play Billing are still pending.
+- Play entitlements are cached locally for offline starts.
 
 Release target:
 
-- Add Play Billing non-consumable product `nija_supporter_lifetime`.
+- Add Play Billing non-consumable product `nija_expanded_vault_lifetime`.
 - On app start, load locally cached entitlement and reconcile with Play Billing state.
 - Default to free features until a trusted entitlement is loaded.
 - Store entitlement state in app-local storage, not inside any vault.
@@ -693,7 +1051,7 @@ flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/a
 flutter build ipa --release --obfuscate --split-debug-info=build/symbols/ios
 ```
 
-Paid release examples:
+Development override examples:
 
 ```bash
 flutter build appbundle --release \

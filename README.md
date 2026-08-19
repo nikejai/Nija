@@ -11,6 +11,8 @@ Nija is a local-first, privacy-first vault application built with Flutter.
 - Localization: Flutter localization delegates + app-level string dictionary (`en`, `es`)
 - Testing: `flutter_test` (unit + widget tests)
 - Launcher icons: `flutter_launcher_icons`
+- Web production headers: `web/_headers` for static hosts and `firebase.json` for Firebase Hosting
+- Web privacy policy: `web/privacy.html` is served directly at `/privacy.html`
 
 ## Architecture
 
@@ -44,6 +46,7 @@ The app follows a layered approach:
     - rotate recovery-phrase wrapper
   - web runtime uses durable browser private app storage through `WebVaultStorageAdapter`; vault bytes and source metadata are not stored in HTTP cookies
   - non-web targets use file-based persistence (`FileVaultStorageAdapter`)
+  - new/small free vaults are capped at 100 MB; existing vaults already above 100 MB are treated as legacy vaults and can continue up to 1 GB
   - cross-platform vault import/export:
     - import encrypted vault from local file/upload,
     - export current encrypted vault to local storage with user-selected file name,
@@ -92,12 +95,13 @@ The app follows a layered approach:
 - Settings menu now omits `Vault Backup`, `Recovery Phrase`, and `Danger Zone` entries.
 - Settings includes `Import encrypted secret` to import `.nijas` files into Vault/Notes.
 - Settings includes default sort selectors for both keys and notes (`Last accessed` or `Title`), persisted locally.
+- Settings includes a Storage section showing vault usage, the active vault limit, Google Play entitlement status, purchase restore, and Android expanded-storage upgrade.
 - Settings includes a paid-gated cloud-backup toggle:
   - Android label: `Backup to Google Drive`
   - iOS label: `Backup to iCloud`
-  - controlled by build flag `NIJA_PAID_BUILD` (`--dart-define`)
-  - disabled in free build with hint text `Available in paid version`
-  - when enabled in paid build, `Backup now` performs direct cloud upload:
+  - Android is controlled by the Google Play expanded-storage entitlement; `NIJA_PAID_BUILD` remains a development override
+  - disabled without entitlement with hint text `Available in paid version`
+  - when enabled, `Backup now` performs direct cloud upload:
     - Android: OAuth sign-in + Google Drive API upload (no share sheet)
     - iOS: iCloud ubiquity container write (no share sheet)
   - each backup is keyed by `vaultId` (stored in vault metadata) so the same vault from different devices can update the same cloud object lineage
@@ -108,7 +112,8 @@ The app follows a layered approach:
     - `Restore backup` action from the same section
 - App PIN can be set or changed from Settings -> Security and provides local quick unlock when biometrics are unavailable.
 - Biometric enable/disable in Settings uses a slider switch control with confirmation dialogs for both enable and disable.
-- On web, biometric/device unlock uses secure WebAuthn PRF quick unlock after a successful master-password login. PIN setup is required first; PRF wraps the PIN, and the PIN unlocks the encrypted local helper. Browsers or devices without secure PRF support keep biometrics disabled and use PIN or master-password unlock.
+  - On web, biometric/device unlock uses secure WebAuthn PRF quick unlock after a successful master-password login. PIN setup is required first; PRF wraps the PIN, and the PIN unlocks the encrypted local helper. Browsers or devices without secure PRF support keep biometrics disabled and use PIN or master-password unlock.
+- Android expanded vault storage uses Google Play Billing with product id `nija_expanded_vault_lifetime`; verified purchases are cached locally for offline starts and unlock the 1 GB vault limit.
 - Encrypted secret sharing:
   - app-specific portable secret file extension: `.nijas`
   - content uses JSON envelope with PBKDF2-HMAC-SHA256 key derivation + AES-256-GCM payload encryption

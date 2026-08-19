@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../app/widgets/nija_brand_lockup.dart';
 import 'onboarding_scaffold.dart';
 
 class FirstInstallWalkthroughScreen extends StatefulWidget {
@@ -93,73 +94,130 @@ class _FirstInstallWalkthroughScreenState
     final colorScheme = theme.colorScheme;
 
     return OnboardingScaffold(
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-          child: Column(
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
+      fullWidth: true,
+      child: Column(
+        children: [
+          Container(
+            height: 64,
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              border: Border(
+                bottom: BorderSide(color: colorScheme.outlineVariant),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Expanded(child: NijaBrandLockup()),
+                TextButton(
                   key: const ValueKey('first-install-walkthrough-skip'),
                   onPressed: _submitting ? null : () => _finish(widget.onSkip),
                   child: const Text('Skip'),
                 ),
-              ),
-              Expanded(
-                child: PageView.builder(
-                  key: const ValueKey('first-install-walkthrough-pages'),
-                  controller: _pageController,
-                  itemCount: _pages.length,
-                  onPageChanged: (index) => setState(() => _pageIndex = index),
-                  itemBuilder: (context, index) =>
-                      _WalkthroughPage(data: _pages[index]),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(
-                  _pages.length,
-                  (index) => AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    width: index == _pageIndex ? 22 : 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: index == _pageIndex
-                          ? colorScheme.primary
-                          : colorScheme.outlineVariant,
-                      borderRadius: BorderRadius.circular(8),
+              ],
+            ),
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth >= 720;
+                return SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                    isWide ? 32 : 16,
+                    isWide ? 32 : 18,
+                    isWide ? 32 : 16,
+                    28,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: 760,
+                        minHeight: constraints.maxHeight - 60,
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            height: isWide ? 420 : 390,
+                            decoration: BoxDecoration(
+                              color: colorScheme.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: colorScheme.outlineVariant,
+                              ),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: PageView.builder(
+                              key: const ValueKey(
+                                'first-install-walkthrough-pages',
+                              ),
+                              controller: _pageController,
+                              itemCount: _pages.length,
+                              onPageChanged: (index) =>
+                                  setState(() => _pageIndex = index),
+                              itemBuilder: (context, index) =>
+                                  _WalkthroughPage(data: _pages[index]),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: List.generate(
+                              _pages.length,
+                              (index) => AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                width: index == _pageIndex ? 22 : 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: index == _pageIndex
+                                      ? colorScheme.primary
+                                      : colorScheme.outlineVariant,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 22),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 520),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                key: const ValueKey(
+                                  'first-install-walkthrough-next',
+                                ),
+                                onPressed: _submitting ? null : _next,
+                                icon: Icon(
+                                  _isLastPage
+                                      ? Icons.check_circle_outline
+                                      : Icons.arrow_forward,
+                                ),
+                                label: Text(
+                                  _isLastPage ? 'Get started' : 'Continue',
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'Step ${_pageIndex + 1} of ${_pages.length}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  key: const ValueKey('first-install-walkthrough-next'),
-                  onPressed: _submitting ? null : _next,
-                  icon: Icon(
-                    _isLastPage
-                        ? Icons.check_circle_outline
-                        : Icons.arrow_forward,
-                  ),
-                  label: Text(_isLastPage ? 'Get started' : 'Continue'),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Step ${_pageIndex + 1} of ${_pages.length}',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+                );
+              },
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -175,42 +233,58 @@ class _WalkthroughPage extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 96,
-            height: 96,
-            decoration: BoxDecoration(
-              color: colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Icon(data.icon, size: 42, color: colorScheme.primary),
-          ),
-          const SizedBox(height: 34),
-          Text(
-            data.title,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 14),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 340),
-            child: Text(
-              data.body,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                height: 1.4,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(28, 26, 28, 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight - 50),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 76,
+                    height: 76,
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: colorScheme.outlineVariant),
+                    ),
+                    child: Icon(
+                      data.icon,
+                      size: 34,
+                      color: colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Text(
+                    data.title,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: Text(
+                      data.body,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

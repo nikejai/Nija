@@ -146,6 +146,14 @@ class VaultAppShell extends StatefulWidget {
     this.onReadVaultInternals,
     this.cloudBackupFeatureAvailableOverride,
     this.debugInternalsFeatureAvailableOverride,
+    this.expandedVaultStorageEntitled = false,
+    this.canPurchaseExpandedVaultStorage = false,
+    this.purchaseInProgress = false,
+    this.entitlementSource = 'free',
+    this.entitlementLastVerifiedAt,
+    this.entitlementErrorMessage,
+    this.onRefreshEntitlements,
+    this.onPurchaseExpandedVaultStorage,
     this.isExploreDemoSession = false,
     this.onExitExploreDemo,
     this.secretSharePortability,
@@ -190,6 +198,14 @@ class VaultAppShell extends StatefulWidget {
   final ReadVaultInternals? onReadVaultInternals;
   final bool? cloudBackupFeatureAvailableOverride;
   final bool? debugInternalsFeatureAvailableOverride;
+  final bool expandedVaultStorageEntitled;
+  final bool canPurchaseExpandedVaultStorage;
+  final bool purchaseInProgress;
+  final String entitlementSource;
+  final DateTime? entitlementLastVerifiedAt;
+  final String? entitlementErrorMessage;
+  final Future<void> Function()? onRefreshEntitlements;
+  final Future<bool> Function()? onPurchaseExpandedVaultStorage;
   final bool isExploreDemoSession;
   final VoidCallback? onExitExploreDemo;
   final SecretSharePortabilityAdapter? secretSharePortability;
@@ -654,7 +670,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   bool get _cloudBackupFeatureAvailable =>
       widget.cloudBackupFeatureAvailableOverride ??
-      AppFeatures.supportsCloudBackup;
+      (widget.expandedVaultStorageEntitled || AppFeatures.supportsCloudBackup);
 
   bool get _debugTabVisible =>
       _debugInternalsFeatureAvailable &&
@@ -1559,7 +1575,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           onSaveDocumentCopy: _saveDocumentCopy,
           customTypeDefinitions: _customTypeDefinitions,
           currentVaultSizeBytes: _effectiveVaultSizeBytes,
-          maxVaultBytes: VaultLimits.maxVaultBytes,
+          maxVaultBytes: _effectiveMaxVaultBytes,
           maxDocumentBytes: VaultLimits.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
           onAddAttachment: (detailContext, detailItem) =>
@@ -1625,10 +1641,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
         _parseEntryTimestamp(entry['createdAt']);
     if (timestamp != null) return timestamp.millisecondsSinceEpoch;
     return _updatedRank(entry);
-  }
-
-  DateTime? _lastAccessedAt(Map<String, dynamic> entry) {
-    return _parseEntryTimestamp(entry['lastAccessedAt']);
   }
 
   DateTime? _activityAt(Map<String, dynamic> entry) {
@@ -1782,18 +1794,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   String _relativeTimeLabel(DateTime timestamp) =>
       formatRelativeTimeSince(timestamp);
-
-  int? _updatedAgeDays(String text) {
-    final normalized = text.toLowerCase().trim();
-    if (normalized.isEmpty || normalized == 'now') return 0;
-    final digits = RegExp(r'\d+').firstMatch(normalized)?.group(0);
-    final value = digits == null ? 0 : (int.tryParse(digits) ?? 0);
-    if (normalized.contains('h')) return 0;
-    if (normalized.contains('d')) return value;
-    if (normalized.contains('w')) return value * 7;
-    if (normalized.contains('m')) return value * 30;
-    return 9999;
-  }
 
   bool _matchesAllItemsDateFilter(Map<String, dynamic> entry) {
     if (_allItemsFilterDateRange == 'any') return true;
@@ -1993,9 +1993,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
     };
     final autoLockLabel = _formatAutoLockSeconds(widget.autoLockSeconds);
     final effectiveVaultSizeBytes = _effectiveVaultSizeBytes;
-    final vaultLimitBytes = VaultLimits.maxVaultBytes;
+    final vaultLimitBytes = _effectiveMaxVaultBytes;
     final vaultUsageLabel =
         '${VaultLimits.formatBytes(effectiveVaultSizeBytes)} of ${VaultLimits.formatBytes(vaultLimitBytes)}';
+    final expandedStorageSubtitle = widget.expandedVaultStorageEntitled
+        ? 'Expanded storage unlocked'
+        : widget.canPurchaseExpandedVaultStorage
+        ? 'Unlock ${VaultLimits.formatBytes(VaultLimits.paidVaultBytes)} vault storage with Google Play'
+        : 'Free vault limit';
+    final entitlementLabel = _entitlementStatusLabel();
     final backupSubtitle = _cloudBackupFeatureAvailable
         ? (_cloudBackupEnabled
               ? 'Automatic cloud backup is enabled'
@@ -2168,6 +2174,82 @@ class _VaultAppShellState extends State<VaultAppShell> {
                           ],
                         ),
                       ],
+                    ],
+                  ),
+                  _SettingsSection(
+                    title: 'Storage',
+                    children: [
+                      _SettingsRow(
+                        key: const ValueKey('settings-vault-storage-row'),
+                        icon: Icons.storage_outlined,
+                        title: 'Vault storage',
+                        subtitle: expandedStorageSubtitle,
+                        value: vaultUsageLabel,
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-storage-entitlement-row'),
+                        icon: widget.expandedVaultStorageEntitled
+                            ? Icons.verified_outlined
+                            : Icons.lock_outline,
+                        title: 'Storage entitlement',
+                        subtitle: entitlementLabel,
+                        value: widget.expandedVaultStorageEntitled
+                            ? '1 GB'
+                            : '100 MB',
+                        onTap: widget.onRefreshEntitlements == null
+                            ? null
+                            : _refreshStorageEntitlement,
+                      ),
+                      if (widget.entitlementErrorMessage != null &&
+                          widget.entitlementErrorMessage!.trim().isNotEmpty)
+                        _SettingsRow(
+                          key: const ValueKey(
+                            'settings-storage-entitlement-error-row',
+                          ),
+                          icon: Icons.info_outline,
+                          title: 'Play Billing status',
+                          subtitle: widget.entitlementErrorMessage!,
+                          onTap: widget.onRefreshEntitlements == null
+                              ? null
+                              : _refreshStorageEntitlement,
+                        ),
+                      _SettingsActionRow(
+                        children: [
+                          if (widget.canPurchaseExpandedVaultStorage)
+                            FilledButton.icon(
+                              key: const ValueKey(
+                                'settings-buy-expanded-storage',
+                              ),
+                              onPressed:
+                                  widget.purchaseInProgress ||
+                                      widget.onPurchaseExpandedVaultStorage ==
+                                          null
+                                  ? null
+                                  : _buyExpandedVaultStorage,
+                              icon: widget.purchaseInProgress
+                                  ? const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.shopping_bag_outlined),
+                              label: Text(
+                                widget.purchaseInProgress
+                                    ? 'Opening Play...'
+                                    : 'Upgrade storage',
+                              ),
+                            ),
+                          OutlinedButton.icon(
+                            key: const ValueKey('settings-refresh-entitlement'),
+                            onPressed: widget.onRefreshEntitlements == null
+                                ? null
+                                : _refreshStorageEntitlement,
+                            icon: const Icon(Icons.restore_outlined),
+                            label: const Text('Restore purchase'),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                   _SettingsSection(
@@ -2621,18 +2703,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
-  Future<void> _showRotateRecoveryPhraseDialog(BuildContext context) async {
-    final values = await showDialog<(String, String)>(
-      context: context,
-      builder: (context) => const _RotateRecoveryPhraseDialog(),
-    );
-    if (values == null) return;
-    await widget.onRotateRecoveryPhrase(
-      currentRecoveryPhrase: values.$1,
-      newRecoveryPhrase: values.$2,
-    );
-  }
-
   Future<void> _showLanguagePicker(BuildContext context) async {
     final selected = await showVaultChoiceMenu<String>(
       context: context,
@@ -2743,6 +2813,33 @@ class _VaultAppShellState extends State<VaultAppShell> {
             : DateTime.fromMillisecondsSinceEpoch(
                 _cloudBackupLastAtEpochMs,
               ).toString(),
+      ),
+    );
+  }
+
+  Future<void> _refreshStorageEntitlement() async {
+    final refresh = widget.onRefreshEntitlements;
+    if (refresh == null) return;
+    await refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Storage purchase status refreshed.')),
+    );
+  }
+
+  Future<void> _buyExpandedVaultStorage() async {
+    final purchase = widget.onPurchaseExpandedVaultStorage;
+    if (purchase == null) return;
+    final started = await purchase();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          started
+              ? 'Complete the Google Play purchase to unlock expanded storage.'
+              : widget.entitlementErrorMessage ??
+                    'Could not start Google Play purchase.',
+        ),
       ),
     );
   }
@@ -2869,7 +2966,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           readOnly: _isExploreDemoReadOnly,
           customTypeDefinitions: _customTypeDefinitions,
           currentVaultSizeBytes: _effectiveVaultSizeBytes,
-          maxVaultBytes: VaultLimits.maxVaultBytes,
+          maxVaultBytes: _effectiveMaxVaultBytes,
           maxDocumentBytes: VaultLimits.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
           showDeleteAction: !_isExploreDemoReadOnly,
@@ -2971,7 +3068,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       MaterialPageRoute(
         builder: (_) => DocumentUploadScreen(
           currentVaultSizeBytes: _effectiveVaultSizeBytes,
-          maxVaultBytes: VaultLimits.maxVaultBytes,
+          maxVaultBytes: _effectiveMaxVaultBytes,
           maxDocumentBytes: VaultLimits.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
         ),
@@ -3316,7 +3413,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         builder: (_) => NewItemCategoryScreen(
           customTypeDefinitions: _customTypeDefinitions,
           currentVaultSizeBytes: _effectiveVaultSizeBytes,
-          maxVaultBytes: VaultLimits.maxVaultBytes,
+          maxVaultBytes: _effectiveMaxVaultBytes,
           maxDocumentBytes: VaultLimits.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
           onCreateNote: () async {
@@ -3329,7 +3426,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
               MaterialPageRoute(
                 builder: (_) => DocumentUploadScreen(
                   currentVaultSizeBytes: _effectiveVaultSizeBytes,
-                  maxVaultBytes: VaultLimits.maxVaultBytes,
+                  maxVaultBytes: _effectiveMaxVaultBytes,
                   maxDocumentBytes: VaultLimits.maxDocumentBytes,
                   onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
                 ),
@@ -3693,24 +3790,27 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _handleCloudBackupNow() async {
     if (!_cloudBackupFeatureAvailable) return;
     if (_isBusyOverlayVisible) return;
-    await widget.onBackupToCloud();
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final revision = widget.activeVaultRevision;
-    final versionId = widget.activeVaultVersionId.trim();
-    final updatedAt = widget.activeVaultUpdatedAt.trim();
-    setState(() {
-      _cloudBackupLastAtEpochMs = now;
-      _cloudBackupRevision = revision;
-      _cloudBackupVersionId = versionId;
-      _cloudBackupUpdatedAt = updatedAt;
+    await _runWithBusy('Cloud backup in progress...', () async {
+      await widget.onBackupToCloud();
+      if (!mounted) return;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final revision = widget.activeVaultRevision;
+      final versionId = widget.activeVaultVersionId.trim();
+      final updatedAt = widget.activeVaultUpdatedAt.trim();
+      setState(() {
+        _cloudBackupLastAtEpochMs = now;
+        _cloudBackupRevision = revision;
+        _cloudBackupVersionId = versionId;
+        _cloudBackupUpdatedAt = updatedAt;
+      });
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt(_prefsKeyCloudBackupLastAt, now);
+        await prefs.setInt(_prefsKeyCloudBackupRevision, revision);
+        await prefs.setString(_prefsKeyCloudBackupVersionId, versionId);
+        await prefs.setString(_prefsKeyCloudBackupUpdatedAt, updatedAt);
+      } catch (_) {}
     });
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_prefsKeyCloudBackupLastAt, now);
-      await prefs.setInt(_prefsKeyCloudBackupRevision, revision);
-      await prefs.setString(_prefsKeyCloudBackupVersionId, versionId);
-      await prefs.setString(_prefsKeyCloudBackupUpdatedAt, updatedAt);
-    } catch (_) {}
   }
 
   Future<void> _refreshCloudBackupAccountLabel() async {
@@ -3809,8 +3909,28 @@ class _VaultAppShellState extends State<VaultAppShell> {
         '${two(value.hour)}:${two(value.minute)}';
   }
 
+  String _entitlementStatusLabel() {
+    if (!widget.expandedVaultStorageEntitled) {
+      return widget.canPurchaseExpandedVaultStorage
+          ? 'Available from Google Play'
+          : 'No expanded storage purchase found';
+    }
+    final source = widget.entitlementSource == 'google_play'
+        ? 'Google Play'
+        : widget.entitlementSource;
+    final verified = widget.entitlementLastVerifiedAt == null
+        ? ''
+        : ' · Verified ${_formatLocalDateTime(widget.entitlementLastVerifiedAt!.toLocal())}';
+    return '$source$verified';
+  }
+
   int get _effectiveVaultSizeBytes =>
       widget.vaultSizeBytes + _storedDocumentBytesThisSession;
+
+  int get _effectiveMaxVaultBytes => VaultLimits.maxVaultBytesFor(
+    currentVaultSizeBytes: widget.vaultSizeBytes,
+    expandedStorageEntitled: widget.expandedVaultStorageEntitled,
+  );
 
   bool _canStoreDocumentBytes(int bytes) {
     if (bytes > VaultLimits.maxDocumentBytes) {
@@ -3820,9 +3940,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return false;
     }
     final projected = _effectiveVaultSizeBytes + bytes;
-    if (projected > VaultLimits.maxVaultBytes) {
+    final maxVaultBytes = _effectiveMaxVaultBytes;
+    if (projected > maxVaultBytes) {
       _showVaultLimitMessage(
-        'Not enough vault space. Limit is ${_formatBytes(VaultLimits.maxVaultBytes)}.',
+        'Not enough vault space. Limit is ${_formatBytes(maxVaultBytes)}.',
       );
       return false;
     }
@@ -6754,6 +6875,9 @@ class _WideAllItemsIndex extends StatelessWidget {
                             child: selectionMode
                                 ? const Icon(Icons.chevron_right)
                                 : IconButton(
+                                    key: ValueKey<String>(
+                                      'vault-entry-actions-${keyForRow(row)}',
+                                    ),
                                     tooltip: 'Item actions',
                                     onPressed: () => onMoreTap(row),
                                     icon: const Icon(Icons.more_vert),
@@ -7025,7 +7149,7 @@ class _DesktopPanel extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (trailing != null) trailing!,
+                ?trailing,
               ],
             ),
           ),

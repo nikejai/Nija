@@ -7,11 +7,24 @@ class AppTheme {
   AppTheme._();
 
   static ThemeData light() {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: AppColors.accent,
-      brightness: Brightness.light,
-      surface: AppColors.surface,
-    );
+    final colorScheme =
+        ColorScheme.fromSeed(
+          seedColor: AppColors.accent,
+          brightness: Brightness.light,
+          surface: AppColors.surface,
+        ).copyWith(
+          primary: AppColors.accent,
+          onPrimary: Colors.white,
+          primaryContainer: const Color(0xFFEFEFF1),
+          onPrimaryContainer: AppColors.textPrimary,
+          secondary: AppColors.textPrimary,
+          onSecondary: Colors.white,
+          secondaryContainer: const Color(0xFFF4F4F5),
+          onSecondaryContainer: AppColors.textPrimary,
+          surfaceContainerHighest: const Color(0xFFF4F4F5),
+          outline: const Color(0xFFD4D4D8),
+          outlineVariant: const Color(0xFFE4E4E7),
+        );
 
     return _withInterFont(
       ThemeData(
@@ -91,6 +104,23 @@ class AppTheme {
             elevation: 0,
           ),
         ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.accent,
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: const Color(0xFFE4E4E7),
+            disabledForegroundColor: const Color(0xFF71717A),
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+            elevation: 0,
+          ),
+        ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
             foregroundColor: AppColors.textSecondary,
@@ -121,10 +151,27 @@ class AppTheme {
         ),
         navigationBarTheme: NavigationBarThemeData(
           height: 74,
+          backgroundColor: Colors.white,
           indicatorColor: const Color(0xFFEFEFF1),
-          labelTextStyle: WidgetStateProperty.all(
-            const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
+          labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((states) {
+            return TextStyle(
+              color: states.contains(WidgetState.selected)
+                  ? AppColors.accent
+                  : AppColors.textSecondary,
+              fontSize: 12,
+              fontWeight: states.contains(WidgetState.selected)
+                  ? FontWeight.w700
+                  : FontWeight.w500,
+            );
+          }),
+          iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((states) {
+            return IconThemeData(
+              color: states.contains(WidgetState.selected)
+                  ? AppColors.accent
+                  : AppColors.textSecondary,
+              size: states.contains(WidgetState.selected) ? 24 : 22,
+            );
+          }),
         ),
         searchBarTheme: SearchBarThemeData(
           elevation: const WidgetStatePropertyAll(0),
@@ -239,7 +286,7 @@ class AppTheme {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF0072F5), width: 2),
+            borderSide: const BorderSide(color: AppColors.accent, width: 2),
           ),
           filled: true,
           fillColor: Colors.white,
@@ -290,11 +337,24 @@ class AppTheme {
     const border = Color(0xFF27272A);
     const accent = Color(0xFFE4E4E7);
 
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: accent,
-      brightness: Brightness.dark,
-      surface: surface,
-    );
+    final colorScheme =
+        ColorScheme.fromSeed(
+          seedColor: accent,
+          brightness: Brightness.dark,
+          surface: surface,
+        ).copyWith(
+          primary: accent,
+          onPrimary: background,
+          primaryContainer: border,
+          onPrimaryContainer: textPrimary,
+          secondary: accent,
+          onSecondary: background,
+          secondaryContainer: const Color(0xFF27272A),
+          onSecondaryContainer: textPrimary,
+          surfaceContainerHighest: const Color(0xFF27272A),
+          outline: const Color(0xFF3F3F46),
+          outlineVariant: border,
+        );
 
     return _withInterFont(
       ThemeData(
@@ -375,6 +435,23 @@ class AppTheme {
             elevation: 0,
           ),
         ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: accent,
+            foregroundColor: background,
+            disabledBackgroundColor: border,
+            disabledForegroundColor: textSecondary,
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+            elevation: 0,
+          ),
+        ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
             foregroundColor: textSecondary,
@@ -407,9 +484,25 @@ class AppTheme {
           height: 74,
           backgroundColor: surface,
           indicatorColor: const Color(0xFF27272A),
-          labelTextStyle: WidgetStateProperty.all(
-            const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
+          labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((states) {
+            return TextStyle(
+              color: states.contains(WidgetState.selected)
+                  ? accent
+                  : textSecondary,
+              fontSize: 12,
+              fontWeight: states.contains(WidgetState.selected)
+                  ? FontWeight.w700
+                  : FontWeight.w500,
+            );
+          }),
+          iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((states) {
+            return IconThemeData(
+              color: states.contains(WidgetState.selected)
+                  ? accent
+                  : textSecondary,
+              size: states.contains(WidgetState.selected) ? 24 : 22,
+            );
+          }),
         ),
         searchBarTheme: SearchBarThemeData(
           elevation: const WidgetStatePropertyAll(0),

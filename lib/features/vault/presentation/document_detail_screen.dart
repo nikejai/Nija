@@ -267,9 +267,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                             const SizedBox(height: 10),
                             _DocumentFilesSection(
                               documents: _documents,
-                              selectedDocumentId: _documentId(
-                                selectedDocument,
-                              ),
+                              selectedDocumentId: _documentId(selectedDocument),
                               onAdd: () => _addAttachment(context),
                               onSelect: _selectDocument,
                               onAction: _showDocumentFileActions,
@@ -300,10 +298,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
-                                    Expanded(
-                                      flex: 7,
-                                      child: previewPanel,
-                                    ),
+                                    Expanded(flex: 7, child: previewPanel),
                                     const SizedBox(width: 20),
                                     Expanded(
                                       flex: 3,
@@ -413,11 +408,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         child: Stack(
           children: [
             Positioned.fill(
-              child: _buildPreview(
-                context,
-                extension,
-                selectedDocument,
-              ),
+              child: _buildPreview(context, extension, selectedDocument),
             ),
             Positioned(
               top: 8,
@@ -1380,11 +1371,11 @@ class _DocumentFilesSection extends StatelessWidget {
                   ),
                 ),
               ),
-              TextButton.icon(
+              IconButton(
                 key: const ValueKey('document-detail-add-document'),
                 onPressed: onAdd,
+                tooltip: 'Add document',
                 icon: const Icon(Icons.attach_file),
-                label: const Text('Add document'),
               ),
             ],
           ),
@@ -1447,10 +1438,7 @@ PdfViewerParams _buildPdfViewerParams({
 }
 
 class _DocumentPreviewLoadOverlay extends StatelessWidget {
-  const _DocumentPreviewLoadOverlay({
-    required this.message,
-    this.progress,
-  });
+  const _DocumentPreviewLoadOverlay({required this.message, this.progress});
 
   final String message;
   final double? progress;

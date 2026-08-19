@@ -3,6 +3,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/entitlements/entitlement_service.dart';
+import '../core/entitlements/entitlement_state.dart';
 import '../core/localization/app_strings.dart';
 import '../features/onboarding/presentation/onboarding_flow.dart';
 import 'theme/app_theme.dart';
@@ -22,6 +24,8 @@ class _NijaAppState extends State<NijaApp> {
   String _languageMode = 'system';
   ThemeMode _themeMode = ThemeMode.system;
   int _autoLockSeconds = _defaultAutoLockSeconds;
+  late final NijaEntitlementService _entitlementService;
+  EntitlementState _entitlementState = const EntitlementState.free();
 
   Locale? get _forcedLocale => switch (_languageMode) {
     'en' => const Locale('en'),
@@ -32,8 +36,30 @@ class _NijaAppState extends State<NijaApp> {
   @override
   void initState() {
     super.initState();
+    _entitlementService = NijaEntitlementService()
+      ..addListener(_onEntitlementChanged);
     _restoreThemeMode();
     _restoreAutoLockSeconds();
+    _restoreEntitlements();
+  }
+
+  @override
+  void dispose() {
+    _entitlementService
+      ..removeListener(_onEntitlementChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onEntitlementChanged() {
+    if (!mounted) return;
+    setState(() => _entitlementState = _entitlementService.state);
+  }
+
+  Future<void> _restoreEntitlements() async {
+    await _entitlementService.initialize();
+    if (!mounted) return;
+    setState(() => _entitlementState = _entitlementService.state);
   }
 
   Future<void> _restoreThemeMode() async {
@@ -109,6 +135,14 @@ class _NijaAppState extends State<NijaApp> {
         autoLockDelay: Duration(seconds: _autoLockSeconds),
         autoLockSeconds: _autoLockSeconds,
         onAutoLockSecondsChanged: _setAutoLockSeconds,
+        entitlementState: _entitlementState,
+        canPurchaseExpandedVaultStorage:
+            _entitlementService.canPurchaseExpandedVaultStorage,
+        purchaseInProgress: _entitlementService.isPurchaseInProgress,
+        entitlementErrorMessage: _entitlementService.lastErrorMessage,
+        onRefreshEntitlements: _entitlementService.refresh,
+        onPurchaseExpandedVaultStorage:
+            _entitlementService.buyExpandedVaultStorage,
       ),
     );
   }

@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
+// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter, uri_does_not_exist
 
 import 'dart:html' as html;
 import 'dart:indexed_db' as idb;
@@ -69,7 +69,10 @@ class WebVaultStorageAdapter implements VaultStorageAdapter {
   }
 
   @override
-  Future<void> write({required String filePath, required String content}) async {
+  Future<void> write({
+    required String filePath,
+    required String content,
+  }) async {
     final db = await _openDatabase();
     final txn = db.transaction(_storeName, 'readwrite');
     await txn.objectStore(_storeName).put(content, filePath);

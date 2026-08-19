@@ -185,7 +185,9 @@ class GoogleDriveVaultPortability {
     return CloudVaultBackupFile(
       storageId: listing.storageId,
       label: cloudBackupLabelFromContent(
-        fallbackName: listing.fileName.isEmpty ? listing.label : listing.fileName,
+        fallbackName: listing.fileName.isEmpty
+            ? listing.label
+            : listing.fileName,
         content: content,
       ),
       content: content,
@@ -254,7 +256,9 @@ class GoogleDriveVaultPortability {
     return _DriveSession(driveApi: driveApi);
   }
 
-  Future<drive.DriveApi> _driveApiForAccount(GoogleSignInAccount account) async {
+  Future<drive.DriveApi> _driveApiForAccount(
+    GoogleSignInAccount account,
+  ) async {
     _driveAuthClient ??= _GoogleAuthClient(() async {
       final active = _googleSignInClient().currentUser ?? account;
       return Map<String, String>.from(await active.authHeaders);
@@ -346,7 +350,8 @@ class GoogleDriveVaultPortability {
       scanned++;
 
       if (vaultId != null) {
-        final propertyVaultId = file.appProperties?['nijaVaultId']?.trim() ?? '';
+        final propertyVaultId =
+            file.appProperties?['nijaVaultId']?.trim() ?? '';
         if (propertyVaultId.isNotEmpty && propertyVaultId != vaultId) {
           continue;
         }
@@ -523,10 +528,7 @@ class GoogleDriveVaultPortability {
     if (id == null || id.isEmpty) return null;
     try {
       final media = await driveApi.files
-          .get(
-            id,
-            downloadOptions: drive.DownloadOptions.fullMedia,
-          )
+          .get(id, downloadOptions: drive.DownloadOptions.fullMedia)
           .timeout(_driveDownloadTimeout);
       if (media is! drive.Media) return null;
       final bytes = <int>[];
@@ -721,12 +723,15 @@ GoogleSignIn _googleSignInClient() {
         'NIJA_GOOGLE_WEB_CLIENT_ID is required for web cloud backup.',
       );
     }
-    client = GoogleSignIn(
-      clientId: webClientId,
-      scopes: _driveScopes,
-    );
+    client = GoogleSignIn(clientId: webClientId, scopes: _driveScopes);
   } else {
-    client = GoogleSignIn(scopes: _driveScopes);
+    const nativeServerClientId = GoogleOAuthConfig.nativeServerClientId;
+    client = GoogleSignIn(
+      scopes: _driveScopes,
+      serverClientId: nativeServerClientId.isEmpty
+          ? null
+          : nativeServerClientId,
+    );
   }
 
   _googleSignInInstance = client;

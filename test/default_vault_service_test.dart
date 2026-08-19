@@ -683,6 +683,75 @@ void main() {
 
       expect(cloudImport.status, ImportStatus.alreadyUpToDate);
       expect(localImport.status, ImportStatus.alreadyUpToDate);
+      final payload = await service.readVaultPayload(
+        filePath: cloudImport.vaultId,
+        password: 'CorrectPass123',
+      );
+      expect(payload.items.single['title'], 'Synced Login');
+    },
+  );
+
+  test(
+    'active imported vault id mutations do not require an external file handle',
+    () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'nija-private-import-',
+      );
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+      final exportPath = '${tempDir.path}/exported.nija';
+      final service = DefaultVaultService(
+        storageAdapter: const FileVaultStorageAdapter(),
+        cryptoAdapter: SecureCryptoAdapter(),
+        privateVaultStore: FilePrivateVaultStore(baseDirectory: tempDir),
+      );
+      await service.createVault(
+        filePath: exportPath,
+        vaultId: 'private-import-id',
+        vaultName: 'Private Import',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: 'CorrectPass123',
+        recoveryPhrase: basePhrase,
+      );
+      final raw = await service.readRawVaultFile(filePath: exportPath);
+
+      final importPath = '${tempDir.path}/staged-import.nija';
+      await File(importPath).writeAsString(raw, flush: true);
+      final result = await service.importNijaFile(
+        filePath: importPath,
+        unlockCredential: 'CorrectPass123',
+      );
+      await File(importPath).delete();
+
+      expect(result.status, ImportStatus.alreadyUpToDate);
+      final stagedPayload = await service.readVaultPayload(
+        filePath: importPath,
+        password: 'CorrectPass123',
+      );
+      expect(stagedPayload.items, isEmpty);
+      await service.persistVaultPayload(
+        filePath: result.vaultId,
+        password: 'CorrectPass123',
+        payload: const VaultPayload(
+          schemaVersion: 1,
+          items: [
+            {'id': 'login-1', 'type': 'Login', 'title': 'After Import'},
+          ],
+          notes: [],
+          tags: [],
+          settings: {},
+          audit: [],
+        ),
+      );
+      final payload = await service.readVaultPayload(
+        filePath: result.vaultId,
+        password: 'CorrectPass123',
+      );
+
+      expect(payload.items.single['title'], 'After Import');
     },
   );
 

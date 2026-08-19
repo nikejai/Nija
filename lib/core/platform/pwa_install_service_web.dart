@@ -1,4 +1,4 @@
-// ignore_for_file: avoid_web_libraries_in_flutter
+// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use, uri_does_not_exist
 
 import 'dart:html' as html;
 import 'dart:js_util' as js_util;
@@ -31,7 +31,11 @@ class PwaInstallServiceWeb implements PwaInstallService {
       );
     }
     try {
-      final installed = js_util.callMethod<bool>(bridge, 'isInstalled', const []);
+      final installed = js_util.callMethod<bool>(
+        bridge,
+        'isInstalled',
+        const [],
+      );
       final canPrompt = js_util.callMethod<bool>(
         bridge,
         'canPromptInstall',

@@ -23,6 +23,8 @@ dependencies:
   google_sign_in_web: ^0.12.4
   googleapis: ^14.0.0
   http: ^1.5.0
+  in_app_purchase: ^3.2.3
+  in_app_purchase_android: ^0.5.2
   pdfrx: ^2.4.1
   google_fonts: ^6.3.2
 

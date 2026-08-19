@@ -2,6 +2,123 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-08-19 23:04:33 IST
+
+- Added a direct web privacy policy page.
+  - Added `web/privacy.html` for app store and web users.
+  - Linked the policy from web metadata and configured no-cache headers for static hosts and Firebase Hosting.
+  - Documented the production privacy policy URL path in app info and Ops.
+
+## 2026-08-19 23:03:15 IST
+
+- Added reusable app-info copy for launch metadata.
+  - Created `docs/app_info.md` with app description, tagline, feature list, privacy/security copy, keywords, store listing notes, and 0.0.1 release notes.
+
+## 2026-08-19 22:27:06 IST
+
+- Clarified Android production build commands in Ops.
+  - Documented the default signed AAB/APK commands without `NIJA_GOOGLE_NATIVE_SERVER_CLIENT_ID`.
+  - Added the explicit native Google Sign-In server-client build command as a Drive OAuth fallback.
+
+## 2026-08-19 22:21:15 IST
+
+- Hardened Android release native symbol handling.
+  - Release builds now request Android native `SYMBOL_TABLE` output so AAB native libraries can be stripped while preserving native crash symbols.
+  - Updated Ops guidance for DWARF debug-info warnings and avoiding Dart snapshot strip flags that break Flutter's AAB validation.
+
+## 2026-08-19 19:02:31 IST
+
+- Moved Android cloud backup behind the Google Play expanded-storage entitlement.
+  - Cloud backup now uses the runtime entitlement by default, with `NIJA_PAID_BUILD` retained only as a development override.
+  - Updated Android release commands so normal Play builds omit `NIJA_PAID_BUILD=true`.
+  - Updated README/Ops/TODO guidance for entitlement-gated Drive backup.
+
+## 2026-08-19 18:47:19 IST
+
+- Added Android Google Play Billing entitlement support for expanded vault storage.
+  - Added `in_app_purchase` wiring, secure cached entitlement state, Play purchase refresh, purchase restore, and acknowledgement handling.
+  - Settings now shows vault storage usage, entitlement status, restore purchase, and Android upgrade action.
+  - Vault size limits now accept runtime expanded-storage entitlement while preserving the 100 MB free and 1 GB legacy/paid behavior.
+  - Documented Play Console product setup, tester requirements, and Android validation steps in Ops.
+
+## 2026-08-19 18:18:42 IST
+
+- Updated vault size limits for the web entitlement gap.
+  - New/small free vaults now cap at 100 MB.
+  - Existing vaults already above 100 MB are treated as legacy vaults and can continue up to 1 GB.
+  - Added tests and Ops notes explaining that web-only limits are client-enforced until runtime entitlement exists.
+
+## 2026-08-19 18:02:05 IST
+
+- Added production web security header configuration.
+  - Added `web/_headers` for static hosts and `firebase.json` for Firebase Hosting with CSP, HSTS, frame protections, referrer policy, permissions policy, and cache controls.
+  - Expanded Ops with the exact web header policy and deployment notes for Google OAuth compatibility.
+  - Added release-gate checks to ensure web CSP/header configuration remains present.
+
+## 2026-08-19 17:41:54 IST
+
+- Added native Google Sign-In configuration support for Android/iOS Drive backup validation.
+  - Native Drive sign-in can now receive `NIJA_GOOGLE_NATIVE_SERVER_CLIENT_ID` as a server client id.
+  - Updated signed-app error copy to call out debug, release, and Play signing SHA-1 registration.
+  - Expanded Ops with debug SHA-1 and native server-client build examples.
+
+## 2026-08-19 17:32:48 IST
+
+- Fixed remaining Material default blue theming in onboarding and shared controls.
+  - Added explicit light/dark filled button themes so onboarding CTAs use the Nija palette and tighter radius.
+  - Pinned generated Material color roles, navigation bar selected states, and focused input borders to the Nija color system.
+  - Added onboarding regression coverage for the first-install CTA theme.
+
+## 2026-08-19 17:21:07 IST
+
+- Updated the first-install onboarding walkthrough to match the current Nija app theme.
+  - Added the same branded top bar treatment used by the entry flow.
+  - Replaced the older centered onboarding layout with a bounded themed step panel.
+  - Made walkthrough page content scroll-safe on compact mobile screens.
+
+## 2026-08-19 17:18:19 IST
+
+- Improved Google Drive restore failure handling for signed Android builds.
+  - Google Sign-In signature/OAuth failures now show an actionable SHA-1 configuration message instead of the raw platform error.
+  - Documented the current release signing SHA fingerprints and the signed-app Google Drive troubleshooting steps in Ops.
+
+## 2026-08-19 17:11:28 IST
+
+- Fixed cloud restore handling for newer backups and restored vault activation.
+  - Cloud restore now uses the existing replace confirmation when the backup revision is newer than the local vault.
+  - Successful cloud restores now switch the active vault to the restored vault id before reloading data.
+  - Cloud backup staging now uses vault/version-derived names instead of Drive file ids when backup content is available.
+
+## 2026-08-19 17:05:53 IST
+
+- Fixed cloud backup merge failures caused by stale staged/imported vault file handles.
+  - No-op imports now rebind temporary backup/import handles to the existing private vault store.
+  - Internal private vault IDs no longer try to mirror snapshots back through the external file adapter.
+
+## 2026-08-19 16:51:34 IST
+
+- Added Android real-device validation instructions for Play internal testing, release APK smoke testing, local bundletool AAB installation, device detection, and launch QA coverage.
+
+## 2026-08-19 16:38:55 IST
+
+- Documented Android SDK command-line tools, license, and NDK repair steps for release AAB native debug symbol stripping failures.
+
+## 2026-08-19 16:31:21 IST
+
+- Added Android release keystore verification and secure backup guidance to the operations runbook.
+
+## 2026-08-19 16:21:22 IST
+
+- Expanded Android operations documentation with the signed AAB release build procedure, version check, signing verification, release gate, artifact verification, and post-build archive/upload steps.
+
+## 2026-08-19 16:09:13 IST
+
+- Fixed release-gate failures around staged imported vault recovery reset, cloud backup busy blocking, document detail header overflow, and vault shell navigation test coverage.
+
+## 2026-08-19 15:57:40 IST
+
+- Cleaned up analyzer issues from recent vault, onboarding, web storage, and test changes.
+
 ## 2026-08-19 15:41:37 IST
 
 - Fixed expanded vault shell detection for unfolded foldable Android devices.
