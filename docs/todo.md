@@ -90,6 +90,7 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Wrong password / wrong recovery phrase behavior.
   - Corrupted ciphertext / tampered metadata handling.
   - Recovery + reset + rotation end-to-end tests.
+  - Added integration abuse coverage for tampered document chunks, path-style document IDs, unconfirmed/wrong-credential imports, and debug-internals plaintext leakage.
 - [x] Add release hardening gates.
   - Security review checklist.
   - Production configuration checks (logging, debug flags, crash surfaces).
@@ -98,8 +99,29 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Added vault picker before unlock when user taps `Open existing vault`.
   - Added known-vault cache persisted in app storage.
   - Added vault import/add flow per platform (web upload, mobile/desktop file picker).
+- [x] Add imported-vault recovery flow.
+  - Current recovery flow only recovers the currently selected active vault.
+  - When importing or selecting an existing vault, offer both `Open with password/PIN` and `Recover with phrase`.
+  - `Recover with phrase` must use the selected/imported vault's recovery wrapper, not the previously active vault.
+  - After successful recovery phrase unlock, require the user to set/change the vault password/PIN before opening the normal vault session.
+  - Persist the new password/PIN wrapper for that recovered vault and refresh any per-vault biometric enrollment state.
+  - Add wrong-phrase, cancelled recovery, imported-vault recovery, and active-vault-is-not-recovered regression tests.
+  - Added `Recover with phrase` to imported-vault password prompts.
+  - Imported-vault recovery now targets the staged imported vault handle, forces master password reset, imports/selects the recovered vault, and clears biometric enrollment for that vault.
+  - Existing vault selection continues to expose `Recover with phrase` on the unlock screen, now with active-session recovery checks reset when switching vaults.
+  - Added regression coverage proving a staged imported vault can reset with its own recovery phrase without mutating the previously active vault.
 - [x] Add vault last-opened metadata and sorting in vault picker.
   - Vault references now persist `lastOpenedAt` and vault picker list is sorted by most recently opened first.
+- [x] Add first-install onboarding walkthrough screens.
+  - Show only on first install / first app open, before the normal create/open vault screen.
+  - Add multiple pages that explain the Nija flow at a high level: create/open a vault, save recovery phrase, unlock with password/PIN/biometrics, add items/documents, backup/export safely, and recover if needed.
+  - Include skip and continue controls, with progress indicators.
+  - Persist completion in app-local storage, not inside any vault.
+  - Ensure returning users, restored installs with completed onboarding, and test/dev resets behave predictably.
+  - Add widget tests for first-run display, page navigation, skip/finish persistence, and non-display after completion.
+  - Added a five-page first-run walkthrough with skip/continue/get-started actions and progress indicators.
+  - Persisted completion in `SharedPreferences` under app-local storage.
+  - Added widget coverage for first-run display, page navigation, skip/finish persistence, and hidden-after-completion behavior.
 
 ## 10) Reported Bug Backlog (2026-05-21)
 
@@ -154,14 +176,30 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 
 ## 11) Free vs Paid Feature Gating
 
-- [ ] Add app-level feature gating boolean(s) for `free` vs `paid` version behavior.
+- [x] Add app-level feature gating boolean(s) for `free` vs `paid` version behavior.
   - Centralize in config so UI + actions can check the same source of truth.
   - Keep paid features disabled by default unless paid mode is enabled.
-- [ ] Add first paid feature: Google backup integration (paid-only).
+- [x] Add first paid feature: Google backup integration (paid-only).
   - Show backup entry as disabled in free mode.
   - Show hint text: `Available in paid version`.
   - Added build-gated cloud-backup toggle in Settings (`NIJA_PAID_BUILD`): Android label `Backup to Google Drive`, iOS label `Backup to iCloud`, disabled in free build with paid hint text.
   - Implemented paid-build `Backup now` action via native share sheet to save encrypted vault file into Google Drive/iCloud Drive.
+  - Centralized cloud-backup and expanded-storage capability checks in `AppFeatures`, and added free-build regression coverage for the Settings gate.
+- [ ] Move paid feature unlocks from build-only flags to runtime entitlements.
+  - Paid features must be toggleable at runtime based on a locally cached entitlement and the latest Play Billing purchase state.
+  - Keep build flags only for development/testing overrides, not as the production source of truth.
+  - Centralize runtime entitlement state so Settings UI, backup actions, storage limits, and future paid features all read the same source.
+  - Default to free features until a trusted runtime entitlement is loaded.
+  - Add tests proving paid UI/actions can unlock and relock without rebuilding the app.
+- [ ] Add Google Play Billing lifetime supporter unlock.
+  - Create a Play Billing product: `nija_supporter_lifetime`.
+  - Product type: non-consumable one-time purchase.
+  - On purchase, Google Play records entitlement against the user's Google account.
+  - On every Nija start, call the Play Billing API and unlock premium features when the product is returned as purchased.
+  - Store the last known purchased entitlement securely in app-local storage, not inside any vault, so premium remains available during offline starts.
+  - If Play Billing returns not purchased and no trusted local entitlement exists, keep free features only.
+  - Purchase restoration should work automatically when the user reinstalls, changes phone, or signs into another Android device with the same Google account.
+  - No backend should be required for the initial lifetime supporter entitlement.
 
 ## 12) Mobile Share-Into-Notes Flow
 
@@ -172,8 +210,41 @@ Work these items strictly one at a time. Each item should be fully implemented, 
     - Body containing the full shared text.
     - Timestamp metadata (shared/import time).
   - Route to vault selection when needed, then save into the chosen vault.
+  - [x] Added Android `ACTION_SEND text/plain` ingestion through the existing native intent bridge.
+  - [ ] Add iOS Share Extension target for true iOS share-sheet ingestion.
 
-## 13) Release Readiness Fixes
+## 13) Vault Item Attachments
+
+- [x] Add attachments support to normal vault items.
+  - Store attachment metadata on the item and encrypted bytes in private document sections.
+  - Keep document bytes out of item payload JSON.
+  - Enforce existing per-document limit: `VaultLimits.maxDocumentBytes` (`5 MB`).
+  - Continue enforcing total vault size through `VaultLimits.maxVaultBytes`.
+- [x] Add support for multiple documents per vault item.
+  - Use an `attachments` list instead of single-document fields such as `documentSection`, `documentFileName`, and `documentSizeBytes`.
+  - Support adding, opening, exporting, and deleting individual attachments.
+  - Keep the existing standalone Document item flow working during migration.
+  - Attachment removal currently removes item metadata; private document-section garbage collection remains a future storage cleanup task.
+- [x] Fix PDF/document preview focus and scrolling.
+  - Real-device verification completed; PDF/document preview gesture focus is working better.
+  - Ensure PDF previews and basic document previews can receive gesture focus and scroll vertically/horizontally inside the viewer.
+  - Added attachment-preview interaction locking so normal item detail scrolling is disabled while a document/PDF preview is being touched.
+  - Wired `pdfrx` interaction callbacks so PDF pan/zoom interactions keep the parent page from stealing gestures.
+  - Added regression coverage for the attachment preview interaction boundary and a PDF gesture integration test target.
+- [x] Add fullscreen/enlarged document preview mode.
+  - Current document preview window is too small for comfortable reading.
+  - Add an enlarge/fullscreen icon from document preview surfaces.
+  - Fullscreen mode should preserve PDF pan/zoom and basic document scrolling behavior.
+  - Provide an obvious close/minimize action and keep save/export actions reachable.
+  - Add widget/integration coverage for opening and closing fullscreen document preview.
+  - Added fullscreen preview actions for standalone document detail and item attachment preview panels.
+  - Added widget coverage for opening and closing fullscreen previews from both surfaces.
+- [ ] Add Android open-with support for supported documents.
+  - Basic docs and PDFs should be directly openable by Nija when the user selects `Open document`.
+  - Register Android picker/open intent support so Nija appears for supported document MIME types/extensions.
+  - Documents opened from Android picker/open intents should render in a sandbox viewer without asking for the vault password and without importing into a vault by default.
+
+## 14) Release Readiness Fixes
 
 - [x] Clean up `vault_app_shell.dart` analyzer issues.
   - Goal: `flutter analyze` passes with zero issues.
@@ -243,8 +314,100 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Scope: update tests expecting old `Custom templates`, `All types`, note action keys, selection/share actions, and related labels.
 - [ ] Re-run release readiness gates.
   - Goal: `./scripts/release_hardening_gate.sh`, `flutter test`, and `flutter build apk --release` all pass.
+- [ ] Add WebApp release build steps.
+  - Goal: document and validate repeatable release steps for the web app.
+  - Scope: add commands for clean Flutter web release build, build artifact location, hosting assumptions, cache headers/service-worker behavior, and release smoke checks.
+  - Include a release note/template for producing the web app release artifact and confirming it can be deployed without dev-only flags.
+- [ ] Implement WebApp/tablet UX consistent with the Nija app theme.
+  - Work these one item at a time and validate each item before moving to the next.
+  - [x] Add responsive web vault-start first page and unlock surface.
+    - Match the existing Nija mobile app theme on web/tablet so onboarding and unlock feel consistent across platforms.
+    - Keep side navigation for authenticated landscape/tablet/web vault screens, not for the onboarding welcome/unlock surfaces.
+    - Ensure first-page import actions open import/restore flows, not create-vault onboarding.
+    - Keep imported-vault password validation from asking for the same password again after successful import.
+    - Web builds skip the first-install walkthrough and land on the vault-start welcome surface.
+    - Make `Create vault` a proper button action instead of text-only.
+    - Preserve existing mobile unlock behavior and back/unlock/recovery actions.
+    - Add widget coverage for wide-screen first page and unlock layout.
+  - [ ] Add responsive web home dashboard.
+    - Desktop/tablet shell should use left sidebar navigation, greeting/header, search, stats cards, recent items, quick actions, vault status, and category summary.
+    - Dashboard type/folder cards should use responsive columns and fixed readable widths instead of stretching across the whole browser.
+    - Preserve existing mobile bottom-navigation flow.
+  - [ ] Add responsive web all-items table view.
+    - Wide layout should show table-style rows with checkbox, name, category, folder, username/details, updated timestamp, actions, search, filter, customize, add item, and pagination controls.
+    - Preserve existing mobile card/list behavior.
+  - [ ] Add light-mode web visual polish pass.
+    - Use the reference palette direction with restrained purple accents, white surfaces, soft borders, small radii, and compact enterprise-style density.
+    - Verify typography, spacing, hover/focus states, and button/icon treatment.
+  - [ ] Add responsive web regression coverage.
+    - Cover desktop width, tablet width, phone width, and light mode for login, dashboard, and all-items surfaces.
+- [ ] Make WebApp installable/offline-first with native-app feel.
+  - Goal: web app should work well on iOS Safari and Android Chrome as an installable app and remain usable offline after initial load.
+  - Scope: verify PWA manifest, icons, theme color, safe-area handling, viewport sizing, service worker caching, offline startup, IndexedDB/local vault persistence, and add-to-home-screen behavior.
+  - Validate create/unlock/lock/reopen flows on iOS and Android browsers in installed and normal browser modes.
+  - Keep UX aligned with native app behavior for navigation, touch targets, document preview, backup/export, and offline messaging.
+  - Audit and update `web/manifest.json` for PWA installability:
+    - production app name/short name,
+    - app description,
+    - `start_url`,
+    - `scope`,
+    - `display: standalone`,
+    - theme/background colors,
+    - 192px/512px maskable icons.
+  - Audit `web/index.html` for mobile web app behavior:
+    - manifest link,
+    - viewport and safe-area behavior,
+    - iOS web-app capable metadata,
+    - theme-color metadata,
+    - no development-only script/config.
+  - Replace web vault persistence from `localStorage` to IndexedDB for larger encrypted vault/document payloads.
+    - Store only encrypted `.nija` payload data and non-secret preferences.
+    - Add migration from existing `localStorage` web vault entries if needed.
+    - Add tests for create/unlock/edit/reload persistence using the web adapter.
+  - Verify Flutter web service-worker/offline behavior.
+    - First successful online load should cache the app shell.
+    - Later launches from iOS/Android home screen should start without network.
+    - Offline mode must not block unlocking an already-created local vault.
+  - Add offline UI states:
+    - show when running offline,
+    - disable or explain cloud backup/restore while offline,
+    - keep local save/edit/export behavior clear.
+  - Add add-to-home-screen guidance:
+    - Android Chrome install prompt / install app menu.
+    - iOS Safari Share -> Add to Home Screen.
+    - iOS limitation note: browser install prompts are limited compared with Android.
+  - Validate browser/platform differences:
+    - iOS Safari normal tab,
+    - iOS home-screen web app,
+    - Android Chrome normal tab,
+    - Android installed PWA.
+  - Add responsive/tablet-web pass for installed WebApp:
+    - phone portrait,
+    - phone landscape,
+    - tablet portrait,
+    - tablet landscape,
+    - document/PDF fullscreen preview.
+  - Add WebApp release smoke tests:
+    - `flutter build web --release`,
+    - serve `build/web` locally,
+    - load app online,
+    - create vault,
+    - reload and unlock,
+    - disable network,
+    - launch/reload and unlock existing vault,
+    - edit/save and confirm persistence after reload.
+- [ ] Add WebApp security release review.
+  - Goal: web release receives an explicit security pass before production deployment.
+  - Scope: check HTTPS-only hosting, secure headers/CSP, no secret-bearing logs, no raw vault data in URLs/history, service-worker cache excludes decrypted payloads, IndexedDB stores only encrypted vault data, clipboard behavior, lock-on-background/visibility changes, and browser storage clearing behavior.
+  - Validate that web debug internals and development-only flags are unavailable in production builds.
+- [ ] Add obfuscation and reverse-engineering hardening for release builds.
+  - Goal: make static analysis and reverse engineering harder without weakening maintainability or crash diagnosis.
+  - Scope: enable Flutter/Dart obfuscation for release builds, split debug info into private artifacts, configure Android R8/ProGuard rules, strip unused resources, and document symbol/archive handling.
+  - Add release commands for Android APK/AAB and web builds that include the agreed hardening flags.
+  - Verify no secrets, API keys, entitlement bypasses, debug endpoints, or sensitive constants are embedded in client code.
+  - Document limitations: obfuscation is defense-in-depth and does not replace cryptographic protections or server-side trust where needed.
 
-## 14) Release Findings From Manual Testing
+## 15) Release Findings From Manual Testing
 
 - [x] Close sensitive item/detail screens when the vault is locked in background.
   - Finding: if an item or note is open and the app auto-locks/background-locks, the same detail screen can remain visible after resume.
@@ -263,6 +426,22 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Added an explicit Refresh action for debug internals when a fresh snapshot is needed.
   - Capped rendered debug file rows/tree entries to keep large vaults from flooding the widget tree.
   - Added widget coverage for cached debug reads, explicit refresh, and capped rendering.
+- [x] Review debug internals rendering and attachment storage architecture.
+  - Finding: the debug `Encryption` section shows too much document-attachment information and includes repeated/duplicate details.
+  - Finding: `Vault file tree` can stretch the page and appears to show duplicate items.
+  - Finding: `Working files` in the TODO/debug section also shows duplicate files.
+  - Goal: debug internals should be readable without expanding the whole page to match large encryption/file-tree output.
+  - Scope: make `Encryption`, `Vault file tree`, and `Working files` fixed-height scrollable panels.
+  - Scope: dedupe repeated rows/details in these sections and hide noisy attachment internals that do not help validate vault health.
+  - Scope: review file saving and attachment persistence architecture to confirm whether attachment writes are polluting the vault with duplicate/orphaned sections.
+  - If attachment persistence is polluting the vault, fix the write/delete flow and add regression coverage for duplicate/orphaned attachment sections.
+  - Grouped document manifest/chunk rows in `Encrypted sections`, `Vault file tree`, and `Working files` so attachment internals do not repeat noisy per-file details.
+  - Made `Encrypted sections`, `Vault file tree`, and `Working files` render in bounded scroll panels.
+  - Tightened document overwrite storage: replacing a large attachment with a smaller one now removes stale chunks for the same document id immediately, before the next payload commit.
+  - Added regression coverage for immediate stale chunk pruning and debug document section grouping.
+  - Fixed file-backed private vault commits to prune files that are no longer part of the committed section set.
+  - Fixed payload persistence to retain only referenced document manifests/chunks, pruning stale replacement chunks and unreferenced attachment/document sections.
+  - Added regression coverage for stale chunk pruning, removed-document pruning, and grouped debug rendering.
 - [x] Investigate and fix app lag when pressing Home.
   - Finding: the app starts lagging when the Home tab/button is pressed.
   - Goal: Home navigation should feel immediate and should not trigger unnecessary persistence, vault metadata reads, document byte reads, debug reads, or broad list recomputation.
@@ -292,7 +471,7 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Added `Save copy` to document quick actions from the item list.
   - Added widget coverage for save-copy action availability in the document preview and document action sheet.
 
-## 15) Vault App Shell File Split
+## 16) Vault App Shell File Split
 
 - [x] Move encrypted import/share UI out of `vault_app_shell.dart`.
   - Goal: keep vault shell focused on orchestration, not import bundle screens.

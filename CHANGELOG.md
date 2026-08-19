@@ -2,6 +2,441 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-08-19 15:41:37 IST
+
+- Fixed expanded vault shell detection for unfolded foldable Android devices.
+  - Foldable/tablet portrait screens now use the web-style rail/sidebar layout when their shortest side is at least `600dp`, without requiring a `900dp` long side.
+  - Updated regression coverage to use a Fold-style `673x841` viewport.
+
+## 2026-08-19 15:25:13 IST
+
+- Enabled the expanded web-style vault shell on Android tablet portrait screens.
+  - Tablet-class viewports now use the rail/sidebar workspace instead of the phone bottom-navigation layout.
+  - Compact tablet side navigation is slightly narrower so the constrained content remains usable.
+  - Added widget coverage for a `600x960` tablet portrait viewport.
+
+## 2026-08-19 11:08:47 IST
+
+- Fixed Settings import cancel leaving the app unusable.
+  - The Settings encrypted-data import flow no longer enters the blocking importing state while the browser file picker is open, so canceling the picker leaves the import row usable.
+  - Added regression coverage for the canceled Settings import path.
+
+## 2026-08-19 02:46:22 IST
+
+- Fixed web vault-file import after the picker-cancel handling change.
+  - Replaced the focus-return fallback with the file input cancel event so selecting a vault file from Home is not treated as a canceled import.
+
+## 2026-08-19 02:43:48 IST
+
+- Fixed web import cancellation leaving Settings stuck in importing state.
+  - Web encrypted-data and vault-file import pickers now complete with no selection when the browser file picker is closed without choosing a file.
+
+## 2026-08-19 02:30:39 IST
+
+- Updated custom template management screens to match the Nija vault theme.
+  - Replaced stretched custom template list/editor layouts with constrained content width, themed headers, bordered panels, and theme-derived icon/color picker styling.
+
+## 2026-08-19 02:28:12 IST
+
+- Updated the new/edit note screen to match the Nija vault theme.
+  - Replaced the default app bar/editor layout with a themed header, constrained content width, bordered title/toolbar/editor panels, and Nija button styling.
+
+## 2026-08-19 02:25:51 IST
+
+- Removed duplicated settings actions from Security & Encryption.
+  - The Security & Encryption sheet now stays focused on security explanation, vault crypto metadata, format details, and status rows instead of repeating Settings menu actions.
+
+## 2026-08-19 02:20:50 IST
+
+- Auto-prompts app PIN on return to unlock.
+  - When a vault has app PIN enabled and biometric unlock is not active, the unlock screen now opens the PIN prompt once automatically while keeping the master-password screen available after cancel.
+
+## 2026-08-19 02:19:16 IST
+
+- Fixed PIN dialog controller lifecycle during web hot reload.
+  - PIN entry and setup dialogs now own and dispose their text controllers inside stateful dialog widgets, preventing disposed-controller rebuild crashes.
+
+## 2026-08-19 02:15:38 IST
+
+- Applied Nija app theming to standard popups.
+  - Global light/dark themes now style standard dialogs, bottom sheets, popup menus, Material menus, and floating snackbars with Nija surfaces, borders, radius, typography, and tint-free elevation.
+
+## 2026-08-19 02:11:28 IST
+
+- Fixed the App PIN change action.
+  - The Security section App PIN row now opens the setup/change PIN flow even when a PIN is already enabled.
+
+## 2026-08-19 02:07:14 IST
+
+- Updated app PIN dialogs to match the Nija vault theme.
+  - PIN setup, change, and unlock prompts now use the same compact themed dialog surface, icon treatment, typography, and button styling as the web biometric dialogs.
+
+## 2026-08-19 02:00:21 IST
+
+- Added app PIN quick unlock as the web fallback and biometric prerequisite.
+  - Users can set or change a per-vault app PIN from the Security section.
+  - PIN unlock stores the local unlock helper encrypted under a PBKDF2-derived PIN key instead of storing a plain password.
+  - Web biometric setup now requires PIN first and stores the PIN behind WebAuthn PRF, so biometric unlock uses PRF to recover the PIN and then unlocks through the PIN-protected helper.
+  - When secure WebAuthn PRF is unavailable, biometric remains disabled and the user can still use app PIN quick unlock.
+
+## 2026-08-19 01:42:55 IST
+
+- Refined secure WebAuthn PRF setup compatibility.
+  - Browsers without `PublicKeyCredential.getClientCapabilities()` can now attempt PRF setup, but enrollment is saved only if the verification assertion returns a PRF key.
+  - Registration still rejects authenticators that explicitly report PRF as disabled.
+
+## 2026-08-19 01:41:40 IST
+
+- Improved secure web biometric unsupported-browser handling.
+  - WebAuthn PRF detection now fails closed when the browser cannot report PRF support.
+  - PRF-unavailable setup errors now show the secure-device-unlock unavailable guidance instead of the generic setup-failed dialog.
+
+## 2026-08-19 01:34:42 IST
+
+- Restored secure WebAuthn PRF-backed biometric unlock for web.
+  - Web quick unlock now derives the local wrapping key from WebAuthn PRF output after Touch ID/Windows Hello verification instead of storing the wrapping key in IndexedDB.
+  - Existing simple WebAuthn quick-unlock records are treated as legacy and cleared before re-enrollment.
+  - Settings now shows secure-device-unlock guidance when WebAuthn PRF/device verification is unavailable instead of silently enabling an insecure fallback.
+  - Updated README and security/screen-flow docs to describe PRF-backed web biometric storage.
+
+## 2026-08-19 01:24:22 IST
+
+- Fixed web biometric auto-enrollment after unlock.
+  - The post-login biometric prompt now resolves the just-entered master password from the active password field or session helper before enrolling WebAuthn.
+  - This prevents the `Master password unavailable` error when enabling biometrics immediately after a successful unlock.
+
+## 2026-08-19 01:21:45 IST
+
+- Removed the extra imported-vault unlock presentation from the login flow.
+  - `UnlockScreen` now always shows the normal master-password UI and `Unlock` action, even when the password is being used internally to validate an imported or selected vault.
+  - Removed the `Unlock imported vault` banner and `Open with password` CTA from the unlock route so users no longer see a separate intermediate login screen.
+
+## 2026-08-19 01:19:24 IST
+
+- Relaxed web biometric registration for broader browser compatibility.
+  - The WebAuthn bridge now lets the browser choose the relying-party ID from the current origin instead of forcing `window.location.hostname`.
+  - Removed the platform-authenticator-only restriction so any user-verifying device credential can satisfy quick unlock.
+  - The biometric setup button now starts registration before mutating dialog state and displays the browser error details if setup still fails.
+
+## 2026-08-19 01:16:53 IST
+
+- Reverted web biometric quick unlock to simple WebAuthn gating.
+  - Removed the PRF requirement from web biometric enrollment and unlock so platform authenticators such as Touch ID and Windows Hello can work without WebAuthn PRF support.
+  - Web quick unlock now registers/authenticates a platform credential and gates access to the per-vault local unlock helper after successful device verification.
+  - Kept master-password unlock as the primary fallback when WebAuthn is unavailable or authentication fails.
+
+## 2026-08-19 01:09:15 IST
+
+- Fixed duplicate unlock screens after selecting or importing a vault.
+  - Known-vault selection now clears any stale imported-vault credential UI before showing the normal unlock screen.
+  - Import/open-vault flows that validate an already-known vault now enter the app directly instead of clearing the import banner and leaving the user on a second unlock screen.
+  - Added regression coverage so known-vault selection cannot show the imported-vault banner or `Open with password` action.
+
+## 2026-08-19 01:06:25 IST
+
+- Hardened WebAuthn biometric enrollment on web.
+  - WebAuthn registration now starts immediately from the confirm button gesture and uses a stored random PRF salt, avoiding browser rejection caused by async work before `navigator.credentials.create()`.
+  - Device-unlock setup now requests the PRF output during credential creation and maps platform prompt failures to the WebAuthn guidance dialog instead of the generic failure text.
+
+## 2026-08-19 01:02:19 IST
+
+- Restored WebAuthn-backed biometric unlock for web vaults.
+  - Web biometric enrollment now registers secure device unlock after a successful master-password login instead of enabling session-login password caching.
+  - The unlock screen now presents one master-password form plus the biometric/device-unlock CTA when enrolled, removing the extra session-unlock action that caused duplicate unlock surfaces.
+  - WebAuthn unavailable messaging now falls back to the master password rather than directing users to session unlock.
+
+## 2026-08-19 00:58:16 IST
+
+- Kept demo preview scoped to the homepage dashboard.
+  - Demo preview remains an opt-in new-user homepage experience only.
+  - All Items and Favorites now always read the real vault item/note lists, even while the homepage demo preview is active.
+  - Added widget and integration coverage so sample records cannot replace or leak into real vault list screens.
+
+## 2026-08-13 19:30:00 IST
+
+- Added WebAuthn-based quick unlock for web vaults.
+  - After a password unlock, users can enable device unlock (Touch ID, Windows Hello, or platform biometrics in a PWA).
+  - Quick-unlock credentials are stored per vault in IndexedDB with AES-GCM-encrypted master passwords and platform WebAuthn verification.
+  - Unlock and settings flows now use the same biometric UX as mobile, including auto-prompt on the unlock screen when enrollment exists.
+  - Added `web/webauthn_quick_unlock.js`, web quick-unlock services, and stub-path regression coverage.
+
+## 2026-08-13 16:31:40 IST
+
+- Expanded the ops runbook for Web Google Drive backup readiness.
+  - Added Web OAuth client setup, fixed local origin guidance, `drive.file` scope guidance, build flags, CSP/header notes, and validation steps.
+  - Clarified that current WebApp backup uses encrypted browser download/local storage until a browser Google Drive provider is implemented.
+  - Added manual validation coverage and official Google references for Web Identity Services and Drive API setup.
+
+## 2026-08-13 15:57:50 IST
+
+- Improved web vault references and the New Item category picker.
+  - Known vault references now retain a non-sensitive source description, such as browser private storage and the selected file name for web imports.
+  - Web vault bytes continue to use browser private app storage rather than HTTP cookies, keeping vault metadata and encrypted data local to the app.
+  - The New Item category picker is now bounded on tablet/web so rows no longer stretch across the full browser width while mobile remains full-width.
+  - Added regression coverage for persisted source metadata and the wide New Item picker width.
+
+## 2026-08-13 14:10:00 IST
+
+- Rebuilt the unlock vault screen to match the wireframe entry/unlock flow for every vault-selection path.
+  - Known-vault picks, imported vault files, restored sessions, and post-create unlock now share one centered `460px` unlock panel.
+  - Added vault name and guardian-aware presentation resolved from the selected vault file.
+  - Replaced the old mobile branding layout and wide two-column login surface with header/back/theme controls, monospace password label, dark unlock button, and stacked secondary actions.
+  - Header back now returns to the known-vault selector instead of leaving the flow.
+
+## 2026-08-13 14:05:00 IST
+
+- Polished the known-vault selection page to match the wireframe select-vault surface.
+  - Centered the header title as `Select vault`, applied Inter/monospace entry typography, and tightened hero spacing.
+  - Restyled vault cards with accent-soft icons, 14px/11px metadata, and human-readable last-opened labels such as `Today · 9:41 PM`.
+  - Replaced the heavy empty-state panel with a bordered card matching vault-row styling.
+  - Updated the bottom import action to the wireframe button scale and typography.
+
+## 2026-08-13 13:55:00 IST
+
+- Matched the vault entry page typography and scale to `nija-e2e-product-flow.html`.
+  - Replaced the missing `Geist` font reference with Inter across the app theme via `google_fonts`.
+  - Added wireframe-accurate entry styles: 34px hero title with tight tracking, 14px body copy, monospace step codes, and compact 14px/11px action rows.
+  - Updated hero icon sizing, card radius, row padding, and restore-button styling to match the reference.
+  - Preloaded Inter and Roboto Mono on web for faster first paint.
+
+## 2026-08-13 13:45:00 IST
+
+- Aligned the web/tablet vault shell with the `nija-e2e-product-flow.html` wireframe while keeping mobile unchanged.
+  - Added a sticky desktop header with `Nija vault` context, screen title, and theme toggle.
+  - Updated the rail/sidebar: theme toggle in the brand rail, switch-vault action in the sidebar when multi-vault switching is available, and lock-vault fallback otherwise.
+  - Reworked the wide dashboard into wireframe-style stat cards, recent-item panel rows, and a two-column quick-actions grid.
+  - Brought Favorites and Settings onto the same bounded desktop surfaces: favorites now uses the wide all-items index styling; settings rows match the wireframe card density.
+  - Removed duplicate wide-screen titles and mobile-only lock controls from the desktop dashboard header row.
+
+## 2026-08-13 01:59:36 IST
+
+- Fixed the wide dashboard `Switch vault` action.
+  - `Switch vault` now opens the same full known-vault selector as the entry flow instead of sharing the generic lock callback.
+  - The lock button still uses the lock flow, while the switch action selects a vault and then reaches the existing unlock step.
+  - Added widget coverage so the quick action cannot regress to the legacy master-password surface.
+
+## 2026-08-13 01:55:53 IST
+
+- Tightened the known-vault selection page to match the `nija-e2e-product-flow.html` UX scale.
+  - The selector now uses the same compact `460px` entry shell, compact heading rhythm, 86px vault rows, 42px icon blocks, and narrow row spacing as the reference.
+  - Kept the full-page selector routing and localized Nija Material theme tokens intact.
+  - Fixed the lock-flow selector so `Select different vault file` still opens the existing local vault-file import path.
+
+## 2026-08-13 01:50:00 IST
+
+- Aligned manual, back-navigation, inactivity, and background locking with the new vault-entry flow.
+  - Locking now opens the full known-vault selection page instead of the legacy unlock surface.
+  - The vault that was just locked remains selectable even when the local-reference cache is unavailable.
+  - Selecting it leads to the existing single password unlock screen, with no duplicate login prompt.
+
+## 2026-08-13 01:41:25 IST
+
+- Replaced the entry-screen known-vault dialog/bottom sheet with a full responsive selection page.
+  - The page lists only saved local-reference data that Nija actually stores: vault label and last-opened state.
+  - Added the reference-style heading, bounded vault cards, back control, and `Select different vault file` action.
+  - Selecting a known vault now proceeds directly to its existing unlock screen; it does not re-enter onboarding or show a second picker.
+  - Added widget and integration regression coverage for the selection-to-unlock path.
+
+## 2026-08-13 01:34:42 IST
+
+- Rebuilt the first Nija entry screen from the `nija-e2e-product-flow.html` reference.
+  - Replaced separate mobile and wide welcome compositions with one full-viewport, mobile-first entry surface and a centered `460px` action column.
+  - Added the reference-style header, hero, grouped four-row vault flow, and one supported cloud restore action.
+  - Separated known-vault selection from direct vault-file import so the selector no longer advertises import actions.
+  - Added localized entry labels and widget coverage for entry action routing and wide layout bounds.
+
+## 2026-08-13 01:20:59 IST
+
+- Corrected dashboard navigation and category visibility.
+  - Removed the non-functional `Folders` quick action; Nija currently has no folder-management surface.
+  - Kept folder counts as derived dashboard metadata for items that already have a folder value.
+  - Mobile and web dashboard categories now hide all zero-count types, including default category placeholders.
+  - Added widget coverage for a vault containing only login and recovery-note entries.
+
+## 2026-08-13 01:00:25 IST
+
+- Continued the mobile-first WebApp/tablet revamp using `nija-e2e-product-flow.html` as the responsive-layout reference.
+  - Added the reference-to-Nija mapping and explicit responsive contract to the Web revamp tracker.
+  - Kept mobile and short landscape windows on the existing compact navigation and interaction model.
+  - Enabled the rail/sidebar workspace only for viewports at least `760px` wide with at least `700px` vertical room.
+  - Added a bounded tablet/web All Items index with name, type, folder, modified date, selection, and row actions while preserving the mobile list, filters, and bulk behavior.
+  - Constrained wide add/edit and settings content to readable widths; mobile forms remain stacked and full-width.
+  - Made All Items filters a centered dialog on tablet/web while preserving the mobile filter flow.
+  - Updated WebApp install metadata from Flutter placeholders to Nija branding and theme values.
+  - Added widget/integration coverage for the wide All Items index, filter dialog, bounded editor, and opt-in demo preview behavior.
+
+## 2026-08-13 00:38:28 IST
+
+- Changed the WebApp homepage demo behavior from automatic replacement to an explicit option.
+  - New empty vaults show real vault content first with a `View demo preview` action.
+  - Sample records appear only while preview mode is active, with `Exit demo` returning to the real vault dashboard.
+  - Updated widget coverage for opt-in and exit behavior.
+
+## 2026-08-13 00:35:05 IST
+
+- Fixed the WebApp homepage demo-preview gate.
+  - Demo records now only appear for a truly empty incoming vault payload.
+  - Persisted real vaults with only the recovery phrase note now show the actual vault content instead of sample records.
+  - Added widget coverage for the recovery-note-only real-vault case.
+
+## 2026-08-13 00:32:06 IST
+
+- Fixed WebApp vault search regressions.
+  - Home dashboard search now clears stale All Items filters before routing to results.
+  - All Items search now includes structured field values, folders, types, tags, and note text.
+  - Added widget coverage for stale dashboard category filters and richer All Items matching.
+
+## 2026-08-13 00:23:48 IST
+
+- Reworked the vault homepage toward the latest responsive WebApp wireframe.
+  - Added a reusable homepage demo-data seed for empty-vault dashboard previews without inserting fake records into the vault.
+  - Replaced the wide dashboard category-strip-first layout with a constrained search row, six stat cards, recent-items panel, quick-actions panel, and category summary.
+  - Updated mobile homepage categories to show the core Notes/Logins/Identities/Documents grid while still surfacing extra custom categories.
+  - Added unit, widget, and integration coverage for homepage demo data, wide dashboard preview, mobile category routing, and web integration rendering.
+
+## 2026-08-13 00:10:21 IST
+
+- Tightened the WebApp revamp tracker with the newer homepage wireframe details.
+  - Added concrete mobile and desktop dashboard structure, stats behavior, quick actions, homepage routing behavior, and responsive homepage test targets.
+
+## 2026-08-12 23:58:44 IST
+
+- Added a detailed WebApp/tablet revamp tracker from the latest responsive wireframe reference.
+  - Captures shell breakpoints, entry/unlock/create-vault flow, dashboard, all-items, detail, add/edit, folders/templates/merge/trash, settings, modal, PWA, security, and visual QA phases.
+  - Linked the tracker from the README product documentation index.
+
+## 2026-08-12 23:39:09 IST
+
+- Fixed the wide dashboard category/folder strip.
+  - Removed the four-category display cap so all category tiles render.
+  - Replaced oversized wide category cards with compact wrapping tiles to reduce empty space.
+  - Added widget coverage for a five-category wide dashboard.
+
+## 2026-08-12 22:17:37 IST
+
+- Refactored the normal item detail screen for desktop/tablet readability.
+  - Detail content is now constrained and centered instead of spanning the full browser width.
+  - Wide layouts use a main content panel plus side panel for metadata and quick actions; medium/mobile layouts collapse to one column.
+  - Empty item fields and duplicate title fields are no longer rendered.
+  - Primary quick actions are type-aware, so identity/passport/card/bank/etc. items no longer show a hardcoded `Copy Password` action.
+  - Added widget coverage for identity detail field filtering and action labeling.
+
+## 2026-08-12 22:08:12 IST
+
+- Reworked the authenticated web/tablet vault shell toward the provided Nija archive wireframe without changing the app theme.
+  - Wide screens now use a narrow brand/status rail plus a separate vault navigation sidebar.
+  - Dashboard content now uses a wider desktop content frame, a compact stats grid, and a split recent/quick-actions layout.
+  - Mobile keeps the existing bottom-navigation layout.
+  - Added widget coverage for the wide rail/sidebar dashboard structure.
+
+## 2026-08-12 21:57:01 IST
+
+- Fixed the add-item saved confirmation on web/tablet.
+  - Wide screens now show `Entry saved` as a centered, constrained dialog instead of a stretched mobile bottom sheet.
+  - Mobile keeps the existing bottom-sheet confirmation.
+  - Added localized saved-confirmation strings and widget coverage for the wide dialog width.
+
+## 2026-08-12 21:47:47 IST
+
+- Fixed web/tablet onboarding and vault layout regressions from manual review.
+  - Widened and tightened the first web welcome frame so text alignment and wrapping are more balanced.
+  - Made first-page `Import data` and cloud restore route to import flows instead of create-vault onboarding.
+  - Successful imported-vault password validation now opens the vault directly instead of showing the unlock page and asking again.
+  - Dashboard type/folder cards now use responsive columns on wider screens so they do not stretch across the full content area.
+
+## 2026-08-12 20:39:16 IST
+
+- Improved web/tablet layout after vault unlock and fixed the wide vault picker presentation.
+  - `Open existing vault` now uses a centered dialog on wide screens instead of a mobile bottom sheet.
+  - Wide authenticated vault content is constrained to a readable width so dashboard/all-items screens no longer stretch across the entire browser window.
+  - Narrowed the wide side navigation rail slightly to reduce crowding.
+
+## 2026-08-12 20:23:57 IST
+
+- Re-aligned web/tablet UI with the Nija mobile app theme for cross-platform consistency.
+  - Replaced the separate editorial website-style wide welcome/unlock surfaces with app-themed Nija onboarding and unlock layouts.
+  - Added a wide/tablet side navigation rail to `VaultAppShell` while preserving bottom navigation on mobile.
+  - Updated onboarding widget coverage, README, TODO, and screen-flow documentation.
+
+## 2026-08-12 19:30:20 IST
+
+- Fixed wide WebApp unlock flow reverting to the older login-style screen after creating or locking a vault.
+  - Reworked `UnlockScreen` wide layout to use the same website-shell visual system as the first page.
+  - Kept unlock, recovery phrase, select vault, encrypted secret, create vault, and biometric actions available in the new unlock panel.
+  - Updated wide unlock widget coverage, README, TODO, and screen-flow documentation.
+
+## 2026-08-12 19:14:51 IST
+
+- Removed the rounded outer border from the mobile onboarding canvas.
+  - `OnboardingScaffold` now keeps the outer bordered surface square while preserving inner component styling.
+  - Updated the screen-flow documentation for the mobile onboarding layout.
+
+## 2026-08-12 19:11:45 IST
+
+- Reworked the wide WebApp first page to match the latest website-view HTML reference.
+  - Added the vertical rail, local-status header, split private-archive intro/workspace layout, square vault action tiles, create-vault modal, cloud restore section, recent vault rows, and footer status line.
+  - Kept light/dark theme support and updated widget coverage plus README, TODO, and screen-flow documentation.
+
+## 2026-08-12 19:01:11 IST
+
+- Reworked the first wide WebApp page from the provided HTML reference.
+  - Added a vault-start welcome surface with brand header, light/dark theme toggle, intro panel, open/create vault actions, recent vault affordance, cloud restore options, and footer trust markers.
+  - Updated wide first-page widget coverage, README, TODO, and screen-flow documentation.
+
+## 2026-08-12 17:34:50 IST
+
+- Added a WebApp light-mode desktop/tablet UX implementation checklist to `docs/todo.md`.
+  - Split the reference mockup into separate work items for login/unlock, home dashboard, all-items table, visual polish, and responsive regression coverage.
+- Implemented the first WebApp UX item: responsive wide login/unlock surface.
+  - Added a light-mode brand/trust panel and vault unlock card for wide screens.
+  - Made the same reference-style surface the first wide WebApp page.
+  - Web builds now skip the first-install walkthrough and land on the vault-start welcome surface.
+  - Replaced text-only create-vault affordances on the wide web surface with proper buttons.
+  - Preserved the existing mobile unlock layout.
+  - Added widget coverage for the wide first page and login layout.
+  - Updated README and screen-flow documentation.
+
+## 2026-08-12 17:31:33 IST
+
+- Added an important Flutter commands reference to the ops runbook.
+  - Covered environment checks, dependency commands, formatting, analysis, tests, local runs, platform builds, hardening builds, install/clean, launcher icons, logs, attach, symbolication, and web release smoke runs.
+
+## 2026-08-12 17:30:37 IST
+
+- Expanded the ops runbook with local run and deploy steps.
+  - Added Android local run commands, release artifact locations, Play Console internal testing, and production release flow.
+  - Added iOS local run/Xcode guidance, IPA artifact location, TestFlight, and App Store release flow.
+  - Added WebApp local Chrome run, local static release validation, static hosting, Firebase Hosting, CDN/object storage deploy notes, and common validation commands.
+
+## 2026-08-12 17:27:57 IST
+
+- Expanded the WebApp/PWA release TODO.
+  - Added installability checks for manifest, icons, standalone display, iOS metadata, and add-to-home-screen guidance.
+  - Added offline-first work for IndexedDB vault persistence, Flutter web service-worker behavior, offline UI states, and iOS/Android installed-app validation.
+  - Added responsive/tablet-web and release smoke-test coverage items.
+
+## 2026-08-12 17:22:55 IST
+
+- Added an operations runbook at `docs/ops_readme.md`.
+  - Documented Google Cloud Console/OAuth setup, support email usage, Google Drive backup behavior, Android release signing/builds, iOS iCloud setup/builds, WebApp release/PWA checks, paid entitlement status, security review, and manual release validation.
+  - Linked the ops runbook from `README.md`.
+
+## 2026-08-12 17:15:41 IST
+
+- Added fullscreen document preview support.
+  - Added enlarge actions to standalone document previews and item attachment preview panels.
+  - Fullscreen preview supports image zoom, text scrolling, and PDF pan/zoom using the existing preview renderers.
+  - Added widget coverage for opening and closing fullscreen previews from document detail and attachment preview surfaces.
+  - Updated screen-flow and release tracker documentation for the completed preview enlargement work.
+
+## 2026-08-12 17:11:54 IST
+
+- Updated release readiness tracking.
+  - Marked real-device PDF/document preview gesture-focus verification as completed.
+  - Added a follow-up task for an enlarge/fullscreen document preview action.
+  - Added WebApp release build, offline/PWA parity, web security review, and obfuscation/reverse-engineering hardening items.
+  - Expanded release hardening gates for web installed-app validation, secure web storage/cache behavior, production headers, and Android release hardening.
+
 ## 2026-05-23 21:01:22 IST
 
 - Added custom template management in Settings.

@@ -325,12 +325,12 @@ class _SettingsSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(14),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: theme.cardTheme.color ?? theme.colorScheme.surface,
                 border: Border.all(color: theme.colorScheme.outlineVariant),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Column(children: children),
             ),
@@ -347,6 +347,7 @@ class _SettingsRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    this.detail,
     this.value,
     this.trailing,
     this.onTap,
@@ -357,6 +358,7 @@ class _SettingsRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
+  final String? detail;
   final String? value;
   final Widget? trailing;
   final VoidCallback? onTap;
@@ -376,8 +378,8 @@ class _SettingsRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Container(
-          constraints: const BoxConstraints(minHeight: 78),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          constraints: const BoxConstraints(minHeight: 72),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             border: Border(
               bottom: BorderSide(
@@ -389,15 +391,15 @@ class _SettingsRow extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
-                  color: effectiveIconColor.withValues(alpha: 0.10),
+                  color: effectiveIconColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: effectiveIconColor, size: 24),
+                child: Icon(icon, color: effectiveIconColor, size: 20),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -409,7 +411,7 @@ class _SettingsRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: effectiveTitleColor,
-                        fontSize: 16,
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                         height: 1.2,
                       ),
@@ -426,6 +428,20 @@ class _SettingsRow extends StatelessWidget {
                         height: 1.25,
                       ),
                     ),
+                    if (detail != null && detail!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        detail!,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: theme.colorScheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -474,11 +490,13 @@ class _InfoDetailSheet extends StatefulWidget {
     required this.title,
     required this.icon,
     required this.sections,
+    this.brandHeader,
   });
 
   final String title;
   final IconData icon;
   final List<_InfoSectionData> sections;
+  final Widget? brandHeader;
 
   @override
   State<_InfoDetailSheet> createState() => _InfoDetailSheetState();
@@ -533,6 +551,10 @@ class _InfoDetailSheetState extends State<_InfoDetailSheet> {
                   ),
                 ],
               ),
+              if (widget.brandHeader != null) ...[
+                const SizedBox(height: 16),
+                widget.brandHeader!,
+              ],
               const SizedBox(height: 10),
               Flexible(
                 child: Scrollbar(
@@ -585,13 +607,6 @@ class _SecurityEncryptionSheet extends StatelessWidget {
     required this.autoLockLabel,
     required this.cloudBackupEnabled,
     required this.cloudBackupLastLabel,
-    required this.onChangeMasterPassword,
-    required this.onRotateRecoveryPhrase,
-    required this.onManageBiometrics,
-    required this.onAdjustAutoLock,
-    required this.onExportVault,
-    required this.onBackupNow,
-    required this.onRestoreBackup,
   });
 
   final Future<Map<String, dynamic>>? metadataFuture;
@@ -599,13 +614,6 @@ class _SecurityEncryptionSheet extends StatelessWidget {
   final String autoLockLabel;
   final bool cloudBackupEnabled;
   final String cloudBackupLastLabel;
-  final VoidCallback onChangeMasterPassword;
-  final VoidCallback onRotateRecoveryPhrase;
-  final VoidCallback onManageBiometrics;
-  final VoidCallback onAdjustAutoLock;
-  final VoidCallback onExportVault;
-  final VoidCallback? onBackupNow;
-  final VoidCallback? onRestoreBackup;
 
   @override
   Widget build(BuildContext context) {
@@ -726,46 +734,6 @@ class _SecurityEncryptionSheet extends StatelessWidget {
                               label: 'Release debug internals',
                               value: kReleaseMode ? 'Hidden' : 'Debug build',
                               good: kReleaseMode,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        _SecurityActionGrid(
-                          actions: [
-                            _SecurityActionData(
-                              icon: Icons.lock_reset_outlined,
-                              label: 'Change master password',
-                              onTap: onChangeMasterPassword,
-                            ),
-                            _SecurityActionData(
-                              icon: Icons.key_outlined,
-                              label: 'Rotate recovery phrase',
-                              onTap: onRotateRecoveryPhrase,
-                            ),
-                            _SecurityActionData(
-                              icon: Icons.fingerprint,
-                              label: 'Manage biometrics',
-                              onTap: onManageBiometrics,
-                            ),
-                            _SecurityActionData(
-                              icon: Icons.lock_clock_outlined,
-                              label: 'Adjust auto-lock',
-                              onTap: onAdjustAutoLock,
-                            ),
-                            _SecurityActionData(
-                              icon: Icons.file_upload_outlined,
-                              label: 'Export encrypted vault',
-                              onTap: onExportVault,
-                            ),
-                            _SecurityActionData(
-                              icon: Icons.backup_outlined,
-                              label: 'Backup now',
-                              onTap: onBackupNow,
-                            ),
-                            _SecurityActionData(
-                              icon: Icons.restore_outlined,
-                              label: 'Restore backup',
-                              onTap: onRestoreBackup,
                             ),
                           ],
                         ),
@@ -1021,42 +989,6 @@ class _SecurityStatusRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _SecurityActionGrid extends StatelessWidget {
-  const _SecurityActionGrid({required this.actions});
-
-  final List<_SecurityActionData> actions;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SecurityPanel(
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final action in actions)
-            OutlinedButton.icon(
-              onPressed: action.onTap,
-              icon: Icon(action.icon, size: 18),
-              label: Text(action.label),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SecurityActionData {
-  const _SecurityActionData({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
 }
 
 class _SecurityNotice extends StatelessWidget {

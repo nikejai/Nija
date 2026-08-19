@@ -8,12 +8,17 @@ import 'package:pdfrx/pdfrx.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../app/theme/dashboard_typography.dart';
+import '../../../app/widgets/nija_brand_lockup.dart';
 import '../../../core/config/app_features.dart';
 import '../../../core/config/vault_limits.dart';
 import '../../../core/localization/app_strings.dart';
+import '../../../core/platform/pwa_install_service.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/secure_clipboard.dart';
 import '../../../domain/validators/vault_validators.dart';
+import '../application/vault_entry_activity.dart';
+import '../application/vault_home_demo_data.dart';
 import '../../../infrastructure/adapters/secret_share_portability.dart';
 import '../../../infrastructure/adapters/secret_share_portability_base.dart';
 import 'add_vault_item_screen.dart';
@@ -21,13 +26,39 @@ import 'create_custom_type_screen.dart';
 import 'document_upload_screen.dart';
 import 'note_editor_screen.dart';
 import 'widgets/vault_entry_list.dart';
+import 'widgets/pwa_install_dialog.dart';
 import 'widgets/vault_page_heading.dart';
+import 'widgets/vault_surface_menu.dart';
 
 part 'widgets/encrypted_import_widgets.dart';
 part 'custom_template_manager_screen.dart';
 part 'document_detail_screen.dart';
 part 'item_detail_screen.dart';
 part 'widgets/vault_settings_widgets.dart';
+
+String _vaultDashboardTypeCode(String type) {
+  return switch (type) {
+    'Login' => 'LG',
+    'Secure Note' => 'NT',
+    'Notes' => 'NT',
+    'Identity' => 'ID',
+    'Passport' => 'ID',
+    'Driver License' => 'ID',
+    'Card' => 'CC',
+    'Document' => 'DC',
+    'Documents' => 'DC',
+    _ =>
+      type.trim().isEmpty
+          ? 'IT'
+          : type
+                .split(RegExp(r'\s+'))
+                .where((part) => part.isNotEmpty)
+                .map((part) => part[0])
+                .take(2)
+                .join()
+                .toUpperCase(),
+  };
+}
 
 typedef BiometricChanged = void Function(bool enabled);
 typedef LanguageModeChanged = void Function(String mode);
@@ -58,8 +89,13 @@ typedef PersistVaultDocumentStream =
       required Stream<List<int>> chunks,
       required int sizeBytes,
     });
+typedef VaultDocumentLoadProgress =
+    void Function(String message, double progress);
 typedef ReadVaultDocument =
-    Future<List<int>> Function({required String sectionName});
+    Future<List<int>> Function({
+      required String sectionName,
+      VaultDocumentLoadProgress? onProgress,
+    });
 typedef LifecycleLockSuppressed = void Function(bool suppressed);
 typedef VaultFileAction = Future<void> Function();
 typedef CloudBackupAction = Future<void> Function();
@@ -73,6 +109,9 @@ class VaultAppShell extends StatefulWidget {
     super.key,
     this.activeVaultName = 'vault.nija',
     this.vaultSizeBytes = 0,
+    this.activeVaultRevision = 0,
+    this.activeVaultVersionId = '',
+    this.activeVaultUpdatedAt = '',
     required this.recoveryWords,
     required this.initialItems,
     required this.initialNotes,
@@ -84,6 +123,9 @@ class VaultAppShell extends StatefulWidget {
     this.autoLockSeconds = 300,
     this.onAutoLockSecondsChanged,
     required this.biometricEnabled,
+    this.biometricAvailable = true,
+    this.pinEnabled = false,
+    this.onPinChanged,
     required this.onBiometricChanged,
     required this.onPersistVaultData,
     this.onPersistVaultDocument,
@@ -93,6 +135,7 @@ class VaultAppShell extends StatefulWidget {
     required this.onRotateMasterPassword,
     required this.onRotateRecoveryPhrase,
     required this.onLockNow,
+    this.onSwitchVault,
     required this.onExportVault,
     required this.onImportVault,
     required this.onBackupToCloud,
@@ -101,11 +144,19 @@ class VaultAppShell extends StatefulWidget {
     required this.onChangeCloudBackupAccount,
     this.onRenameVault,
     this.onReadVaultInternals,
+    this.cloudBackupFeatureAvailableOverride,
+    this.debugInternalsFeatureAvailableOverride,
+    this.isExploreDemoSession = false,
+    this.onExitExploreDemo,
+    this.secretSharePortability,
   });
 
   final List<String> recoveryWords;
   final String activeVaultName;
   final int vaultSizeBytes;
+  final int activeVaultRevision;
+  final String activeVaultVersionId;
+  final String activeVaultUpdatedAt;
   final List<Map<String, dynamic>> initialItems;
   final List<Map<String, dynamic>> initialNotes;
   final List<Map<String, dynamic>> initialCustomTypeDefinitions;
@@ -116,6 +167,9 @@ class VaultAppShell extends StatefulWidget {
   final int autoLockSeconds;
   final ValueChanged<int>? onAutoLockSecondsChanged;
   final bool biometricEnabled;
+  final bool biometricAvailable;
+  final bool pinEnabled;
+  final BiometricChanged? onPinChanged;
   final BiometricChanged onBiometricChanged;
   final PersistVaultData onPersistVaultData;
   final PersistVaultDocument? onPersistVaultDocument;
@@ -125,6 +179,7 @@ class VaultAppShell extends StatefulWidget {
   final RotateMasterPassword onRotateMasterPassword;
   final RotateRecoveryPhrase onRotateRecoveryPhrase;
   final VoidCallback onLockNow;
+  final VoidCallback? onSwitchVault;
   final VaultFileAction onExportVault;
   final VaultFileAction onImportVault;
   final CloudBackupAction onBackupToCloud;
@@ -133,6 +188,11 @@ class VaultAppShell extends StatefulWidget {
   final CloudBackupAccountChange onChangeCloudBackupAccount;
   final RenameVault? onRenameVault;
   final ReadVaultInternals? onReadVaultInternals;
+  final bool? cloudBackupFeatureAvailableOverride;
+  final bool? debugInternalsFeatureAvailableOverride;
+  final bool isExploreDemoSession;
+  final VoidCallback? onExitExploreDemo;
+  final SecretSharePortabilityAdapter? secretSharePortability;
 
   @override
   State<VaultAppShell> createState() => _VaultAppShellState();
@@ -147,11 +207,22 @@ class _VaultAppShellState extends State<VaultAppShell> {
       'nija_pref_cloud_backup_enabled_v1';
   static const String _prefsKeyCloudBackupLastAt =
       'nija_pref_cloud_backup_last_at_v1';
+  static const String _prefsKeyCloudBackupRevision =
+      'nija_pref_cloud_backup_revision_v1';
+  static const String _prefsKeyCloudBackupVersionId =
+      'nija_pref_cloud_backup_version_id_v1';
+  static const String _prefsKeyCloudBackupUpdatedAt =
+      'nija_pref_cloud_backup_updated_at_v1';
+  static const String _prefsKeyDebugInternalsUnlocked =
+      'nija_pref_debug_internals_unlocked_v1';
+  static const String _prefsKeyDebugInternalsEnabled =
+      'nija_pref_debug_internals_enabled_v1';
+  static const int _debugInternalsUnlockTapCount = 7;
+  static const int _debugInternalsFeedbackStartTapCount = 3;
   final _clipboard = SecureClipboard();
   final _allItemsSearchController = TextEditingController();
   final _encryptedShareCodec = EncryptedShareCodec();
-  final SecretSharePortabilityAdapter _secretSharePortability =
-      SecretSharePortabilityAdapterImpl();
+  late final SecretSharePortabilityAdapter _secretSharePortability;
   int _tabIndex = 0;
   String _allItemsQuery = '';
   String _allItemsFilterSearch = '';
@@ -162,14 +233,26 @@ class _VaultAppShellState extends State<VaultAppShell> {
   bool _cloudBackupEnabled = false;
   bool _importingEncryptedSecret = false;
   String _importBusyMessage = 'Importing data...';
+  int _backgroundBusyCount = 0;
+  String _backgroundBusyMessage = 'Working...';
   int _storedDocumentBytesThisSession = 0;
   int _cloudBackupLastAtEpochMs = 0;
+  int _cloudBackupRevision = 0;
+  String _cloudBackupVersionId = '';
+  String _cloudBackupUpdatedAt = '';
   String _cloudBackupAccountLabel = 'Not connected';
+  bool _debugInternalsUnlocked = false;
+  bool _debugInternalsEnabled = false;
+  int _aboutNijaTapCount = 0;
+  PwaInstallStatus? _pwaInstallStatus;
   bool _allItemsSelectionMode = false;
   final Set<String> _selectedAllItemsKeys = <String>{};
+  Timer? _persistDebounceTimer;
   Future<Map<String, dynamic>>? _debugInternalsFuture;
   _DashboardData? _dashboardDataCache;
   int? _dashboardDataSignature;
+  bool _allowHomeDemoData = false;
+  bool _showHomeDemoPreview = false;
   late final List<Map<String, dynamic>> _customTypeDefinitions;
   late final List<Map<String, dynamic>> _items;
   late final List<Map<String, dynamic>> _notes;
@@ -184,6 +267,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
   @override
   void initState() {
     super.initState();
+    _secretSharePortability =
+        widget.secretSharePortability ?? SecretSharePortabilityAdapterImpl();
     _activeVaultName = widget.activeVaultName;
     _customTypeDefinitions = widget.initialCustomTypeDefinitions
         .map((entry) => Map<String, dynamic>.from(entry))
@@ -194,6 +279,26 @@ class _VaultAppShellState extends State<VaultAppShell> {
     _notes = widget.initialNotes
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList();
+    _allowHomeDemoData =
+        widget.isExploreDemoSession ||
+        (widget.initialItems.isEmpty && widget.initialNotes.isEmpty);
+    if (widget.isExploreDemoSession) {
+      _showHomeDemoPreview = true;
+      if (_items.isEmpty && _notes.isEmpty) {
+        _items.addAll(
+          VaultHomeDemoData.items.map(
+            (entry) => Map<String, dynamic>.from(entry),
+          ),
+        );
+        _notes.addAll(
+          VaultHomeDemoData.notes.map(
+            (entry) => Map<String, dynamic>.from(entry),
+          ),
+        );
+      }
+      _dashboardDataCache = null;
+      _dashboardDataSignature = null;
+    }
     _vaultListEntryAdapters = [
       const VaultDocumentListEntryAdapter(),
       VaultItemListEntryAdapter(
@@ -202,14 +307,62 @@ class _VaultAppShellState extends State<VaultAppShell> {
       ),
       const VaultNoteListEntryAdapter(),
     ];
-    if (_notes.isEmpty) {
+    if (_notes.isEmpty &&
+        !widget.isExploreDemoSession &&
+        !widget.initialNotes.any(
+          (note) => note['id']?.toString() == 'note-recovery-phrase',
+        )) {
       _notes.add(_buildRecoveryPhraseNote());
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _persistVaultData();
-      });
     }
-    unawaited(_restoreCloudBackupPreference());
-    unawaited(_refreshCloudBackupAccountLabel());
+    if (widget.isExploreDemoSession) {
+      _startExploreDemoPreferences();
+    } else {
+      unawaited(_restoreCloudBackupPreference());
+      unawaited(_restoreDebugInternalsPreferences());
+      unawaited(_refreshCloudBackupAccountLabel());
+    }
+    if (kIsWeb && !widget.isExploreDemoSession) {
+      unawaited(_refreshPwaInstallStatus());
+    }
+  }
+
+  Future<void> _refreshPwaInstallStatus() async {
+    if (!kIsWeb || widget.isExploreDemoSession) return;
+    final next = await pwaInstallService.getStatus();
+    if (!mounted) return;
+    final previous = _pwaInstallStatus;
+    if (previous != null &&
+        previous.isInstalled == next.isInstalled &&
+        previous.canPrompt == next.canPrompt &&
+        previous.requiresManualSteps == next.requiresManualSteps &&
+        previous.platform == next.platform) {
+      return;
+    }
+    setState(() => _pwaInstallStatus = next);
+  }
+
+  Future<void> _handlePwaInstallTap(BuildContext context) async {
+    final next = await handlePwaInstallOfferTap(context);
+    if (!mounted || next == null) return;
+    setState(() => _pwaInstallStatus = next);
+  }
+
+  String _pwaInstallSettingsTitle(PwaInstallStatus status) =>
+      pwaInstallOfferTitle(status);
+
+  String _pwaInstallSettingsSubtitle(PwaInstallStatus status) {
+    return status.useHomeScreenLabel
+        ? AppStrings.pwaInstallHomeScreenHint
+        : AppStrings.pwaInstallComputerHint;
+  }
+
+  IconData _pwaInstallSettingsIcon(PwaInstallStatus status) =>
+      pwaInstallOfferIcon(status);
+
+  void _startExploreDemoPreferences() {
+    _cloudBackupEnabled = false;
+    _debugInternalsUnlocked = false;
+    _debugInternalsEnabled = false;
   }
 
   @override
@@ -237,6 +390,20 @@ class _VaultAppShellState extends State<VaultAppShell> {
         );
       _selectedAllItemsKeys.removeWhere((key) => key.startsWith('note:'));
     }
+    if (oldWidget.activeVaultName != widget.activeVaultName ||
+        !listEquals(oldWidget.initialItems, widget.initialItems) ||
+        !listEquals(oldWidget.initialNotes, widget.initialNotes)) {
+      _allowHomeDemoData =
+          widget.isExploreDemoSession ||
+          (widget.initialItems.isEmpty && widget.initialNotes.isEmpty);
+      if (widget.isExploreDemoSession) {
+        _showHomeDemoPreview = true;
+      }
+    }
+    if (oldWidget.isExploreDemoSession != widget.isExploreDemoSession &&
+        widget.isExploreDemoSession) {
+      _showHomeDemoPreview = true;
+    }
     if (!listEquals(
       oldWidget.initialCustomTypeDefinitions,
       widget.initialCustomTypeDefinitions,
@@ -256,6 +423,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   @override
   void dispose() {
+    _persistDebounceTimer?.cancel();
     _allItemsSearchController.dispose();
     _clipboard.dispose();
     super.dispose();
@@ -275,6 +443,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       'title': 'Recovery Phrase',
       'preview': 'Recovery phrase (plain copyable text).',
       'updated': 'Now',
+      'updatedAt': DateTime.now().toUtc().toIso8601String(),
       'pinned': true,
       'tags': ['recovery', 'security'],
       'delta': [
@@ -295,6 +464,26 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    final debugTabVisible = _debugTabVisible;
+    final selectedTabIndex = debugTabVisible
+        ? _tabIndex
+        : (_tabIndex > 3 ? 3 : _tabIndex);
+    // Mobile is the source experience. Tablet/web gain the rail and bounded
+    // workspace frame without changing the routes or mobile interactions.
+    final useSideNavigation = _isWideLayout(context);
+    void selectDestination(int value) {
+      if (value == _tabIndex) return;
+      if (value == 4 && _debugTabVisible) {
+        _ensureDebugInternalsFuture();
+      }
+      setState(() {
+        if (value == 1) {
+          _allItemsTypeFilter = 'all';
+        }
+        _tabIndex = value;
+      });
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -302,89 +491,146 @@ class _VaultAppShellState extends State<VaultAppShell> {
         unawaited(_handleBackNavigation());
       },
       child: Scaffold(
-        body: Stack(
+        body: Row(
           children: [
-            SafeArea(
-              child: KeyedSubtree(
-                key: ValueKey<int>(_tabIndex),
-                child: _buildActiveTab(context),
+            if (useSideNavigation)
+              _VaultSideNavigation(
+                selectedIndex: selectedTabIndex,
+                debugTabVisible: debugTabVisible,
+                activeVaultName: _activeVaultName,
+                itemCount: _items.length + _notes.length,
+                vaultMetaLabel: widget.isExploreDemoSession
+                    ? 'Demo · sample data'
+                    : '${_items.length + _notes.length} items · local',
+                onLockNow: widget.onLockNow,
+                onSwitchVault: widget.onSwitchVault,
+                onThemeToggle: widget.onThemeModeChanged == null
+                    ? null
+                    : _toggleThemeMode,
+                themeMode: widget.themeMode,
+                onDestinationSelected: selectDestination,
               ),
+            Expanded(
+              child: useSideNavigation
+                  ? Column(
+                      children: [
+                        _VaultDesktopHeader(
+                          title: _desktopTabTitle(selectedTabIndex),
+                          themeMode: widget.themeMode,
+                          onThemeModeChanged: widget.onThemeModeChanged == null
+                              ? null
+                              : _toggleThemeMode,
+                        ),
+                        Expanded(
+                          child: Stack(
+                            children: [
+                              KeyedSubtree(
+                                key: ValueKey<int>(_tabIndex),
+                                child: _VaultWideContentFrame(
+                                  child: _buildActiveTab(context),
+                                ),
+                              ),
+                              if (_isBusyOverlayVisible)
+                                _buildBusyOverlay(context),
+                            ],
+                          ),
+                        ),
+                      ],
+                    )
+                  : Stack(
+                      children: [
+                        SafeArea(
+                          child: KeyedSubtree(
+                            key: ValueKey<int>(_tabIndex),
+                            child: _buildActiveTab(context),
+                          ),
+                        ),
+                        if (_isBusyOverlayVisible) _buildBusyOverlay(context),
+                      ],
+                    ),
             ),
-            if (_importingEncryptedSecret) _buildBusyOverlay(context),
           ],
         ),
-        bottomNavigationBar: NavigationBarTheme(
-          data: NavigationBarThemeData(
-            backgroundColor: colorScheme.surface,
-            indicatorColor: Colors.transparent,
-            labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
-              states,
-            ) {
-              if (states.contains(WidgetState.selected)) {
-                return TextStyle(
-                  color: colorScheme.primary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                );
-              }
-              return TextStyle(
-                color: colorScheme.onSurfaceVariant,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              );
-            }),
-            iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((states) {
-              if (states.contains(WidgetState.selected)) {
-                return IconThemeData(color: colorScheme.primary, size: 22);
-              }
-              return IconThemeData(
-                color: colorScheme.onSurfaceVariant,
-                size: 22,
-              );
-            }),
-          ),
-          child: NavigationBar(
-            selectedIndex: _tabIndex,
-            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-            destinations: [
-              NavigationDestination(
-                icon: const Icon(Icons.shield_outlined),
-                label: AppStrings.tabVault,
-              ),
-              NavigationDestination(
-                icon: const Icon(Icons.grid_view_outlined),
-                label: AppStrings.tabTypes,
-              ),
-              NavigationDestination(
-                icon: const Icon(Icons.star_outline),
-                label: AppStrings.tabNotes,
-              ),
-              NavigationDestination(
-                icon: const Icon(Icons.settings_outlined),
-                label: AppStrings.tabSettings,
-              ),
-              if (kDebugMode)
-                const NavigationDestination(
-                  icon: Icon(Icons.bug_report_outlined),
-                  label: 'Debug',
+        bottomNavigationBar: useSideNavigation
+            ? null
+            : NavigationBarTheme(
+                data: NavigationBarThemeData(
+                  backgroundColor: colorScheme.surface,
+                  indicatorColor: colorScheme.primaryContainer,
+                  labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
+                    states,
+                  ) {
+                    if (states.contains(WidgetState.selected)) {
+                      return TextStyle(
+                        color: colorScheme.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      );
+                    }
+                    return TextStyle(
+                      color: colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    );
+                  }),
+                  iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((
+                    states,
+                  ) {
+                    if (states.contains(WidgetState.selected)) {
+                      return IconThemeData(
+                        color: colorScheme.primary,
+                        size: 24,
+                      );
+                    }
+                    return IconThemeData(
+                      color: colorScheme.onSurfaceVariant,
+                      size: 22,
+                    );
+                  }),
                 ),
-            ],
-            onDestinationSelected: (value) {
-              if (value == _tabIndex) return;
-              if (value == 4 && kDebugMode) {
-                _ensureDebugInternalsFuture();
-              }
-              setState(() => _tabIndex = value);
-            },
-          ),
-        ),
+                child: NavigationBar(
+                  selectedIndex: selectedTabIndex,
+                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                  destinations: [
+                    NavigationDestination(
+                      icon: const Icon(Icons.shield_outlined),
+                      selectedIcon: const Icon(Icons.shield),
+                      label: AppStrings.tabVault,
+                    ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.grid_view_outlined),
+                      selectedIcon: const Icon(Icons.grid_view),
+                      label: AppStrings.tabTypes,
+                    ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.star_outline),
+                      selectedIcon: const Icon(Icons.star),
+                      label: AppStrings.tabNotes,
+                    ),
+                    NavigationDestination(
+                      icon: const Icon(Icons.settings_outlined),
+                      selectedIcon: const Icon(Icons.settings),
+                      label: AppStrings.tabSettings,
+                    ),
+                    if (debugTabVisible)
+                      const NavigationDestination(
+                        icon: Icon(Icons.bug_report_outlined),
+                        selectedIcon: Icon(Icons.bug_report),
+                        label: 'Debug',
+                      ),
+                  ],
+                  onDestinationSelected: selectDestination,
+                ),
+              ),
         floatingActionButton: _tabIndex == 0 || _tabIndex == 1
             ? FloatingActionButton.small(
                 onPressed: () => _openAddItemScreen(context),
                 child: const Icon(Icons.add),
               )
             : null,
-        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+        floatingActionButtonLocation: useSideNavigation
+            ? FloatingActionButtonLocation.endFloat
+            : FloatingActionButtonLocation.centerDocked,
       ),
     );
   }
@@ -395,55 +641,166 @@ class _VaultAppShellState extends State<VaultAppShell> {
       1 => _buildTypesTab(context),
       2 => _buildFavoritesTab(context),
       3 => _buildSettingsTab(context),
-      4 when kDebugMode => _buildDebugInternalsTab(context),
+      4 when _debugTabVisible => _buildDebugInternalsTab(context),
       _ => _buildVaultTab(context),
     };
+  }
+
+  bool get _debugInternalsFeatureAvailable =>
+      // Debug internals are never available in profile/release builds.
+      kDebugMode &&
+      (widget.debugInternalsFeatureAvailableOverride ??
+          AppFeatures.supportsDebugInternals);
+
+  bool get _cloudBackupFeatureAvailable =>
+      widget.cloudBackupFeatureAvailableOverride ??
+      AppFeatures.supportsCloudBackup;
+
+  bool get _debugTabVisible =>
+      _debugInternalsFeatureAvailable &&
+      _debugInternalsUnlocked &&
+      _debugInternalsEnabled;
+
+  bool get _isExploreDemoReadOnly => widget.isExploreDemoSession;
+
+  bool _blockExploreDemoWrite([String? message]) {
+    if (!widget.isExploreDemoSession) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message ?? AppStrings.exploreDemoWriteBlocked)),
+    );
+    return true;
+  }
+
+  String _dashboardGreeting() {
+    final hour = DateTime.now().hour;
+    final period = hour < 12
+        ? 'morning'
+        : hour < 18
+        ? 'afternoon'
+        : 'evening';
+    return 'Good $period, Nija User 👋';
+  }
+
+  bool _isWideLayout(BuildContext context) {
+    final viewport = MediaQuery.sizeOf(context);
+    final shortestSide = viewport.shortestSide;
+    final landscapeWorkspace = viewport.width >= 760 && viewport.height >= 700;
+    final tabletPortraitWorkspace =
+        shortestSide >= 600 && viewport.height >= 700;
+    return landscapeWorkspace || tabletPortraitWorkspace;
+  }
+
+  String _desktopTabTitle(int tabIndex) {
+    return switch (tabIndex) {
+      0 => AppStrings.tabVault,
+      1 => AppStrings.tabTypes,
+      2 => AppStrings.tabNotes,
+      3 => AppStrings.tabSettings,
+      4 => 'Debug',
+      _ => AppStrings.tabVault,
+    };
+  }
+
+  void _toggleThemeMode() {
+    final onChanged = widget.onThemeModeChanged;
+    if (onChanged == null) return;
+    final next = widget.themeMode == ThemeMode.dark
+        ? ThemeMode.light
+        : ThemeMode.dark;
+    onChanged(next);
   }
 
   Widget _buildBusyOverlay(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Positioned.fill(
-      child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.25),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 320),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox.square(
-                      dimension: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2.6),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      _importBusyMessage,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: colorScheme.onSurface,
-                        fontWeight: FontWeight.w700,
+      child: Stack(
+        children: [
+          ModalBarrier(
+            key: const ValueKey('vault-busy-overlay-barrier'),
+            dismissible: false,
+            color: Colors.black.withValues(alpha: 0.25),
+          ),
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox.square(
+                        dimension: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2.6),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Large encrypted files may take a moment.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                  ],
+                      const SizedBox(height: 14),
+                      Text(
+                        _activeBusyMessage,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Large encrypted files may take a moment.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: colorScheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
+  bool get _isBusyOverlayVisible =>
+      !widget.isExploreDemoSession &&
+      (_importingEncryptedSecret || _backgroundBusyCount > 0);
+
+  String get _activeBusyMessage =>
+      _importingEncryptedSecret ? _importBusyMessage : _backgroundBusyMessage;
+
+  Future<T> _runWithBusy<T>(String message, Future<T> Function() action) async {
+    if (widget.isExploreDemoSession) {
+      return action();
+    }
+    if (mounted) {
+      setState(() {
+        _backgroundBusyCount++;
+        _backgroundBusyMessage = message;
+      });
+    }
+    try {
+      return await action();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _backgroundBusyCount = (_backgroundBusyCount - 1).clamp(0, 1 << 20);
+          if (_backgroundBusyCount == 0) {
+            _backgroundBusyMessage = 'Working...';
+          }
+        });
+      }
+    }
+  }
+
   Future<void> _handleBackNavigation() async {
+    if (_isBusyOverlayVisible) {
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context)..removeCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Please wait for the operation to finish.'),
+        ),
+      );
+      return;
+    }
     if (_allItemsSelectionMode) {
       _clearAllItemsSelection();
       return;
@@ -476,187 +833,211 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final dashboardData = _dashboardData();
     final recentItems = dashboardData.recentItems;
     final dashboardTypes = dashboardData.dashboardTypes;
+    final isWide = _isWideLayout(context);
 
     return SafeArea(
+      top: !isWide,
+      bottom: !isWide,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+        padding: EdgeInsets.fromLTRB(
+          isWide ? 24 : 16,
+          isWide ? 22 : 10,
+          isWide ? 24 : 16,
+          isWide ? 22 : 8,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Nija', style: vaultPageHeadingStyle(context)),
-                      Text(
-                        _activeVaultName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
-                          fontSize: 12,
+                      if (isWide) ...[
+                        Text(
+                          'Dashboard',
+                          style: DashboardTypography.microLabel(
+                            colorScheme.onSurfaceVariant,
+                          ),
                         ),
+                        const SizedBox(height: 5),
+                      ],
+                      Text(
+                        isWide ? _dashboardGreeting() : 'Nija',
+                        style: isWide
+                            ? DashboardTypography.greetingTitle(
+                                colorScheme.onSurface,
+                              )
+                            : vaultPageHeadingStyle(context),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        isWide
+                            ? "Here's what's happening with your vault."
+                            : _activeVaultName,
+                        maxLines: isWide ? 2 : 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: isWide
+                            ? DashboardTypography.greetingSubtitle(
+                                colorScheme.onSurfaceVariant,
+                              )
+                            : TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 12,
+                              ),
                       ),
                     ],
                   ),
                 ),
-                IconButton(
-                  onPressed: () => _openAddItemScreen(context),
-                  icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
-                  tooltip: 'Create',
-                ),
-                IconButton(
-                  onPressed: widget.onLockNow,
-                  icon: Icon(
-                    Icons.lock_outline,
-                    color: colorScheme.onSurfaceVariant,
+                if (isWide)
+                  FilledButton.icon(
+                    key: const ValueKey('dashboard-add-item'),
+                    onPressed: () => _openAddItemScreen(context),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add Item'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 42),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  )
+                else ...[
+                  IconButton(
+                    key: const ValueKey('dashboard-add-item'),
+                    onPressed: () => _openAddItemScreen(context),
+                    icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
+                    tooltip: 'Create',
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  IconButton.outlined(
+                    onPressed: widget.onLockNow,
+                    icon: Icon(
+                      Icons.lock_outline,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    tooltip: 'Lock vault',
+                  ),
+                ],
               ],
             ),
-            Text(
-              'All your important information,\nin one secure place.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+            if (!isWide)
+              Text(
+                'All your important information,\nin one secure place.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: isWide ? 720 : double.infinity,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        style: TextStyle(color: colorScheme.onSurface),
+                        decoration: InputDecoration(
+                          hintText: 'Search your data...',
+                          hintStyle: TextStyle(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          filled: true,
+                          fillColor: colorScheme.surfaceContainerHighest,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 0,
+                          ),
+                        ),
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: _applyDashboardSearchToAllItems,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: IconButton(
+                        key: const ValueKey('dashboard-filter-selector'),
+                        onPressed: () => _openAllItemsFiltersOverlay(
+                          _allTypeFilterOptions(),
+                          showAllItemsOnApply: true,
+                        ),
+                        icon: Icon(
+                          Icons.tune,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    style: TextStyle(color: colorScheme.onSurface),
-                    decoration: InputDecoration(
-                      hintText: 'Search your data...',
-                      hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
-                      prefixIcon: Icon(
-                        Icons.search,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                      filled: true,
-                      fillColor: colorScheme.surfaceContainerHighest,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                    ),
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: _applyDashboardSearchToAllItems,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: IconButton(
-                    key: const ValueKey('dashboard-filter-selector'),
-                    onPressed: () => _openAllItemsFiltersOverlay(
-                      _allTypeFilterOptions(),
-                      showAllItemsOnApply: true,
-                    ),
-                    icon: Icon(Icons.tune, color: colorScheme.onSurfaceVariant),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
+            SizedBox(height: isWide ? 18 : 12),
             Expanded(
-              child: ListView(
-                children: [
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                          childAspectRatio: 1.45,
-                        ),
-                    itemCount: dashboardTypes.take(6).length,
-                    itemBuilder: (context, index) {
-                      final entry = dashboardTypes[index];
-                      return _HomeTypeCard(
-                        label: entry.key,
-                        count: entry.value,
-                        icon: _iconForDashboardType(entry.key),
-                        accent: _colorForDashboardType(entry.key),
-                        onTap: () {
-                          setState(() {
-                            _allItemsTypeFilter = entry.key;
-                            _tabIndex = 1;
-                          });
-                        },
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Text(
-                        'Recent',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const Spacer(),
-                      InkWell(
-                        borderRadius: BorderRadius.circular(8),
-                        onTap: () => setState(() => _tabIndex = 1),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 6,
-                          ),
-                          child: Text(
-                            'View all',
-                            style: TextStyle(color: Color(0xFF4F46E5)),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  if (recentItems.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.outlineVariant,
-                        ),
-                      ),
-                      child: Text(
-                        'No recent items yet.',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    )
-                  else
-                    VaultEntryList(
-                      rows: recentItems,
+              child: isWide
+                  ? _WideDashboardLayout(
+                      data: dashboardData,
+                      dashboardTypes: dashboardTypes,
+                      recentItems: recentItems,
                       adapters: _vaultListEntryAdapters,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 8),
-                      iconAlpha: 0.2,
-                      rowPadding: const EdgeInsets.all(12),
-                      trailingMode: VaultEntryTrailingMode.chevron,
                       keyForRow: _vaultListKeyForRow,
-                      onTap: (row) => _openVaultListRow(context, row),
-                      onLongPress: (row) =>
+                      iconForType: _iconForDashboardType,
+                      colorForType: _colorForDashboardType,
+                      onTypeTap: (type) => _selectDashboardType(type),
+                      onViewAll: () => setState(() {
+                        _allItemsTypeFilter = 'all';
+                        _tabIndex = 1;
+                      }),
+                      onAddItem: () => _openAddItemScreen(context),
+                      onImportData: () {
+                        if (_blockExploreDemoWrite(
+                          'Create or unlock a vault to import data.',
+                        )) {
+                          return;
+                        }
+                        widget.onImportVault();
+                      },
+                      onSwitchVault: widget.onSwitchVault ?? widget.onLockNow,
+                      onShowDemoPreview: _showHomeDemoPreviewOption,
+                      onHideDemoPreview: _hideHomeDemoPreview,
+                      onOpenRow: (row) => _openDashboardRow(context, row),
+                      onRowActions: (row) =>
+                          _showVaultListRowQuickActions(context, row),
+                    )
+                  : _MobileDashboardList(
+                      data: dashboardData,
+                      recentItems: recentItems,
+                      adapters: _vaultListEntryAdapters,
+                      keyForRow: _vaultListKeyForRow,
+                      iconForType: _iconForDashboardType,
+                      colorForType: _colorForDashboardType,
+                      onTypeTap: (type) => _selectDashboardType(type),
+                      onViewAll: () => setState(() {
+                        _allItemsTypeFilter = 'all';
+                        _tabIndex = 1;
+                      }),
+                      onShowDemoPreview: _showHomeDemoPreviewOption,
+                      onHideDemoPreview: _hideHomeDemoPreview,
+                      onOpenRow: (row) => _openDashboardRow(context, row),
+                      onRowActions: (row) =>
                           _showVaultListRowQuickActions(context, row),
                     ),
-                ],
-              ),
             ),
           ],
         ),
@@ -666,6 +1047,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Widget _buildTypesTab(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isWide = _isWideLayout(context);
     final all = <Map<String, dynamic>>[
       ..._items.map((item) => <String, dynamic>{'kind': 'item', 'entry': item}),
       ..._notes.map((note) => <String, dynamic>{'kind': 'note', 'entry': note}),
@@ -695,21 +1077,24 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   : entry['subtitle']?.toString())
               ?.toLowerCase() ??
           '';
+      final searchableText = _entrySearchText(kind, entry);
       final matchesQuery =
-          query.isEmpty || title.contains(query) || subtitle.contains(query);
+          query.isEmpty ||
+          title.contains(query) ||
+          subtitle.contains(query) ||
+          searchableText.contains(query);
       final matchesOverlaySearch =
           filterSearch.isEmpty ||
           title.contains(filterSearch) ||
-          subtitle.contains(filterSearch);
+          subtitle.contains(filterSearch) ||
+          searchableText.contains(filterSearch);
       final matchesType =
           _allItemsTypeFilter == 'all' || _allItemsTypeFilter == type;
       final matchesOverlayType =
           _allItemsFilterTypes.isEmpty || _allItemsFilterTypes.contains(type);
       final matchesFavorite =
           !_allItemsFilterFavoritesOnly || entry['pinned'] == true;
-      final matchesDate = _matchesAllItemsDateFilter(
-        entry['updated']?.toString() ?? '',
-      );
+      final matchesDate = _matchesAllItemsDateFilter(entry);
       return matchesQuery &&
           matchesOverlaySearch &&
           matchesType &&
@@ -718,8 +1103,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
           matchesDate;
     }).toList();
     return SafeArea(
+      top: !isWide,
+      bottom: !isWide,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        padding: EdgeInsets.fromLTRB(
+          isWide ? 24 : 16,
+          16,
+          isWide ? 24 : 16,
+          16,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -740,7 +1132,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       ),
                     ),
                   )
-                else
+                else if (!isWide)
                   Text('All Items', style: vaultPageHeadingStyle(context)),
                 const Spacer(),
                 if (_allItemsSelectionMode)
@@ -754,6 +1146,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 const Spacer(),
                 if (_allItemsSelectionMode)
                   const SizedBox.shrink()
+                else if (isWide)
+                  FilledButton.icon(
+                    onPressed: () => _openAddItemScreen(context),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add item'),
+                  )
                 else
                   IconButton(
                     onPressed: () => _openAddItemScreen(context),
@@ -819,19 +1217,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   final selected = _allItemsTypeFilter == type;
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Text(type == 'all' ? 'All' : type),
+                    child: _AllItemsTypeChip(
+                      label: type == 'all' ? 'All' : type,
                       selected: selected,
-                      onSelected: (_) =>
-                          setState(() => _allItemsTypeFilter = type),
-                      backgroundColor: colorScheme.surfaceContainerHighest,
-                      selectedColor: colorScheme.primaryContainer,
-                      labelStyle: TextStyle(
-                        color: selected
-                            ? colorScheme.onPrimaryContainer
-                            : colorScheme.onSurfaceVariant,
-                      ),
-                      side: BorderSide.none,
+                      onTap: () => setState(() => _allItemsTypeFilter = type),
                     ),
                   );
                 }).toList(),
@@ -881,6 +1270,32 @@ class _VaultAppShellState extends State<VaultAppShell> {
                         style: TextStyle(color: colorScheme.onSurfaceVariant),
                       ),
                     )
+                  : isWide
+                  ? _WideAllItemsIndex(
+                      rows: filtered,
+                      adapters: _vaultListEntryAdapters,
+                      selectionMode: _allItemsSelectionMode,
+                      selectedKeys: _selectedAllItemsKeys,
+                      keyForRow: _allItemsSelectionKey,
+                      onTap: (row) {
+                        if (_allItemsSelectionMode) {
+                          _toggleAllItemsSelection(row);
+                          return;
+                        }
+                        _openVaultListRow(context, row);
+                      },
+                      onLongPress: kIsWeb
+                          ? null
+                          : (row) {
+                              if (_allItemsSelectionMode) {
+                                _toggleAllItemsSelection(row);
+                                return;
+                              }
+                              _enterAllItemsSelectionMode(row);
+                            },
+                      onMoreTap: (row) =>
+                          _showVaultListRowQuickActions(context, row),
+                    )
                   : VaultEntryList(
                       rows: filtered,
                       adapters: _vaultListEntryAdapters,
@@ -897,13 +1312,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
                         }
                         _openVaultListRow(context, row);
                       },
-                      onLongPress: (row) {
-                        if (_allItemsSelectionMode) {
-                          _toggleAllItemsSelection(row);
-                          return;
-                        }
-                        _enterAllItemsSelectionMode(row);
-                      },
+                      onLongPress: kIsWeb
+                          ? null
+                          : (row) {
+                              if (_allItemsSelectionMode) {
+                                _toggleAllItemsSelection(row);
+                                return;
+                              }
+                              _enterAllItemsSelectionMode(row);
+                            },
                       onMoreTap: (row) =>
                           _showVaultListRowQuickActions(context, row),
                     ),
@@ -921,6 +1338,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Widget _buildFavoritesTab(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isWide = _isWideLayout(context);
     final favoriteItems = _items
         .where((item) => item['pinned'] == true)
         .map((item) => <String, dynamic>{'kind': 'item', 'entry': item})
@@ -940,20 +1359,84 @@ class _VaultAppShellState extends State<VaultAppShell> {
           });
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: EdgeInsets.fromLTRB(
+        isWide ? 24 : 16,
+        isWide ? 8 : 12,
+        isWide ? 24 : 16,
+        isWide ? 24 : 12,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionHeader(
-            title: AppStrings.tabNotes,
-            subtitle: 'Starred secrets',
-          ),
-          const SizedBox(height: 10),
+          if (!isWide)
+            _SectionHeader(
+              title: AppStrings.tabNotes,
+              subtitle: 'Starred secrets',
+            ),
+          if (!isWide) const SizedBox(height: 10),
+          if (isWide) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: TextField(
+                  style: TextStyle(color: colorScheme.onSurface),
+                  decoration: InputDecoration(
+                    hintText: 'Search favorites...',
+                    hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    filled: true,
+                    fillColor: colorScheme.surfaceContainerHighest,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Text(
+                  'Sort by: Modified (newest)',
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${allFavorites.length} items',
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
           Expanded(
             child: allFavorites.isEmpty
                 ? const _EmptyState(
                     title: 'No favorites yet',
                     subtitle: 'Star items from quick actions to see them here.',
+                  )
+                : isWide
+                ? _WideAllItemsIndex(
+                    rows: allFavorites,
+                    adapters: _vaultListEntryAdapters,
+                    selectionMode: false,
+                    selectedKeys: const {},
+                    keyForRow: _vaultListKeyForRow,
+                    onTap: (row) => _openVaultListRow(context, row),
+                    onMoreTap: (row) =>
+                        _showVaultListRowQuickActions(context, row),
                   )
                 : VaultEntryList(
                     rows: allFavorites,
@@ -962,8 +1445,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
                     trailingMode: VaultEntryTrailingMode.more,
                     forceFavoriteIndicator: true,
                     onTap: (row) => _openVaultListRow(context, row),
-                    onLongPress: (row) =>
-                        _showVaultListRowQuickActions(context, row),
                     onMoreTap: (row) =>
                         _showVaultListRowQuickActions(context, row),
                   ),
@@ -990,6 +1471,53 @@ class _VaultAppShellState extends State<VaultAppShell> {
     } else {
       _openItemDetail(context, entry);
     }
+  }
+
+  void _openDashboardRow(BuildContext context, Map<String, dynamic> row) {
+    if (row['demo'] == true && !widget.isExploreDemoSession) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This is a demo preview. Add an item to start.'),
+        ),
+      );
+      return;
+    }
+    _openVaultListRow(context, row);
+  }
+
+  void _selectDashboardType(String type) {
+    if (_shouldShowHomeDemoData && !widget.isExploreDemoSession) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This is a demo preview. Add an item to start.'),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _allItemsTypeFilter = type;
+      _tabIndex = 1;
+    });
+  }
+
+  void _showHomeDemoPreviewOption() {
+    setState(() {
+      _showHomeDemoPreview = true;
+      _dashboardDataCache = null;
+      _dashboardDataSignature = null;
+    });
+  }
+
+  void _hideHomeDemoPreview() {
+    if (widget.isExploreDemoSession) {
+      widget.onExitExploreDemo?.call();
+      return;
+    }
+    setState(() {
+      _showHomeDemoPreview = false;
+      _dashboardDataCache = null;
+      _dashboardDataSignature = null;
+    });
   }
 
   void _showVaultListRowQuickActions(
@@ -1022,11 +1550,33 @@ class _VaultAppShellState extends State<VaultAppShell> {
       MaterialPageRoute(
         builder: (_) => _DocumentDetailScreen(
           item: accessedItem,
-          onReadDocument: widget.onReadVaultDocument,
+          onReadDocument: _isExploreDemoReadOnly
+              ? null
+              : widget.onReadVaultDocument,
+          readOnly: _isExploreDemoReadOnly,
           onShareEncryptedDocument: _shareEncryptedDocument,
           onExportEncryptedDocument: _exportEncryptedDocument,
           onSaveDocumentCopy: _saveDocumentCopy,
-          showDeleteAction: true,
+          customTypeDefinitions: _customTypeDefinitions,
+          currentVaultSizeBytes: _effectiveVaultSizeBytes,
+          maxVaultBytes: VaultLimits.maxVaultBytes,
+          maxDocumentBytes: VaultLimits.maxDocumentBytes,
+          onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+          onAddAttachment: (detailContext, detailItem) =>
+              _addAttachmentToItem(detailContext, detailItem),
+          onOpenAttachment: (attachment) => _openAttachment(attachment),
+          onShareAttachment: (attachment) => _shareAttachment(attachment),
+          onShareEncryptedAttachment: (attachment) =>
+              _shareEncryptedAttachment(attachment),
+          onExportEncryptedAttachment: (attachment) =>
+              _exportEncryptedAttachment(attachment),
+          onSaveAttachmentCopy: (attachment) => _saveAttachmentCopy(attachment),
+          onDeleteAttachment: (detailItem, attachment) =>
+              _deleteAttachmentFromItem(detailItem, attachment),
+          showDeleteAction: !_isExploreDemoReadOnly,
+          onShareMenu: _isExploreDemoReadOnly
+              ? null
+              : () => _showDocumentQuickActions(context, accessedItem),
         ),
       ),
     );
@@ -1045,6 +1595,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(AppStrings.itemDeleted)));
+      return;
+    }
+    try {
+      if (!await _arePendingAttachmentsStored(result)) return;
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to store attachment. Please retry.'),
+        ),
+      );
       return;
     }
     setState(() => _items[idx] = _preserveLastAccessedAt(result, _items[idx]));
@@ -1071,10 +1632,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   DateTime? _activityAt(Map<String, dynamic> entry) {
-    return _lastAccessedAt(entry) ??
-        _parseEntryTimestamp(entry['updatedAt']) ??
-        _parseEntryTimestamp(entry['documentUploadedAt']) ??
-        _parseEntryTimestamp(entry['createdAt']);
+    return vaultEntryActivityAt(entry);
   }
 
   _DashboardData _dashboardData() {
@@ -1084,6 +1642,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return cached;
     }
 
+    final demoMode = _shouldShowHomeDemoData;
+    final dashboardItems = demoMode ? VaultHomeDemoData.items : _items;
+    final dashboardNotes = demoMode ? VaultHomeDemoData.notes : _notes;
     final recent = <_DashboardRecentCandidate>[];
     void addRecentCandidate(String kind, Map<String, dynamic> entry) {
       final activityAt = _activityAt(entry);
@@ -1104,19 +1665,29 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }
 
     final typeCounts = <String, int>{};
-    for (final item in _items) {
+    final folderNames = <String>{};
+    for (final item in dashboardItems) {
       addRecentCandidate('item', item);
       final type = item['type']?.toString().trim();
       if (type == null || type.isEmpty) continue;
       typeCounts[type] = (typeCounts[type] ?? 0) + 1;
+      final folder = item['folder']?.toString().trim();
+      if (folder != null && folder.isNotEmpty) {
+        folderNames.add(folder);
+      }
     }
-    for (final note in _notes) {
+    for (final note in dashboardNotes) {
       addRecentCandidate('note', note);
+      final folder = note['folder']?.toString().trim();
+      if (folder != null && folder.isNotEmpty) {
+        folderNames.add(folder);
+      }
     }
 
     final dashboardTypes =
         <MapEntry<String, int>>[
-          if (_notes.isNotEmpty) MapEntry<String, int>('Notes', _notes.length),
+          if (dashboardNotes.isNotEmpty)
+            MapEntry<String, int>('Notes', dashboardNotes.length),
           ...typeCounts.entries,
         ]..sort((a, b) {
           final countCompare = b.value.compareTo(a.value);
@@ -1131,19 +1702,46 @@ class _VaultAppShellState extends State<VaultAppShell> {
               'kind': candidate.kind,
               'entry': candidate.entry,
               'updatedLabel': _relativeTimeLabel(candidate.activityAt),
+              if (demoMode) 'demo': true,
             },
           )
           .toList(growable: false),
       dashboardTypes: dashboardTypes,
+      typeCounts: Map<String, int>.unmodifiable(typeCounts),
+      totalCount: dashboardItems.length + dashboardNotes.length,
+      folderCount: demoMode
+          ? VaultHomeDemoData.folders.length
+          : folderNames.length,
+      isDemo: demoMode,
+      canShowDemoPreview: _canOfferHomeDemoPreview && !demoMode,
+      isExploreSession: widget.isExploreDemoSession,
     );
     _dashboardDataSignature = signature;
     _dashboardDataCache = data;
     return data;
   }
 
+  bool get _shouldShowHomeDemoData {
+    if (widget.isExploreDemoSession) return false;
+    if (!_showHomeDemoPreview) return false;
+    if (!_canOfferHomeDemoPreview) return false;
+    return true;
+  }
+
+  bool get _canOfferHomeDemoPreview {
+    if (widget.isExploreDemoSession) return false;
+    if (!_allowHomeDemoData) return false;
+    if (_items.isNotEmpty) return false;
+    if (_notes.isEmpty) return true;
+    if (_notes.length != 1) return false;
+    return _notes.single['id']?.toString() == 'note-recovery-phrase';
+  }
+
   int _dashboardInputSignature() {
     final values = <Object?>[
       DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerMinute,
+      widget.isExploreDemoSession,
+      _showHomeDemoPreview,
       _items.length,
       _notes.length,
     ];
@@ -1182,14 +1780,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return DateTime.tryParse(value);
   }
 
-  String _relativeTimeLabel(DateTime timestamp) {
-    final elapsed = DateTime.now().toUtc().difference(timestamp.toUtc());
-    if (elapsed.inMinutes < 1) return 'Just now';
-    if (elapsed.inHours < 1) return '${elapsed.inMinutes}m ago';
-    if (elapsed.inDays < 1) return '${elapsed.inHours}h ago';
-    if (elapsed.inDays == 1) return '1d ago';
-    return '${elapsed.inDays}d ago';
-  }
+  String _relativeTimeLabel(DateTime timestamp) =>
+      formatRelativeTimeSince(timestamp);
 
   int? _updatedAgeDays(String text) {
     final normalized = text.toLowerCase().trim();
@@ -1203,9 +1795,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return 9999;
   }
 
-  bool _matchesAllItemsDateFilter(String updatedText) {
+  bool _matchesAllItemsDateFilter(Map<String, dynamic> entry) {
     if (_allItemsFilterDateRange == 'any') return true;
-    final ageDays = _updatedAgeDays(updatedText);
+    final ageDays = vaultEntryAgeDays(entry);
     if (ageDays == null) return false;
     switch (_allItemsFilterDateRange) {
       case 'today':
@@ -1246,12 +1838,50 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (query.isEmpty) return;
     setState(() {
       _allItemsQuery = query;
+      _allItemsTypeFilter = 'all';
+      _allItemsFilterSearch = '';
+      _allItemsFilterTypes = <String>{};
+      _allItemsFilterFavoritesOnly = false;
+      _allItemsFilterDateRange = 'any';
       _allItemsSearchController.text = query;
       _allItemsSearchController.selection = TextSelection.collapsed(
         offset: query.length,
       );
       _tabIndex = 1;
     });
+  }
+
+  String _entrySearchText(String kind, Map<String, dynamic> entry) {
+    final values = <String>[
+      entry['title']?.toString() ?? '',
+      entry['subtitle']?.toString() ?? '',
+      entry['preview']?.toString() ?? '',
+      entry['type']?.toString() ?? '',
+      entry['folder']?.toString() ?? '',
+      entry['updated']?.toString() ?? '',
+    ];
+    final tags = entry['tags'];
+    if (tags is List) {
+      values.addAll(tags.map((tag) => tag.toString()));
+    }
+    final fields = entry['fields'];
+    if (fields is List) {
+      for (final rawField in fields) {
+        if (rawField is! Map) continue;
+        values.add(rawField['label']?.toString() ?? '');
+        values.add(rawField['value']?.toString() ?? '');
+      }
+    }
+    if (kind == 'note') {
+      final delta = entry['delta'];
+      if (delta is List) {
+        for (final rawOp in delta) {
+          if (rawOp is! Map) continue;
+          values.add(rawOp['insert']?.toString() ?? '');
+        }
+      }
+    }
+    return values.join(' ').toLowerCase();
   }
 
   Map<String, dynamic>? _customTypeDefinitionForType(String type) {
@@ -1282,21 +1912,38 @@ class _VaultAppShellState extends State<VaultAppShell> {
     List<String> typeOptions, {
     bool showAllItemsOnApply = false,
   }) async {
-    final applied = await Navigator.of(context).push<_AllItemsFilterState>(
-      PageRouteBuilder(
-        opaque: false,
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            _AllItemsFiltersOverlay(
-              initialState: _AllItemsFilterState(
-                search: _allItemsFilterSearch,
-                selectedTypes: _allItemsFilterTypes,
-                favoritesOnly: _allItemsFilterFavoritesOnly,
-                dateRange: _allItemsFilterDateRange,
-              ),
-              typeOptions: typeOptions,
-            ),
-      ),
+    final initialState = _AllItemsFilterState(
+      search: _allItemsFilterSearch,
+      selectedTypes: _allItemsFilterTypes,
+      favoritesOnly: _allItemsFilterFavoritesOnly,
+      dateRange: _allItemsFilterDateRange,
     );
+    final isWide = _isWideLayout(context);
+    final applied = isWide
+        ? await showDialog<_AllItemsFilterState>(
+            context: context,
+            builder: (context) => Dialog(
+              insetPadding: const EdgeInsets.all(28),
+              child: SizedBox(
+                width: 580,
+                height: 680,
+                child: _AllItemsFiltersOverlay(
+                  initialState: initialState,
+                  typeOptions: typeOptions,
+                ),
+              ),
+            ),
+          )
+        : await Navigator.of(context).push<_AllItemsFilterState>(
+            PageRouteBuilder(
+              opaque: false,
+              pageBuilder: (context, animation, secondaryAnimation) =>
+                  _AllItemsFiltersOverlay(
+                    initialState: initialState,
+                    typeOptions: typeOptions,
+                  ),
+            ),
+          );
     if (applied == null) return;
     setState(() {
       _allItemsFilterSearch = applied.search;
@@ -1329,6 +1976,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Widget _buildSettingsTab(BuildContext context) {
+    if (kIsWeb && !widget.isExploreDemoSession) {
+      unawaited(_refreshPwaInstallStatus());
+    }
+    final pwaInstallStatus = _pwaInstallStatus;
     final languageLabel = switch (widget.languageMode) {
       'en' => 'English',
       'es' => 'Español',
@@ -1345,223 +1996,330 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final vaultLimitBytes = VaultLimits.maxVaultBytes;
     final vaultUsageLabel =
         '${VaultLimits.formatBytes(effectiveVaultSizeBytes)} of ${VaultLimits.formatBytes(vaultLimitBytes)}';
-    final backupSubtitle = AppFeatures.isPaidBuild
+    final backupSubtitle = _cloudBackupFeatureAvailable
         ? (_cloudBackupEnabled
-              ? _cloudBackupLastAtEpochMs <= 0
-                    ? 'Last backup: Never'
-                    : 'Last backup: ${DateTime.fromMillisecondsSinceEpoch(_cloudBackupLastAtEpochMs)}'
+              ? 'Automatic cloud backup is enabled'
               : 'Backup your data locally')
-        : 'Available in paid version';
+        : AppFeatures.paidUnavailableLabel;
+    final currentVaultVersionLabel = _vaultVersionSummary(
+      revision: widget.activeVaultRevision,
+      versionId: widget.activeVaultVersionId,
+    );
+    final currentVaultUpdatedLabel = _formatVaultIsoTimestamp(
+      widget.activeVaultUpdatedAt,
+    );
+    final backedUpVaultVersionLabel = _vaultVersionSummary(
+      revision: _cloudBackupRevision,
+      versionId: _cloudBackupVersionId,
+    );
 
     final theme = Theme.of(context);
 
-    return DecoratedBox(
-      decoration: BoxDecoration(color: theme.scaffoldBackgroundColor),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-        children: [
-          Text('Settings', style: vaultPageHeadingStyle(context)),
-          const SizedBox(height: 18),
-          _SettingsSection(
-            title: 'Account',
-            children: [
-              _SettingsRow(
-                icon: Icons.dashboard_customize_outlined,
-                title: 'Nija User',
-                subtitle: _activeVaultName,
-                onTap: () => _showRenameVaultDialog(context),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = _isWideLayout(context);
+        return DecoratedBox(
+          decoration: BoxDecoration(color: theme.scaffoldBackgroundColor),
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isWide ? 900 : double.infinity,
               ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Security',
-            children: [
-              _SettingsRow(
-                icon: Icons.lock_outline,
-                title: 'Master Password',
-                subtitle: 'Change your master password',
-                onTap: () => _showRotateMasterPasswordDialog(context),
-              ),
-              _SettingsRow(
-                key: const ValueKey('settings-auto-lock-row'),
-                icon: Icons.key_outlined,
-                title: AppStrings.settingsAutoLock,
-                subtitle: 'Lock Nija automatically',
-                value: autoLockLabel,
-                onTap: () => _showAutoLockPicker(context),
-              ),
-              _SettingsRow(
-                key: const ValueKey('settings-biometrics-switch'),
-                icon: _iconForSetting(AppStrings.settingsBiometricUnlock),
-                title: AppStrings.settingsBiometricUnlock,
-                subtitle: 'Unlock using fingerprint or face',
-                trailing: Switch(
-                  value: widget.biometricEnabled,
-                  onChanged: widget.onBiometricChanged,
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(
+                  isWide ? 24 : 16,
+                  18,
+                  isWide ? 24 : 16,
+                  28,
                 ),
+                children: [
+                  if (!isWide)
+                    Text('Settings', style: vaultPageHeadingStyle(context)),
+                  if (!isWide) const SizedBox(height: 18),
+                  _SettingsSection(
+                    title: 'Account',
+                    children: [
+                      _SettingsRow(
+                        icon: Icons.dashboard_customize_outlined,
+                        title: 'Nija User',
+                        subtitle: _activeVaultName,
+                        onTap: () => _showRenameVaultDialog(context),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-current-vault-version'),
+                        icon: Icons.commit_outlined,
+                        title: 'Current version',
+                        subtitle: currentVaultUpdatedLabel == 'Unknown'
+                            ? 'Saved vault metadata'
+                            : 'Updated $currentVaultUpdatedLabel',
+                        detail: currentVaultVersionLabel,
+                      ),
+                    ],
+                  ),
+                  _SettingsSection(
+                    title: 'Security',
+                    children: [
+                      _SettingsRow(
+                        icon: Icons.lock_outline,
+                        title: 'Master Password',
+                        subtitle: 'Change your master password',
+                        onTap: () => _showRotateMasterPasswordDialog(context),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-auto-lock-row'),
+                        icon: Icons.key_outlined,
+                        title: AppStrings.settingsAutoLock,
+                        subtitle: 'Lock Nija automatically',
+                        value: autoLockLabel,
+                        onTap: () => _showAutoLockPicker(context),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-biometrics-switch'),
+                        icon: _iconForSetting(
+                          AppStrings.settingsBiometricUnlock,
+                        ),
+                        title: AppStrings.settingsBiometricUnlock,
+                        subtitle: widget.biometricAvailable
+                            ? AppStrings.settingsBiometricAvailableSubtitle
+                            : AppStrings.settingsBiometricUnavailableSubtitle,
+                        onTap: widget.biometricAvailable
+                            ? null
+                            : () => widget.onBiometricChanged(true),
+                        trailing: Switch(
+                          value: widget.biometricEnabled,
+                          onChanged: widget.biometricAvailable
+                              ? widget.onBiometricChanged
+                              : null,
+                        ),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-app-pin-row'),
+                        icon: Icons.pin_outlined,
+                        title: AppStrings.settingsAppPin,
+                        subtitle: widget.pinEnabled
+                            ? AppStrings.settingsAppPinEnabledSubtitle
+                            : AppStrings.settingsAppPinDisabledSubtitle,
+                        value: widget.pinEnabled
+                            ? AppStrings.changePin
+                            : AppStrings.setUpPin,
+                        onTap: widget.onPinChanged == null
+                            ? null
+                            : () => widget.onPinChanged!(!widget.pinEnabled),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-security-encryption-row'),
+                        icon: Icons.shield_outlined,
+                        title: 'Security & Encryption',
+                        subtitle: 'View encryption details and key info',
+                        onTap: () => _showSecurityEncryptionSheet(context),
+                      ),
+                    ],
+                  ),
+                  _SettingsSection(
+                    title: 'Cloud Backup',
+                    children: [
+                      _SettingsRow(
+                        key: const ValueKey('settings-cloud-backup-switch'),
+                        icon: _cloudBackupIcon(),
+                        title: _cloudBackupTitle(),
+                        subtitle: backupSubtitle,
+                        onTap: _cloudBackupFeatureAvailable
+                            ? () => _setCloudBackupEnabled(!_cloudBackupEnabled)
+                            : null,
+                      ),
+                      if (_cloudBackupFeatureAvailable &&
+                          _cloudBackupEnabled) ...[
+                        _SettingsRow(
+                          icon: Icons.account_circle_outlined,
+                          title: 'Backup account',
+                          subtitle: _cloudBackupAccountLabel,
+                          onTap: _handleChangeCloudBackupAccount,
+                        ),
+                        _SettingsRow(
+                          key: const ValueKey('settings-cloud-backup-last-at'),
+                          icon: Icons.schedule_outlined,
+                          title: 'Last backup',
+                          subtitle: _formatCloudBackupLastAt(),
+                        ),
+                        _SettingsRow(
+                          key: const ValueKey('settings-cloud-backup-version'),
+                          icon: Icons.cloud_done_outlined,
+                          title: 'Backed up version',
+                          subtitle: _cloudBackupUpdatedAt.trim().isEmpty
+                              ? 'Vault updated: Unknown'
+                              : 'Vault updated: ${_formatVaultIsoTimestamp(_cloudBackupUpdatedAt)}',
+                          detail: backedUpVaultVersionLabel,
+                        ),
+                        _SettingsActionRow(
+                          children: [
+                            OutlinedButton.icon(
+                              key: const ValueKey('settings-cloud-backup-now'),
+                              onPressed: _handleCloudBackupNow,
+                              icon: Icon(_cloudBackupIcon()),
+                              label: const Text('Backup now'),
+                            ),
+                            OutlinedButton.icon(
+                              key: const ValueKey('settings-cloud-restore-now'),
+                              onPressed: widget.onRestoreFromCloud,
+                              icon: const Icon(Icons.restore_outlined),
+                              label: const Text('Restore'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                  _SettingsSection(
+                    title: 'Data',
+                    children: [
+                      _SettingsRow(
+                        key: const ValueKey('settings-import-encrypted-secret'),
+                        icon: Icons.file_download_outlined,
+                        title: 'Import',
+                        subtitle: _importingEncryptedSecret
+                            ? 'Importing data...'
+                            : 'Import data from a file',
+                        trailing: _importingEncryptedSecret
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : null,
+                        onTap: _importingEncryptedSecret
+                            ? null
+                            : _importEncryptedSecret,
+                      ),
+                      _SettingsRow(
+                        icon: Icons.file_upload_outlined,
+                        title: 'Export',
+                        subtitle: 'Export data to a file',
+                        onTap: widget.onExportVault,
+                      ),
+                      _SettingsRow(
+                        icon: Icons.sd_storage_outlined,
+                        title: 'Encrypted export size',
+                        subtitle: vaultUsageLabel,
+                      ),
+                      _SettingsRow(
+                        icon: Icons.delete_outline,
+                        iconColor: const Color(0xFFFF5D5D),
+                        title: 'Clear Data',
+                        subtitle: 'Permanently delete all your data',
+                        danger: true,
+                        onTap: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(AppStrings.settingComingSoon),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                  _SettingsSection(
+                    title: 'Preferences',
+                    children: [
+                      if (kIsWeb &&
+                          !widget.isExploreDemoSession &&
+                          pwaInstallStatus != null &&
+                          pwaInstallStatus.showInstallOffer)
+                        _SettingsRow(
+                          key: const ValueKey('settings-install-app-row'),
+                          icon: _pwaInstallSettingsIcon(pwaInstallStatus),
+                          title: _pwaInstallSettingsTitle(pwaInstallStatus),
+                          subtitle: _pwaInstallSettingsSubtitle(
+                            pwaInstallStatus,
+                          ),
+                          onTap: () => _handlePwaInstallTap(context),
+                        ),
+                      _SettingsRow(
+                        icon: Icons.palette_outlined,
+                        title: 'Theme',
+                        subtitle: 'Choose app appearance',
+                        value: themeLabel,
+                        onTap: () => _showThemePicker(context),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-categories-row'),
+                        icon: Icons.folder_outlined,
+                        title: 'Categories',
+                        subtitle:
+                            '${_customTypeDefinitions.length} custom templates',
+                        onTap: () => _showCustomTemplateManager(context),
+                      ),
+                      _SettingsRow(
+                        icon: Icons.language_outlined,
+                        title: AppStrings.language,
+                        subtitle: languageLabel,
+                        onTap: () => _showLanguagePicker(context),
+                      ),
+                    ],
+                  ),
+                  _SettingsSection(
+                    title: 'About',
+                    children: [
+                      _SettingsRow(
+                        key: const ValueKey('settings-about-nija-row'),
+                        icon: Icons.info_outline,
+                        title: 'About Nija',
+                        subtitle: 'Version 1.0.0',
+                        onTap: () => _handleAboutNijaTap(context),
+                      ),
+                      if (_debugInternalsFeatureAvailable &&
+                          _debugInternalsUnlocked)
+                        _SettingsRow(
+                          key: const ValueKey(
+                            'settings-debug-internals-switch',
+                          ),
+                          icon: Icons.bug_report_outlined,
+                          title: 'Debug internals',
+                          subtitle: 'Show vault internals tab',
+                          trailing: Switch(
+                            value: _debugInternalsEnabled,
+                            onChanged: _setDebugInternalsEnabled,
+                          ),
+                          onTap: () => _setDebugInternalsEnabled(
+                            !_debugInternalsEnabled,
+                          ),
+                        ),
+                      _SettingsRow(
+                        icon: Icons.verified_user_outlined,
+                        title: 'Privacy Policy',
+                        subtitle: 'Read our privacy policy',
+                        onTap: () => _showInfoSheet(
+                          context,
+                          title: 'Privacy Policy',
+                          icon: Icons.verified_user_outlined,
+                          sections: _privacyPolicySections(),
+                        ),
+                      ),
+                      _SettingsRow(
+                        icon: Icons.description_outlined,
+                        title: 'Terms of Use',
+                        subtitle: 'Read our terms and conditions',
+                        onTap: () => _showInfoSheet(
+                          context,
+                          title: 'Terms of Use',
+                          icon: Icons.description_outlined,
+                          sections: _termsOfUseSections(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    onPressed: widget.onLockNow,
+                    child: Text(AppStrings.lockVaultNow),
+                  ),
+                ],
               ),
-              _SettingsRow(
-                key: const ValueKey('settings-security-encryption-row'),
-                icon: Icons.shield_outlined,
-                title: 'Security & Encryption',
-                subtitle: 'View encryption details and key info',
-                onTap: () => _showSecurityEncryptionSheet(context),
-              ),
-            ],
+            ),
           ),
-          _SettingsSection(
-            title: 'Cloud Backup',
-            children: [
-              _SettingsRow(
-                key: const ValueKey('settings-cloud-backup-switch'),
-                icon: _cloudBackupIcon(),
-                title: _cloudBackupTitle(),
-                subtitle: backupSubtitle,
-                onTap: AppFeatures.isPaidBuild
-                    ? () => _setCloudBackupEnabled(!_cloudBackupEnabled)
-                    : null,
-              ),
-              if (AppFeatures.isPaidBuild && _cloudBackupEnabled) ...[
-                _SettingsRow(
-                  icon: Icons.account_circle_outlined,
-                  title: 'Backup account',
-                  subtitle: _cloudBackupAccountLabel,
-                  onTap: _handleChangeCloudBackupAccount,
-                ),
-                _SettingsActionRow(
-                  children: [
-                    OutlinedButton.icon(
-                      key: const ValueKey('settings-cloud-backup-now'),
-                      onPressed: _handleCloudBackupNow,
-                      icon: Icon(_cloudBackupIcon()),
-                      label: const Text('Backup now'),
-                    ),
-                    OutlinedButton.icon(
-                      key: const ValueKey('settings-cloud-restore-now'),
-                      onPressed: widget.onRestoreFromCloud,
-                      icon: const Icon(Icons.restore_outlined),
-                      label: const Text('Restore'),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-          _SettingsSection(
-            title: 'Data',
-            children: [
-              _SettingsRow(
-                key: const ValueKey('settings-import-encrypted-secret'),
-                icon: Icons.file_download_outlined,
-                title: 'Import',
-                subtitle: _importingEncryptedSecret
-                    ? 'Importing data...'
-                    : 'Import data from a file',
-                trailing: _importingEncryptedSecret
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : null,
-                onTap: _importingEncryptedSecret
-                    ? null
-                    : _importEncryptedSecret,
-              ),
-              _SettingsRow(
-                icon: Icons.file_upload_outlined,
-                title: 'Export',
-                subtitle: 'Export data to a file',
-                onTap: widget.onExportVault,
-              ),
-              _SettingsRow(
-                icon: Icons.sd_storage_outlined,
-                title: 'Vault size',
-                subtitle: vaultUsageLabel,
-              ),
-              _SettingsRow(
-                icon: Icons.delete_outline,
-                iconColor: const Color(0xFFFF5D5D),
-                title: 'Clear Data',
-                subtitle: 'Permanently delete all your data',
-                danger: true,
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(AppStrings.settingComingSoon)),
-                  );
-                },
-              ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Preferences',
-            children: [
-              _SettingsRow(
-                icon: Icons.palette_outlined,
-                title: 'Theme',
-                subtitle: 'Choose app appearance',
-                value: themeLabel,
-                onTap: () => _showThemePicker(context),
-              ),
-              _SettingsRow(
-                key: const ValueKey('settings-categories-row'),
-                icon: Icons.folder_outlined,
-                title: 'Categories',
-                subtitle: '${_customTypeDefinitions.length} custom templates',
-                onTap: () => _showCustomTemplateManager(context),
-              ),
-              _SettingsRow(
-                icon: Icons.language_outlined,
-                title: AppStrings.language,
-                subtitle: languageLabel,
-                onTap: () => _showLanguagePicker(context),
-              ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'About',
-            children: [
-              _SettingsRow(
-                icon: Icons.info_outline,
-                title: 'About Nija',
-                subtitle: 'Version 1.0.0',
-                onTap: () => _showInfoSheet(
-                  context,
-                  title: 'About Nija',
-                  icon: Icons.info_outline,
-                  sections: _aboutNijaSections(),
-                ),
-              ),
-              _SettingsRow(
-                icon: Icons.verified_user_outlined,
-                title: 'Privacy Policy',
-                subtitle: 'Read our privacy policy',
-                onTap: () => _showInfoSheet(
-                  context,
-                  title: 'Privacy Policy',
-                  icon: Icons.verified_user_outlined,
-                  sections: _privacyPolicySections(),
-                ),
-              ),
-              _SettingsRow(
-                icon: Icons.description_outlined,
-                title: 'Terms of Use',
-                subtitle: 'Read our terms and conditions',
-                onTap: () => _showInfoSheet(
-                  context,
-                  title: 'Terms of Use',
-                  icon: Icons.description_outlined,
-                  sections: _termsOfUseSections(),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ElevatedButton(
-            onPressed: widget.onLockNow,
-            child: Text(AppStrings.lockVaultNow),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -1622,6 +2380,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                     'storageLayoutVersion',
                     'manifestVersion',
                     'snapshotBytes',
+                    'workingStoreBytes',
                   ]),
                 ),
                 const SizedBox(height: 10),
@@ -1644,7 +2403,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 const SizedBox(height: 10),
                 _DebugInfoCard(
                   title: 'Encrypted sections',
-                  rows: _debugMapRows(data['encryptedSections']),
+                  rows: _encryptedSectionRows(data['encryptedSections']),
+                  maxHeight: 220,
                 ),
                 const SizedBox(height: 10),
                 _DebugInfoCard(
@@ -1657,6 +2417,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 _DebugInfoCard(
                   title: 'Working files',
                   rows: _workingFileRows(data['workingStore']),
+                  maxHeight: 260,
                 ),
                 const SizedBox(height: 10),
                 _DebugInfoCard(
@@ -1667,7 +2428,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       _activeVaultName,
                     ),
                     MapEntry<String, String>(
-                      'vaultSizeBytes',
+                      'exportVaultSizeBytes',
                       widget.vaultSizeBytes.toString(),
                     ),
                     MapEntry<String, String>('items', _items.length.toString()),
@@ -1713,14 +2474,58 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   List<MapEntry<String, String>> _debugMapRows(dynamic value) {
     if (value is! Map) return const <MapEntry<String, String>>[];
-    return value.entries
-        .map(
-          (entry) => MapEntry<String, String>(
-            entry.key.toString(),
-            entry.value.toString(),
-          ),
-        )
-        .toList();
+    return _dedupeDebugRows(
+      value.entries
+          .map(
+            (entry) => MapEntry<String, String>(
+              entry.key.toString(),
+              entry.value.toString(),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  List<MapEntry<String, String>> _encryptedSectionRows(dynamic value) {
+    if (value is! Map) return const <MapEntry<String, String>>[];
+    final coreRows = <MapEntry<String, String>>[];
+    var documentManifests = 0;
+    var documentChunks = 0;
+    var documentBytes = 0;
+    final otherRows = <MapEntry<String, String>>[];
+
+    for (final entry in value.entries) {
+      final name = entry.key.toString();
+      final bytes = int.tryParse(entry.value.toString()) ?? 0;
+      if (_DebugFileTreeCard.isCoreDebugFile(name)) {
+        coreRows.add(MapEntry<String, String>(name, '$bytes bytes'));
+      } else if (_isDocumentManifestName(name)) {
+        documentManifests += 1;
+        documentBytes += bytes;
+      } else if (_isDocumentChunkName(name)) {
+        documentChunks += 1;
+        documentBytes += bytes;
+      } else {
+        otherRows.add(MapEntry<String, String>(name, '$bytes bytes'));
+      }
+    }
+
+    coreRows.sort((a, b) => a.key.compareTo(b.key));
+    otherRows.sort((a, b) => a.key.compareTo(b.key));
+    final rows = <MapEntry<String, String>>[
+      ...coreRows,
+      if (documentManifests > 0)
+        MapEntry<String, String>(
+          'document manifests',
+          '$documentManifests files',
+        ),
+      if (documentChunks > 0)
+        MapEntry<String, String>('document chunks', '$documentChunks files'),
+      if (documentBytes > 0)
+        MapEntry<String, String>('document bytes', '$documentBytes bytes'),
+      ...otherRows,
+    ];
+    return _dedupeDebugRows(rows);
   }
 
   List<MapEntry<String, String>> _workingFolderRows(dynamic value) {
@@ -1739,16 +2544,39 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (value is! Map) return const <MapEntry<String, String>>[];
     final files = value['files'];
     if (files is! Map) return const <MapEntry<String, String>>[];
-    final rows =
-        files.entries
+    final coreRows = <MapEntry<String, String>>[];
+    final documents = <String, ({int count, int bytes})>{};
+    final otherRows = <MapEntry<String, String>>[];
+    for (final entry in files.entries) {
+      final name = entry.key.toString();
+      final bytes = int.tryParse(entry.value.toString()) ?? 0;
+      final docId = _DebugFileTreeCard.documentTreeId(name);
+      if (_DebugFileTreeCard.isCoreDebugFile(name)) {
+        coreRows.add(MapEntry<String, String>(name, '$bytes bytes'));
+      } else if (docId != null) {
+        final existing = documents[docId] ?? (count: 0, bytes: 0);
+        documents[docId] = (
+          count: existing.count + 1,
+          bytes: existing.bytes + bytes,
+        );
+      } else {
+        otherRows.add(MapEntry<String, String>(name, '$bytes bytes'));
+      }
+    }
+
+    final documentRows =
+        documents.entries
             .map(
               (entry) => MapEntry<String, String>(
-                entry.key.toString(),
-                '${entry.value} bytes',
+                'document ${entry.key}',
+                '${entry.value.count} files, ${entry.value.bytes} bytes',
               ),
             )
             .toList()
           ..sort((a, b) => a.key.compareTo(b.key));
+    coreRows.sort((a, b) => a.key.compareTo(b.key));
+    otherRows.sort((a, b) => a.key.compareTo(b.key));
+    final rows = _dedupeDebugRows([...coreRows, ...documentRows, ...otherRows]);
     const maxRows = 80;
     if (rows.length <= maxRows) return rows;
     return [
@@ -1758,6 +2586,27 @@ class _VaultAppShellState extends State<VaultAppShell> {
         '${rows.length - maxRows} files hidden; use Refresh after narrowing the issue.',
       ),
     ];
+  }
+
+  List<MapEntry<String, String>> _dedupeDebugRows(
+    List<MapEntry<String, String>> rows,
+  ) {
+    final seen = <String>{};
+    final deduped = <MapEntry<String, String>>[];
+    for (final row in rows) {
+      final signature = '${row.key}\u0000${row.value}';
+      if (!seen.add(signature)) continue;
+      deduped.add(row);
+    }
+    return deduped;
+  }
+
+  bool _isDocumentManifestName(String name) {
+    return RegExp(r'^document_.+\.manifest\.enc$').hasMatch(name);
+  }
+
+  bool _isDocumentChunkName(String name) {
+    return RegExp(r'^document_.+_chunk_\d+\.enc$').hasMatch(name);
   }
 
   Future<void> _showRotateMasterPasswordDialog(BuildContext context) async {
@@ -1785,22 +2634,32 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _showLanguagePicker(BuildContext context) async {
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showVaultChoiceMenu<String>(
       context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(title: Text(AppStrings.language)),
-              _languageOptionTile(context, 'system', AppStrings.systemDefault),
-              _languageOptionTile(context, 'en', 'English'),
-              _languageOptionTile(context, 'es', 'Español'),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
+      title: AppStrings.language,
+      options: [
+        VaultMenuOption(
+          value: 'system',
+          title: AppStrings.systemDefault,
+          trailing: widget.languageMode == 'system'
+              ? const Icon(Icons.check)
+              : null,
+        ),
+        VaultMenuOption(
+          value: 'en',
+          title: 'English',
+          trailing: widget.languageMode == 'en'
+              ? const Icon(Icons.check)
+              : null,
+        ),
+        VaultMenuOption(
+          value: 'es',
+          title: 'Español',
+          trailing: widget.languageMode == 'es'
+              ? const Icon(Icons.check)
+              : null,
+        ),
+      ],
     );
     if (selected == null || selected == widget.languageMode) return;
     widget.onLanguageModeChanged(selected);
@@ -1808,15 +2667,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(AppStrings.languageUpdated)));
-  }
-
-  Widget _languageOptionTile(BuildContext context, String mode, String label) {
-    final selected = widget.languageMode == mode;
-    return ListTile(
-      title: Text(label),
-      trailing: selected ? const Icon(Icons.check) : null,
-      onTap: () => Navigator.of(context).pop(mode),
-    );
   }
 
   Future<void> _showThemePicker(BuildContext context) async {
@@ -1828,34 +2678,35 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return;
     }
 
-    final selected = await showModalBottomSheet<ThemeMode>(
+    final selected = await showVaultChoiceMenu<ThemeMode>(
       context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const ListTile(title: Text('Theme')),
-              _themeOptionTile(context, ThemeMode.system, 'System'),
-              _themeOptionTile(context, ThemeMode.light, 'Light'),
-              _themeOptionTile(context, ThemeMode.dark, 'Dark'),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
+      title: 'Theme',
+      options: [
+        VaultMenuOption(
+          value: ThemeMode.system,
+          title: 'System',
+          trailing: widget.themeMode == ThemeMode.system
+              ? const Icon(Icons.check)
+              : null,
+        ),
+        VaultMenuOption(
+          value: ThemeMode.light,
+          title: 'Light',
+          trailing: widget.themeMode == ThemeMode.light
+              ? const Icon(Icons.check)
+              : null,
+        ),
+        VaultMenuOption(
+          value: ThemeMode.dark,
+          title: 'Dark',
+          trailing: widget.themeMode == ThemeMode.dark
+              ? const Icon(Icons.check)
+              : null,
+        ),
+      ],
     );
     if (selected == null || selected == widget.themeMode) return;
     onThemeModeChanged(selected);
-  }
-
-  Widget _themeOptionTile(BuildContext context, ThemeMode mode, String label) {
-    final selected = widget.themeMode == mode;
-    return ListTile(
-      title: Text(label),
-      trailing: selected ? const Icon(Icons.check) : null,
-      onTap: () => Navigator.of(context).pop(mode),
-    );
   }
 
   Future<void> _showInfoSheet(
@@ -1863,20 +2714,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
     required String title,
     required IconData icon,
     required List<_InfoSectionData> sections,
+    Widget? brandHeader,
   }) async {
-    await showModalBottomSheet<void>(
+    await showVaultSurfaceSheet<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (context) =>
-          _InfoDetailSheet(title: title, icon: icon, sections: sections),
+      scrollControlled: true,
+      builder: (context) => _InfoDetailSheet(
+        title: title,
+        icon: icon,
+        sections: sections,
+        brandHeader: brandHeader,
+      ),
     );
   }
 
   Future<void> _showSecurityEncryptionSheet(BuildContext context) async {
     final metadataFuture = widget.onReadVaultInternals?.call();
-    await showModalBottomSheet<void>(
+    await showVaultSurfaceSheet<void>(
       context: context,
-      isScrollControlled: true,
+      scrollControlled: true,
       builder: (sheetContext) => _SecurityEncryptionSheet(
         metadataFuture: metadataFuture,
         biometricEnabled: widget.biometricEnabled,
@@ -1887,38 +2743,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
             : DateTime.fromMillisecondsSinceEpoch(
                 _cloudBackupLastAtEpochMs,
               ).toString(),
-        onChangeMasterPassword: () {
-          Navigator.of(sheetContext).pop();
-          _showRotateMasterPasswordDialog(context);
-        },
-        onRotateRecoveryPhrase: () {
-          Navigator.of(sheetContext).pop();
-          _showRotateRecoveryPhraseDialog(context);
-        },
-        onManageBiometrics: () {
-          Navigator.of(sheetContext).pop();
-          widget.onBiometricChanged(!widget.biometricEnabled);
-        },
-        onAdjustAutoLock: () {
-          Navigator.of(sheetContext).pop();
-          _showAutoLockPicker(context);
-        },
-        onExportVault: () {
-          Navigator.of(sheetContext).pop();
-          widget.onExportVault();
-        },
-        onBackupNow: AppFeatures.isPaidBuild
-            ? () {
-                Navigator.of(sheetContext).pop();
-                _handleCloudBackupNow();
-              }
-            : null,
-        onRestoreBackup: AppFeatures.isPaidBuild
-            ? () {
-                Navigator.of(sheetContext).pop();
-                widget.onRestoreFromCloud();
-              }
-            : null,
       ),
     );
   }
@@ -1926,7 +2750,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   List<_InfoSectionData> _aboutNijaSections() {
     return const <_InfoSectionData>[
       _InfoSectionData(
-        title: 'Nija',
+        title: 'Nija · निज',
         body:
             'Version 1.0.0\nNija is a private vault for passwords, notes, documents, identities, and custom secure records.',
       ),
@@ -2002,7 +2826,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return;
     }
 
-    final selected = await showModalBottomSheet<int>(
+    final selected = await showVaultSurfaceSheet<int>(
       context: context,
       builder: (context) =>
           _AutoLockSecondsSheet(initialSeconds: widget.autoLockSeconds),
@@ -2042,8 +2866,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
       MaterialPageRoute(
         builder: (_) => _ItemDetailScreen(
           item: accessedItem,
+          readOnly: _isExploreDemoReadOnly,
           customTypeDefinitions: _customTypeDefinitions,
-          showDeleteAction: true,
+          currentVaultSizeBytes: _effectiveVaultSizeBytes,
+          maxVaultBytes: VaultLimits.maxVaultBytes,
+          maxDocumentBytes: VaultLimits.maxDocumentBytes,
+          onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+          showDeleteAction: !_isExploreDemoReadOnly,
+          onAddAttachment: (detailContext, detailItem) =>
+              _addAttachmentToItem(detailContext, detailItem),
+          onReadAttachment: (attachment) => _readAttachmentBytes(attachment),
+          onOpenAttachment: (attachment) => _openAttachment(attachment),
+          onShareAttachment: (attachment) => _shareAttachment(attachment),
+          onShareEncryptedAttachment: (attachment) =>
+              _shareEncryptedAttachment(attachment),
+          onExportEncryptedAttachment: (attachment) =>
+              _exportEncryptedAttachment(attachment),
+          onSaveAttachmentCopy: (attachment) => _saveAttachmentCopy(attachment),
+          onDeleteAttachment: (detailItem, attachment) =>
+              _deleteAttachmentFromItem(detailItem, attachment),
           onCopy: (value) async {
             await _clipboard.copySensitive(value);
             if (!context.mounted) return;
@@ -2056,6 +2897,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
             suggestedBaseName: item['title']?.toString() ?? 'item',
             contentType: 'vault_item',
           ),
+          onShareMenu: _isExploreDemoReadOnly
+              ? null
+              : () => _showItemQuickActions(context, accessedItem),
         ),
       ),
     );
@@ -2084,33 +2928,307 @@ class _VaultAppShellState extends State<VaultAppShell> {
     Map<String, dynamic> item,
     List<int> bytes,
   ) async {
-    await _shareEncryptedSecret(
-      plainText: _documentEncryptedPayload(item, bytes),
-      suggestedBaseName: _documentSuggestedBaseName(item),
-      contentType: 'document',
-    );
+    await _runWithBusy('Preparing encrypted document...', () async {
+      await _shareEncryptedSecret(
+        plainText: _documentEncryptedPayload(item, bytes),
+        suggestedBaseName: _documentSuggestedBaseName(item),
+        contentType: 'document',
+      );
+    });
   }
 
   Future<void> _exportEncryptedDocument(
     Map<String, dynamic> item,
     List<int> bytes,
   ) async {
-    await _exportEncryptedSecret(
-      plainText: _documentEncryptedPayload(item, bytes),
-      suggestedBaseName: _documentSuggestedBaseName(item),
-      contentType: 'document',
-    );
+    await _runWithBusy('Exporting encrypted document...', () async {
+      await _exportEncryptedSecret(
+        plainText: _documentEncryptedPayload(item, bytes),
+        suggestedBaseName: _documentSuggestedBaseName(item),
+        contentType: 'document',
+      );
+    });
   }
 
   Future<bool> _saveDocumentCopy(
     Map<String, dynamic> item,
     List<int> bytes,
   ) async {
-    return _secretSharePortability.exportPlainFile(
-      suggestedName: _documentFileName(item),
-      bytes: Uint8List.fromList(bytes),
-      mimeType: _mimeTypeForExtension(_documentExtension(item)),
+    return _runWithBusy('Saving document copy...', () {
+      return _secretSharePortability.exportPlainFile(
+        suggestedName: _documentFileName(item),
+        bytes: Uint8List.fromList(bytes),
+        mimeType: _mimeTypeForExtension(_documentExtension(item)),
+      );
+    });
+  }
+
+  Future<Map<String, dynamic>?> _addAttachmentToItem(
+    BuildContext context,
+    Map<String, dynamic> item,
+  ) async {
+    final uploaded = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => DocumentUploadScreen(
+          currentVaultSizeBytes: _effectiveVaultSizeBytes,
+          maxVaultBytes: VaultLimits.maxVaultBytes,
+          maxDocumentBytes: VaultLimits.maxDocumentBytes,
+          onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+        ),
+      ),
     );
+    if (uploaded == null) return null;
+    return _runWithBusy('Saving attached document...', () async {
+      final attachments = _attachmentsFromUploadedDocument(uploaded);
+      if (attachments.isEmpty) return null;
+      for (final attachment in attachments) {
+        if (!await _isPendingAttachmentStored(item, attachment)) return null;
+      }
+      final updatedItem = _itemWithAttachments(item, attachments);
+      if (!await _replaceItemAndPersist(updatedItem)) return null;
+      item['attachments'] = _itemAttachments(updatedItem);
+      return attachments.first;
+    });
+  }
+
+  List<Map<String, dynamic>> _attachmentsFromUploadedDocument(
+    Map<String, dynamic> document,
+  ) {
+    return [
+      _attachmentFromUploadedDocument(document),
+      ...(document['attachments'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry)),
+    ];
+  }
+
+  Map<String, dynamic> _attachmentFromUploadedDocument(
+    Map<String, dynamic> document,
+  ) {
+    final uploadedAt =
+        document['documentUploadedAt']?.toString() ??
+        DateTime.now().toUtc().toIso8601String();
+    final id =
+        'attachment-${DateTime.now().microsecondsSinceEpoch}-${_items.length}';
+    return {
+      'id': id,
+      'title': document['title']?.toString().trim().isNotEmpty == true
+          ? document['title'].toString().trim()
+          : document['documentFileName']?.toString() ?? 'Document',
+      'subtitle': document['subtitle']?.toString() ?? '',
+      'documentFileName':
+          document['documentFileName']?.toString() ?? 'document',
+      'documentExtension': document['documentExtension']?.toString() ?? 'FILE',
+      'documentSizeBytes': document['documentSizeBytes'] ?? 0,
+      'documentUploadedAt': uploadedAt,
+      'documentStorage': 'pending',
+      if (document['tags'] is List)
+        'tags': List<String>.from(
+          (document['tags'] as List).map((entry) => entry.toString()),
+        ),
+      if (document['__documentReadStream__'] != null)
+        '__documentReadStream__': document['__documentReadStream__'],
+      if (document['__documentBytes__'] != null)
+        '__documentBytes__': document['__documentBytes__'],
+    };
+  }
+
+  Future<bool> _isPendingAttachmentStored(
+    Map<String, dynamic> item,
+    Map<String, dynamic> attachment,
+  ) async {
+    final rawStream = attachment.remove('__documentReadStream__');
+    final rawBytes = attachment.remove('__documentBytes__');
+    if (rawStream == null && rawBytes == null) return true;
+    if (widget.onPersistVaultDocument == null &&
+        widget.onPersistVaultDocumentStream == null) {
+      attachment['documentStorage'] = 'inline-unavailable';
+      return true;
+    }
+    final sizeBytes = _documentMetadataSizeBytes(attachment);
+    final itemId = item['id']?.toString() ?? 'item';
+    final attachmentId = attachment['id']?.toString() ?? 'attachment';
+    final documentId = '${itemId}_$attachmentId';
+    if (rawStream != null) {
+      if (widget.onPersistVaultDocumentStream == null) {
+        attachment['documentStorage'] = 'inline-unavailable';
+        return true;
+      }
+      if (!_canStoreDocumentBytes(sizeBytes)) return false;
+      final stream = rawStream as Stream<List<int>>;
+      final sectionName = await widget.onPersistVaultDocumentStream!(
+        documentId: documentId,
+        chunks: stream,
+        sizeBytes: sizeBytes,
+      );
+      _storedDocumentBytesThisSession += sizeBytes;
+      attachment['documentStorage'] = 'private-section';
+      attachment['documentSection'] = sectionName;
+      return true;
+    }
+    final bytes = rawBytes is Uint8List
+        ? rawBytes
+        : Uint8List.fromList(List<int>.from(rawBytes as List));
+    final storedSizeBytes = _documentMetadataSizeBytes(
+      attachment,
+      fallbackBytes: bytes.length,
+    );
+    if (!_canStoreDocumentBytes(storedSizeBytes)) return false;
+    final sectionName = widget.onPersistVaultDocumentStream != null
+        ? await widget.onPersistVaultDocumentStream!(
+            documentId: documentId,
+            chunks: Stream<List<int>>.value(bytes),
+            sizeBytes: storedSizeBytes,
+          )
+        : await widget.onPersistVaultDocument!(
+            documentId: documentId,
+            bytes: bytes,
+          );
+    _storedDocumentBytesThisSession += storedSizeBytes;
+    attachment['documentStorage'] = 'private-section';
+    attachment['documentSection'] = sectionName;
+    return true;
+  }
+
+  Future<bool> _arePendingAttachmentsStored(Map<String, dynamic> item) async {
+    final attachments = _itemAttachments(item);
+    if (attachments.isEmpty) {
+      item.remove('attachments');
+      return true;
+    }
+    for (final attachment in attachments) {
+      if (!await _isPendingAttachmentStored(item, attachment)) return false;
+    }
+    item['attachments'] = attachments;
+    return true;
+  }
+
+  Map<String, dynamic> _itemWithAttachments(
+    Map<String, dynamic> item,
+    List<Map<String, dynamic>> newAttachments,
+  ) {
+    final attachments = _itemAttachments(item)
+      ..addAll(newAttachments.map((entry) => Map<String, dynamic>.from(entry)));
+    return {...Map<String, dynamic>.from(item), 'attachments': attachments};
+  }
+
+  Future<bool> _replaceItemAndPersist(Map<String, dynamic> updatedItem) async {
+    final id = updatedItem['id']?.toString();
+    final idx = _items.indexWhere((entry) => entry['id']?.toString() == id);
+    if (idx == -1) return false;
+    setState(
+      () => _items[idx] = _preserveLastAccessedAt(updatedItem, _items[idx]),
+    );
+    await _persistVaultData();
+    return true;
+  }
+
+  Future<void> _deleteAttachmentFromItem(
+    Map<String, dynamic> item,
+    Map<String, dynamic> attachment,
+  ) async {
+    await _runWithBusy('Removing attached document...', () async {
+      final attachmentId = attachment['id']?.toString();
+      final attachments = _itemAttachments(item)
+        ..removeWhere((entry) => entry['id']?.toString() == attachmentId);
+      final updatedItem = {
+        ...Map<String, dynamic>.from(item),
+        'attachments': attachments,
+      };
+      await _replaceItemAndPersist(updatedItem);
+    });
+  }
+
+  Future<List<int>> _readAttachmentBytes(
+    Map<String, dynamic> attachment,
+  ) async {
+    final sectionName = attachment['documentSection']?.toString().trim() ?? '';
+    final reader = widget.onReadVaultDocument;
+    if (sectionName.isEmpty || reader == null) {
+      throw StateError('Attachment reader unavailable.');
+    }
+    return reader(sectionName: sectionName);
+  }
+
+  Future<void> _openAttachment(Map<String, dynamic> attachment) async {
+    await _runWithBusy('Opening document...', () async {
+      final bytes = await _readAttachmentBytes(attachment);
+      final fileName = _documentFileName(attachment);
+      final mimeType = _mimeTypeForExtension(_documentExtension(attachment));
+      try {
+        await _documentOpenChannel.invokeMethod<bool>('openDocument', {
+          'fileName': fileName,
+          'mimeType': mimeType,
+          'bytes': Uint8List.fromList(bytes),
+        });
+      } on MissingPluginException {
+        await _secretSharePortability.exportPlainFile(
+          suggestedName: fileName,
+          bytes: Uint8List.fromList(bytes),
+          mimeType: mimeType,
+        );
+      }
+    });
+  }
+
+  Future<void> _shareAttachment(Map<String, dynamic> attachment) async {
+    await _runWithBusy('Preparing document share...', () async {
+      final bytes = await _readAttachmentBytes(attachment);
+      final fileName = _documentFileName(attachment);
+      final mimeType = _mimeTypeForExtension(_documentExtension(attachment));
+      if (kIsWeb) {
+        final exported = await _secretSharePortability.exportPlainFile(
+          suggestedName: fileName,
+          bytes: Uint8List.fromList(bytes),
+          mimeType: mimeType,
+        );
+        if (exported) return;
+      }
+      try {
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [
+              XFile.fromData(
+                Uint8List.fromList(bytes),
+                name: fileName,
+                mimeType: mimeType,
+              ),
+            ],
+          ),
+        );
+      } catch (_) {
+        await _secretSharePortability.exportPlainFile(
+          suggestedName: fileName,
+          bytes: Uint8List.fromList(bytes),
+          mimeType: mimeType,
+        );
+      }
+    });
+  }
+
+  Future<void> _shareEncryptedAttachment(
+    Map<String, dynamic> attachment,
+  ) async {
+    await _runWithBusy('Preparing encrypted document...', () async {
+      final bytes = await _readAttachmentBytes(attachment);
+      await _shareEncryptedDocument(attachment, bytes);
+    });
+  }
+
+  Future<void> _exportEncryptedAttachment(
+    Map<String, dynamic> attachment,
+  ) async {
+    await _runWithBusy('Exporting encrypted document...', () async {
+      final bytes = await _readAttachmentBytes(attachment);
+      await _exportEncryptedDocument(attachment, bytes);
+    });
+  }
+
+  Future<bool> _saveAttachmentCopy(Map<String, dynamic> attachment) async {
+    return _runWithBusy('Saving document copy...', () async {
+      final bytes = await _readAttachmentBytes(attachment);
+      return _saveDocumentCopy(attachment, bytes);
+    });
   }
 
   Future<void> _openNoteDetail(
@@ -2122,8 +3240,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
       MaterialPageRoute(
         builder: (_) => NoteViewScreen(
           note: accessedNote,
-          showDeleteAction: true,
-          onAutoSave: _upsertNoteAndPersist,
+          readOnly: _isExploreDemoReadOnly,
+          showDeleteAction: !_isExploreDemoReadOnly,
+          onAutoSave: _isExploreDemoReadOnly ? null : _upsertNoteAndPersist,
+          onShareMenu: _isExploreDemoReadOnly
+              ? null
+              : () => _showNoteQuickActions(context, accessedNote),
         ),
       ),
     );
@@ -2159,7 +3281,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final updated = Map<String, dynamic>.from(_items[idx]);
     updated['lastAccessedAt'] = DateTime.now().toUtc().toIso8601String();
     setState(() => _items[idx] = updated);
-    unawaited(_persistVaultData());
+    _schedulePersistVaultData();
     return updated;
   }
 
@@ -2171,7 +3293,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final updated = Map<String, dynamic>.from(_notes[idx]);
     updated['lastAccessedAt'] = DateTime.now().toUtc().toIso8601String();
     setState(() => _notes[idx] = updated);
-    unawaited(_persistVaultData());
+    _schedulePersistVaultData();
     return updated;
   }
 
@@ -2188,10 +3310,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _openAddItemScreen(BuildContext context) async {
+    if (_blockExploreDemoWrite()) return;
     final created = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => NewItemCategoryScreen(
           customTypeDefinitions: _customTypeDefinitions,
+          currentVaultSizeBytes: _effectiveVaultSizeBytes,
+          maxVaultBytes: VaultLimits.maxVaultBytes,
+          maxDocumentBytes: VaultLimits.maxDocumentBytes,
+          onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
           onCreateNote: () async {
             return Navigator.of(context).push<Map<String, dynamic>>(
               MaterialPageRoute(builder: (_) => const NoteEditorScreen()),
@@ -2225,6 +3352,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final item = Map<String, dynamic>.from(entry);
     try {
       if (!await _isPendingDocumentStored(item)) return;
+      if (!await _arePendingAttachmentsStored(item)) return;
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2378,15 +3506,35 @@ class _VaultAppShellState extends State<VaultAppShell> {
     } else {
       setState(() => _notes[idx] = note);
     }
-    unawaited(_persistVaultData());
+    _schedulePersistVaultData();
+  }
+
+  void _schedulePersistVaultData() {
+    if (widget.isExploreDemoSession) return;
+    _persistDebounceTimer?.cancel();
+    _persistDebounceTimer = Timer(const Duration(milliseconds: 400), () {
+      unawaited(_persistVaultData());
+    });
   }
 
   Future<void> _persistVaultData() async {
+    if (widget.isExploreDemoSession) return;
+    if (_backgroundBusyCount == 0 && !_importingEncryptedSecret) {
+      await _runWithBusy('Saving vault updates...', _persistVaultDataUnchecked);
+      return;
+    }
+    await _persistVaultDataUnchecked();
+  }
+
+  Future<void> _persistVaultDataUnchecked() async {
+    if (_blockExploreDemoWrite()) return;
     try {
       await widget.onPersistVaultData(
-        items: _items,
-        notes: _notes,
-        customTypeDefinitions: _customTypeDefinitions,
+        items: _serializableVaultEntries(_items),
+        notes: _serializableVaultEntries(_notes),
+        customTypeDefinitions: _serializableVaultEntries(
+          _customTypeDefinitions,
+        ),
       );
     } catch (_) {
       if (!mounted) return;
@@ -2396,6 +3544,30 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ),
       );
     }
+  }
+
+  List<Map<String, dynamic>> _serializableVaultEntries(
+    List<Map<String, dynamic>> entries,
+  ) {
+    return entries
+        .map((entry) => _serializableVaultValue(entry) as Map<String, dynamic>)
+        .toList();
+  }
+
+  Object? _serializableVaultValue(Object? value) {
+    if (value is Map) {
+      final copy = <String, dynamic>{};
+      for (final entry in value.entries) {
+        final key = entry.key.toString();
+        if (key.startsWith('__')) continue;
+        copy[key] = _serializableVaultValue(entry.value);
+      }
+      return copy;
+    }
+    if (value is List) {
+      return value.map(_serializableVaultValue).toList();
+    }
+    return value;
   }
 
   int _updatedRank(Map<String, dynamic> entry) {
@@ -2409,10 +3581,35 @@ class _VaultAppShellState extends State<VaultAppShell> {
       final prefs = await SharedPreferences.getInstance();
       final enabled = prefs.getBool(_prefsKeyCloudBackupEnabled) ?? false;
       final lastAt = prefs.getInt(_prefsKeyCloudBackupLastAt) ?? 0;
+      final revision = prefs.getInt(_prefsKeyCloudBackupRevision) ?? 0;
+      final versionId = prefs.getString(_prefsKeyCloudBackupVersionId) ?? '';
+      final updatedAt = prefs.getString(_prefsKeyCloudBackupUpdatedAt) ?? '';
       if (!mounted) return;
       setState(() {
-        _cloudBackupEnabled = enabled && AppFeatures.isPaidBuild;
+        _cloudBackupEnabled = enabled && _cloudBackupFeatureAvailable;
         _cloudBackupLastAtEpochMs = lastAt;
+        _cloudBackupRevision = revision;
+        _cloudBackupVersionId = versionId;
+        _cloudBackupUpdatedAt = updatedAt;
+      });
+    } catch (_) {
+      // Ignore preference read failures.
+    }
+  }
+
+  Future<void> _restoreDebugInternalsPreferences() async {
+    if (!_debugInternalsFeatureAvailable) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final unlocked = prefs.getBool(_prefsKeyDebugInternalsUnlocked) ?? false;
+      final enabled = prefs.getBool(_prefsKeyDebugInternalsEnabled) ?? false;
+      if (!mounted) return;
+      setState(() {
+        _debugInternalsUnlocked = unlocked;
+        _debugInternalsEnabled = unlocked && enabled;
+        if (!_debugInternalsEnabled && _tabIndex == 4) {
+          _tabIndex = 3;
+        }
       });
     } catch (_) {
       // Ignore preference read failures.
@@ -2420,7 +3617,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _setCloudBackupEnabled(bool enabled) async {
-    if (!AppFeatures.isPaidBuild) return;
+    if (!_cloudBackupFeatureAvailable) return;
     setState(() => _cloudBackupEnabled = enabled);
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2428,17 +3625,96 @@ class _VaultAppShellState extends State<VaultAppShell> {
     } catch (_) {}
   }
 
+  Future<void> _setDebugInternalsEnabled(bool enabled) async {
+    if (!_debugInternalsFeatureAvailable || !_debugInternalsUnlocked) return;
+    setState(() {
+      _debugInternalsEnabled = enabled;
+      if (!enabled && _tabIndex == 4) {
+        _tabIndex = 3;
+      }
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsKeyDebugInternalsEnabled, enabled);
+    } catch (_) {}
+  }
+
+  Future<void> _handleAboutNijaTap(BuildContext context) async {
+    if (!_debugInternalsFeatureAvailable) {
+      _showAboutNijaSheet(context);
+      return;
+    }
+    if (_debugInternalsUnlocked) {
+      _showAboutNijaSheet(context);
+      return;
+    }
+
+    final nextCount = _aboutNijaTapCount + 1;
+    if (nextCount < _debugInternalsUnlockTapCount) {
+      setState(() => _aboutNijaTapCount = nextCount);
+      if (nextCount < _debugInternalsFeedbackStartTapCount) {
+        return;
+      }
+      final remaining = _debugInternalsUnlockTapCount - nextCount;
+      final messenger = ScaffoldMessenger.of(context)..removeCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text('$remaining taps away from debug options.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _aboutNijaTapCount = 0;
+      _debugInternalsUnlocked = true;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsKeyDebugInternalsUnlocked, true);
+    } catch (_) {}
+    if (!context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context)..removeCurrentSnackBar();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Debug options unlocked.')),
+    );
+  }
+
+  void _showAboutNijaSheet(BuildContext context) {
+    _showInfoSheet(
+      context,
+      title: 'About Nija',
+      icon: Icons.info_outline,
+      brandHeader: const Center(
+        child: NijaBrandLockup(layout: NijaBrandLayout.vertical, markSize: 48),
+      ),
+      sections: _aboutNijaSections(),
+    );
+  }
+
   Future<void> _handleCloudBackupNow() async {
+    if (!_cloudBackupFeatureAvailable) return;
+    if (_isBusyOverlayVisible) return;
     await widget.onBackupToCloud();
     final now = DateTime.now().millisecondsSinceEpoch;
-    setState(() => _cloudBackupLastAtEpochMs = now);
+    final revision = widget.activeVaultRevision;
+    final versionId = widget.activeVaultVersionId.trim();
+    final updatedAt = widget.activeVaultUpdatedAt.trim();
+    setState(() {
+      _cloudBackupLastAtEpochMs = now;
+      _cloudBackupRevision = revision;
+      _cloudBackupVersionId = versionId;
+      _cloudBackupUpdatedAt = updatedAt;
+    });
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_prefsKeyCloudBackupLastAt, now);
+      await prefs.setInt(_prefsKeyCloudBackupRevision, revision);
+      await prefs.setString(_prefsKeyCloudBackupVersionId, versionId);
+      await prefs.setString(_prefsKeyCloudBackupUpdatedAt, updatedAt);
     } catch (_) {}
   }
 
   Future<void> _refreshCloudBackupAccountLabel() async {
+    if (!_cloudBackupFeatureAvailable) return;
     final label = await widget.onReadCloudBackupAccount();
     if (!mounted) return;
     setState(
@@ -2449,6 +3725,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _handleChangeCloudBackupAccount() async {
+    if (!_cloudBackupFeatureAvailable) return;
     final ok = await widget.onChangeCloudBackupAccount();
     if (!mounted) return;
     if (ok) {
@@ -2466,7 +3743,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   String _cloudBackupTitle() {
-    if (kIsWeb) return 'Cloud backup';
+    if (kIsWeb) return 'Backup to Google Drive';
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return 'Backup to Google Drive';
@@ -2491,6 +3768,45 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   String _formatBytes(int bytes) {
     return VaultLimits.formatBytes(bytes);
+  }
+
+  String _vaultVersionSummary({
+    required int revision,
+    required String versionId,
+  }) {
+    final shortVersionId = _shortVaultVersionId(versionId);
+    if (revision <= 0 && shortVersionId == 'unknown') return 'Unknown';
+    if (revision <= 0) return shortVersionId;
+    if (shortVersionId == 'unknown') return 'r$revision';
+    return 'r$revision - $shortVersionId';
+  }
+
+  String _shortVaultVersionId(String versionId) {
+    final trimmed = versionId.trim();
+    if (trimmed.isEmpty) return 'unknown';
+    if (trimmed.length <= 8) return trimmed;
+    return trimmed.substring(0, 8);
+  }
+
+  String _formatCloudBackupLastAt() {
+    if (_cloudBackupLastAtEpochMs <= 0) return 'Never';
+    return _formatLocalDateTime(
+      DateTime.fromMillisecondsSinceEpoch(_cloudBackupLastAtEpochMs),
+    );
+  }
+
+  String _formatVaultIsoTimestamp(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return 'Unknown';
+    final parsed = DateTime.tryParse(trimmed);
+    if (parsed == null) return trimmed;
+    return _formatLocalDateTime(parsed.toLocal());
+  }
+
+  String _formatLocalDateTime(DateTime value) {
+    String two(int input) => input.toString().padLeft(2, '0');
+    return '${value.year}-${two(value.month)}-${two(value.day)} '
+        '${two(value.hour)}:${two(value.minute)}';
   }
 
   int get _effectiveVaultSizeBytes =>
@@ -2621,57 +3937,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Future<void> _deleteSelectedAllItems() async {
     if (_selectedAllItemsKeys.isEmpty) return;
-    final shouldDelete = await showModalBottomSheet<bool>(
+    final shouldDelete = await showVaultConfirmSheet(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => SafeArea(
-        child: Container(
-          margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.delete_outline,
-                size: 34,
-                color: Color(0xFFEF4444),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Move to Trash?',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${_selectedAllItemsKeys.length} items will be moved to trash.\nThis action can be undone.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFEF4444),
-                  ),
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('Move to Trash'),
-                ),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
-              ),
-            ],
-          ),
-        ),
-      ),
+      title: 'Move to Trash?',
+      message:
+          '${_selectedAllItemsKeys.length} items will be moved to trash.\nThis action can be undone.',
+      confirmLabel: 'Move to Trash',
+      destructive: true,
     );
     if (shouldDelete != true) return;
     final selectedItemIds = _selectedAllItemsKeys
@@ -2721,25 +3993,20 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Future<void> _showAllItemsMoreActions() async {
     if (_selectedAllItemsKeys.isEmpty) return;
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showVaultChoiceMenu<String>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.enhanced_encryption_outlined),
-              title: Text(AppStrings.shareEncryptedFile),
-              onTap: () => Navigator.of(context).pop('share_encrypted'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.file_download_outlined),
-              title: Text(AppStrings.exportEncryptedFile),
-              onTap: () => Navigator.of(context).pop('export_encrypted'),
-            ),
-          ],
+      options: [
+        VaultMenuOption(
+          value: 'share_encrypted',
+          leading: const Icon(Icons.enhanced_encryption_outlined),
+          title: AppStrings.shareEncryptedFile,
         ),
-      ),
+        VaultMenuOption(
+          value: 'export_encrypted',
+          leading: const Icon(Icons.file_download_outlined),
+          title: AppStrings.exportEncryptedFile,
+        ),
+      ],
     );
     if (selected == 'share_encrypted') {
       await _shareSelectedAllItemsEncrypted();
@@ -3035,45 +4302,40 @@ class _VaultAppShellState extends State<VaultAppShell> {
     Map<String, dynamic> note,
   ) async {
     final pinned = note['pinned'] == true;
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showVaultChoiceMenu<String>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              key: const ValueKey('note-action-pin'),
-              leading: Icon(pinned ? Icons.star_outline : Icons.star),
-              title: Text(pinned ? AppStrings.unpin : AppStrings.pin),
-              onTap: () => Navigator.of(context).pop('pin'),
-            ),
-            ListTile(
-              key: const ValueKey('note-action-delete'),
-              leading: const Icon(Icons.delete_outline),
-              title: Text(AppStrings.delete),
-              onTap: () => Navigator.of(context).pop('delete'),
-            ),
-            ListTile(
-              key: const ValueKey('note-action-share'),
-              leading: const Icon(Icons.share_outlined),
-              title: Text(AppStrings.sharePlainText),
-              onTap: () => Navigator.of(context).pop('share_plain'),
-            ),
-            ListTile(
-              key: const ValueKey('note-action-share-encrypted'),
-              leading: const Icon(Icons.enhanced_encryption_outlined),
-              title: Text(AppStrings.shareEncryptedFile),
-              onTap: () => Navigator.of(context).pop('share_encrypted'),
-            ),
-            ListTile(
-              key: const ValueKey('note-action-export-encrypted'),
-              leading: const Icon(Icons.file_download_outlined),
-              title: Text(AppStrings.exportEncryptedFile),
-              onTap: () => Navigator.of(context).pop('export_encrypted'),
-            ),
-          ],
+      options: [
+        VaultMenuOption(
+          key: const ValueKey('note-action-pin'),
+          value: 'pin',
+          leading: Icon(pinned ? Icons.star_outline : Icons.star),
+          title: pinned ? AppStrings.unpin : AppStrings.pin,
         ),
-      ),
+        VaultMenuOption(
+          key: const ValueKey('note-action-delete'),
+          value: 'delete',
+          leading: const Icon(Icons.delete_outline),
+          title: AppStrings.delete,
+        ),
+        VaultMenuOption(
+          key: const ValueKey('note-action-share'),
+          value: 'share_plain',
+          leading: const Icon(Icons.share_outlined),
+          title: AppStrings.sharePlainText,
+        ),
+        VaultMenuOption(
+          key: const ValueKey('note-action-share-encrypted'),
+          value: 'share_encrypted',
+          leading: const Icon(Icons.enhanced_encryption_outlined),
+          title: AppStrings.shareEncryptedFile,
+        ),
+        VaultMenuOption(
+          key: const ValueKey('note-action-export-encrypted'),
+          value: 'export_encrypted',
+          leading: const Icon(Icons.file_download_outlined),
+          title: AppStrings.exportEncryptedFile,
+        ),
+      ],
     );
     if (selected == null) return;
     final idx = _notes.indexWhere(
@@ -3125,45 +4387,40 @@ class _VaultAppShellState extends State<VaultAppShell> {
     Map<String, dynamic> item,
   ) async {
     final pinned = item['pinned'] == true;
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showVaultChoiceMenu<String>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              key: const ValueKey('item-action-pin'),
-              leading: Icon(pinned ? Icons.star_outline : Icons.star),
-              title: Text(pinned ? AppStrings.unpin : AppStrings.pin),
-              onTap: () => Navigator.of(context).pop('pin'),
-            ),
-            ListTile(
-              key: const ValueKey('item-action-delete'),
-              leading: const Icon(Icons.delete_outline),
-              title: Text(AppStrings.delete),
-              onTap: () => Navigator.of(context).pop('delete'),
-            ),
-            ListTile(
-              key: const ValueKey('item-action-share'),
-              leading: const Icon(Icons.share_outlined),
-              title: Text(AppStrings.sharePlainText),
-              onTap: () => Navigator.of(context).pop('share_plain'),
-            ),
-            ListTile(
-              key: const ValueKey('item-action-share-encrypted'),
-              leading: const Icon(Icons.enhanced_encryption_outlined),
-              title: Text(AppStrings.shareEncryptedFile),
-              onTap: () => Navigator.of(context).pop('share_encrypted'),
-            ),
-            ListTile(
-              key: const ValueKey('item-action-export-encrypted'),
-              leading: const Icon(Icons.file_download_outlined),
-              title: Text(AppStrings.exportEncryptedFile),
-              onTap: () => Navigator.of(context).pop('export_encrypted'),
-            ),
-          ],
+      options: [
+        VaultMenuOption(
+          key: const ValueKey('item-action-pin'),
+          value: 'pin',
+          leading: Icon(pinned ? Icons.star_outline : Icons.star),
+          title: pinned ? AppStrings.unpin : AppStrings.pin,
         ),
-      ),
+        VaultMenuOption(
+          key: const ValueKey('item-action-delete'),
+          value: 'delete',
+          leading: const Icon(Icons.delete_outline),
+          title: AppStrings.delete,
+        ),
+        VaultMenuOption(
+          key: const ValueKey('item-action-share'),
+          value: 'share_plain',
+          leading: const Icon(Icons.share_outlined),
+          title: AppStrings.sharePlainText,
+        ),
+        VaultMenuOption(
+          key: const ValueKey('item-action-share-encrypted'),
+          value: 'share_encrypted',
+          leading: const Icon(Icons.enhanced_encryption_outlined),
+          title: AppStrings.shareEncryptedFile,
+        ),
+        VaultMenuOption(
+          key: const ValueKey('item-action-export-encrypted'),
+          value: 'export_encrypted',
+          leading: const Icon(Icons.file_download_outlined),
+          title: AppStrings.exportEncryptedFile,
+        ),
+      ],
     );
     if (selected == null) return;
     final idx = _items.indexWhere(
@@ -3215,51 +4472,46 @@ class _VaultAppShellState extends State<VaultAppShell> {
     Map<String, dynamic> item,
   ) async {
     final pinned = item['pinned'] == true;
-    final selected = await showModalBottomSheet<String>(
+    final selected = await showVaultChoiceMenu<String>(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              key: const ValueKey('document-action-open'),
-              leading: const Icon(Icons.open_in_new_outlined),
-              title: const Text('Open document'),
-              onTap: () => Navigator.of(context).pop('open'),
-            ),
-            ListTile(
-              key: const ValueKey('document-action-pin'),
-              leading: Icon(pinned ? Icons.star_outline : Icons.star),
-              title: Text(pinned ? AppStrings.unpin : AppStrings.pin),
-              onTap: () => Navigator.of(context).pop('pin'),
-            ),
-            ListTile(
-              key: const ValueKey('document-action-share-encrypted'),
-              leading: const Icon(Icons.enhanced_encryption_outlined),
-              title: const Text('Share encrypted file'),
-              onTap: () => Navigator.of(context).pop('share_encrypted'),
-            ),
-            ListTile(
-              key: const ValueKey('document-action-export-encrypted'),
-              leading: const Icon(Icons.file_download_outlined),
-              title: const Text('Export encrypted file'),
-              onTap: () => Navigator.of(context).pop('export_encrypted'),
-            ),
-            ListTile(
-              key: const ValueKey('document-action-save-copy'),
-              leading: const Icon(Icons.download_for_offline_outlined),
-              title: const Text('Save copy'),
-              onTap: () => Navigator.of(context).pop('save_copy'),
-            ),
-            ListTile(
-              key: const ValueKey('document-action-delete'),
-              leading: const Icon(Icons.delete_outline),
-              title: Text(AppStrings.delete),
-              onTap: () => Navigator.of(context).pop('delete'),
-            ),
-          ],
+      options: [
+        VaultMenuOption(
+          key: const ValueKey('document-action-open'),
+          value: 'open',
+          leading: const Icon(Icons.open_in_new_outlined),
+          title: 'Open document',
         ),
-      ),
+        VaultMenuOption(
+          key: const ValueKey('document-action-pin'),
+          value: 'pin',
+          leading: Icon(pinned ? Icons.star_outline : Icons.star),
+          title: pinned ? AppStrings.unpin : AppStrings.pin,
+        ),
+        VaultMenuOption(
+          key: const ValueKey('document-action-share-encrypted'),
+          value: 'share_encrypted',
+          leading: const Icon(Icons.enhanced_encryption_outlined),
+          title: 'Share encrypted file',
+        ),
+        VaultMenuOption(
+          key: const ValueKey('document-action-export-encrypted'),
+          value: 'export_encrypted',
+          leading: const Icon(Icons.file_download_outlined),
+          title: 'Export encrypted file',
+        ),
+        VaultMenuOption(
+          key: const ValueKey('document-action-save-copy'),
+          value: 'save_copy',
+          leading: const Icon(Icons.download_for_offline_outlined),
+          title: 'Save copy',
+        ),
+        VaultMenuOption(
+          key: const ValueKey('document-action-delete'),
+          value: 'delete',
+          leading: const Icon(Icons.delete_outline),
+          title: AppStrings.delete,
+        ),
+      ],
     );
     if (selected == null) return;
     final idx = _items.indexWhere(
@@ -3439,15 +4691,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _importEncryptedSecret() async {
+    if (_blockExploreDemoWrite()) return;
     if (_importingEncryptedSecret) return;
-    setState(() {
-      _importingEncryptedSecret = true;
-      _importBusyMessage = 'Selecting import file...';
-    });
     try {
       final imported = await _secretSharePortability.importEncryptedFile();
       if (imported == null || !mounted) return;
-      setState(() => _importBusyMessage = 'Waiting for import password...');
+      setState(() {
+        _importingEncryptedSecret = true;
+        _importBusyMessage = 'Waiting for import password...';
+      });
       final password = await _promptSecretImportPassword(context);
       if (password == null || password.trim().isEmpty || !mounted) return;
       setState(() => _importBusyMessage = 'Decrypting imported file...');
@@ -4034,8 +5286,18 @@ String _entryCreatedLabel(Map<String, dynamic> entry) {
 }
 
 String _entryModifiedLabel(Map<String, dynamic> entry) {
-  final value = entry['updatedAt'] ?? entry['updated'] ?? entry['createdAt'];
-  return _formatEntryTimestamp(value, fallback: 'Now');
+  final activityAt = vaultEntryActivityAt(entry);
+  if (activityAt != null) {
+    return _formatEntryTimestamp(
+      activityAt.toIso8601String(),
+      fallback: 'Unknown',
+    );
+  }
+  final legacy = entry['updated']?.toString().trim() ?? '';
+  if (legacy.isNotEmpty && legacy.toLowerCase() != 'now') {
+    return legacy;
+  }
+  return 'Unknown';
 }
 
 String _entryDeviceLabel(Map<String, dynamic> entry) {
@@ -4084,6 +5346,46 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 8),
             Text(subtitle, textAlign: TextAlign.center),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AllItemsTypeChip extends StatelessWidget {
+  const _AllItemsTypeChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: selected
+          ? colorScheme.primaryContainer
+          : colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected
+                  ? colorScheme.onPrimaryContainer
+                  : colorScheme.onSurfaceVariant,
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
         ),
       ),
     );
@@ -4163,10 +5465,15 @@ class _DebugHeader extends StatelessWidget {
 }
 
 class _DebugInfoCard extends StatelessWidget {
-  const _DebugInfoCard({required this.title, required this.rows});
+  const _DebugInfoCard({
+    required this.title,
+    required this.rows,
+    this.maxHeight,
+  });
 
   final String title;
   final List<MapEntry<String, String>> rows;
+  final double? maxHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -4193,38 +5500,70 @@ class _DebugInfoCard extends StatelessWidget {
                 ),
               )
             else
-              ...rows.map(
-                (row) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 132,
-                        child: Text(
-                          row.key,
-                          style: TextStyle(
-                            color: colorScheme.onSurfaceVariant,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: SelectableText(
-                          row.value,
-                          style: TextStyle(
-                            color: colorScheme.onSurface,
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              _DebugRowsView(rows: rows, maxHeight: maxHeight),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _DebugRowsView extends StatelessWidget {
+  const _DebugRowsView({required this.rows, this.maxHeight});
+
+  final List<MapEntry<String, String>> rows;
+  final double? maxHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: rows.map((row) => _DebugInfoRow(row: row)).toList(),
+    );
+    if (maxHeight == null) return content;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight!),
+      child: Scrollbar(
+        child: SingleChildScrollView(primary: false, child: content),
+      ),
+    );
+  }
+}
+
+class _DebugInfoRow extends StatelessWidget {
+  const _DebugInfoRow({required this.row});
+
+  final MapEntry<String, String> row;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 132,
+            child: Text(
+              row.key,
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          Expanded(
+            child: SelectableText(
+              row.value,
+              style: TextStyle(
+                color: colorScheme.onSurface,
+                fontSize: 12,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -4234,6 +5573,7 @@ class _DebugFileTreeCard extends StatelessWidget {
   const _DebugFileTreeCard({required this.store});
 
   static const int _maxRenderedFiles = 80;
+  static const double _maxHeight = 260;
   final dynamic store;
 
   @override
@@ -4262,7 +5602,20 @@ class _DebugFileTreeCard extends StatelessWidget {
                 ),
               )
             else
-              ...tree.map((line) => _DebugTreeLine(line: line)),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: _maxHeight),
+                child: Scrollbar(
+                  child: SingleChildScrollView(
+                    primary: false,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: tree
+                          .map((line) => _DebugTreeLine(line: line))
+                          .toList(),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -4289,8 +5642,8 @@ class _DebugFileTreeCard extends StatelessWidget {
     final documents = <String, List<MapEntry<String, int>>>{};
     final other = <MapEntry<String, int>>[];
     for (final entry in entries) {
-      final docId = _documentTreeId(entry.key);
-      if (_isCoreDebugFile(entry.key)) {
+      final docId = documentTreeId(entry.key);
+      if (isCoreDebugFile(entry.key)) {
         core.add(entry);
       } else if (docId != null) {
         documents
@@ -4331,10 +5684,20 @@ class _DebugFileTreeCard extends StatelessWidget {
       );
       for (final docId in documents.keys.toList()..sort()) {
         if (!canRenderMoreFiles()) break;
-        final docFiles = documents[docId]!
-          ..sort((a, b) => a.key.compareTo(b.key));
-        lines.add(_DebugTreeLineData(depth: 2, label: docId, folder: true));
-        lines.addAll(cappedFileLines(docFiles, depth: 3));
+        final docFiles = documents[docId]!;
+        final docBytes = docFiles.fold<int>(
+          0,
+          (sum, entry) => sum + entry.value,
+        );
+        renderedFiles += docFiles.length;
+        lines.add(
+          _DebugTreeLineData(
+            depth: 2,
+            label: docId,
+            detail: '${docFiles.length} files, $docBytes bytes',
+            folder: true,
+          ),
+        );
       }
     }
     if (other.isNotEmpty && canRenderMoreFiles()) {
@@ -4372,7 +5735,7 @@ class _DebugFileTreeCard extends StatelessWidget {
     return parts.isEmpty ? root : parts.last;
   }
 
-  static bool _isCoreDebugFile(String name) {
+  static bool isCoreDebugFile(String name) {
     return const <String>{
       'header.json',
       'manifest.enc',
@@ -4383,7 +5746,7 @@ class _DebugFileTreeCard extends StatelessWidget {
     }.contains(name);
   }
 
-  static String? _documentTreeId(String name) {
+  static String? documentTreeId(String name) {
     final manifest = RegExp(r'^document_(.+)\.manifest\.enc$').firstMatch(name);
     if (manifest != null) return manifest.group(1);
     final chunk = RegExp(r'^document_(.+)_chunk_\d+\.enc$').firstMatch(name);
@@ -4601,6 +5964,565 @@ Color _colorForCustomTemplateColorKey(String? key) {
   }
 }
 
+class _MobileDashboardList extends StatelessWidget {
+  const _MobileDashboardList({
+    required this.data,
+    required this.recentItems,
+    required this.adapters,
+    required this.keyForRow,
+    required this.iconForType,
+    required this.colorForType,
+    required this.onTypeTap,
+    required this.onViewAll,
+    required this.onShowDemoPreview,
+    required this.onHideDemoPreview,
+    required this.onOpenRow,
+    required this.onRowActions,
+  });
+
+  final _DashboardData data;
+  final List<Map<String, dynamic>> recentItems;
+  final List<VaultListEntryAdapter> adapters;
+  final String Function(Map<String, dynamic> row) keyForRow;
+  final IconData Function(String type) iconForType;
+  final Color Function(String type) colorForType;
+  final ValueChanged<String> onTypeTap;
+  final VoidCallback onViewAll;
+  final VoidCallback onShowDemoPreview;
+  final VoidCallback onHideDemoPreview;
+  final ValueChanged<Map<String, dynamic>> onOpenRow;
+  final ValueChanged<Map<String, dynamic>> onRowActions;
+
+  @override
+  Widget build(BuildContext context) {
+    final categories = _homeDashboardCategories(data);
+    return ListView(
+      children: [
+        if (data.isDemo ||
+            data.canShowDemoPreview ||
+            data.isExploreSession) ...[
+          _DemoDashboardNotice(
+            isActive: data.isDemo || data.isExploreSession,
+            isExploreSession: data.isExploreSession,
+            onShowPreview: onShowDemoPreview,
+            onHidePreview: onHideDemoPreview,
+          ),
+          const SizedBox(height: 12),
+        ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final crossAxisCount = width >= 700 ? 4 : 2;
+            final childAspectRatio = crossAxisCount >= 4 ? 1.2 : 1.45;
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: crossAxisCount,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: childAspectRatio,
+              ),
+              itemCount: categories.length,
+              itemBuilder: (context, index) {
+                final entry = categories[index];
+                return _HomeTypeCard(
+                  label: entry.label,
+                  count: entry.count,
+                  icon: iconForType(entry.filterType),
+                  accent: colorForType(entry.filterType),
+                  onTap: () => onTypeTap(entry.filterType),
+                );
+              },
+            );
+          },
+        ),
+        const SizedBox(height: 14),
+        _DashboardSectionTitle(title: 'Recent', onViewAll: onViewAll),
+        const SizedBox(height: 6),
+        _DashboardRecentList(
+          recentItems: recentItems,
+          adapters: adapters,
+          keyForRow: keyForRow,
+          onOpenRow: onOpenRow,
+          onRowActions: onRowActions,
+        ),
+      ],
+    );
+  }
+}
+
+class _WideDashboardLayout extends StatelessWidget {
+  const _WideDashboardLayout({
+    required this.data,
+    required this.dashboardTypes,
+    required this.recentItems,
+    required this.adapters,
+    required this.keyForRow,
+    required this.iconForType,
+    required this.colorForType,
+    required this.onTypeTap,
+    required this.onViewAll,
+    required this.onAddItem,
+    required this.onImportData,
+    required this.onSwitchVault,
+    required this.onShowDemoPreview,
+    required this.onHideDemoPreview,
+    required this.onOpenRow,
+    required this.onRowActions,
+  });
+
+  final _DashboardData data;
+  final List<MapEntry<String, int>> dashboardTypes;
+  final List<Map<String, dynamic>> recentItems;
+  final List<VaultListEntryAdapter> adapters;
+  final String Function(Map<String, dynamic> row) keyForRow;
+  final IconData Function(String type) iconForType;
+  final Color Function(String type) colorForType;
+  final ValueChanged<String> onTypeTap;
+  final VoidCallback onViewAll;
+  final VoidCallback onAddItem;
+  final VoidCallback onImportData;
+  final VoidCallback onSwitchVault;
+  final VoidCallback onShowDemoPreview;
+  final VoidCallback onHideDemoPreview;
+  final ValueChanged<Map<String, dynamic>> onOpenRow;
+  final ValueChanged<Map<String, dynamic>> onRowActions;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      children: [
+        if (data.isDemo ||
+            data.canShowDemoPreview ||
+            data.isExploreSession) ...[
+          _DemoDashboardNotice(
+            isActive: data.isDemo || data.isExploreSession,
+            isExploreSession: data.isExploreSession,
+            onShowPreview: onShowDemoPreview,
+            onHidePreview: onHideDemoPreview,
+          ),
+          const SizedBox(height: 12),
+        ],
+        _DesktopDashboardStats(
+          stats: [
+            _DashboardStatData(
+              label: 'Total Items',
+              value: data.totalCount,
+              icon: Icons.inventory_2_outlined,
+            ),
+            _DashboardStatData(
+              label: 'Folders',
+              value: data.folderCount,
+              icon: Icons.folder_outlined,
+            ),
+            _DashboardStatData(
+              label: 'Logins',
+              value: data.typeCounts['Login'] ?? 0,
+              icon: Icons.lock_outline,
+            ),
+            _DashboardStatData(
+              label: 'Notes',
+              value: data.dashboardTypes
+                  .firstWhere(
+                    (entry) => entry.key == 'Notes',
+                    orElse: () => const MapEntry<String, int>('Notes', 0),
+                  )
+                  .value,
+              icon: Icons.description_outlined,
+            ),
+            _DashboardStatData(
+              label: 'Identities',
+              value:
+                  (data.typeCounts['Identity'] ?? 0) +
+                  (data.typeCounts['Passport'] ?? 0) +
+                  (data.typeCounts['Driver License'] ?? 0),
+              icon: Icons.badge_outlined,
+            ),
+            _DashboardStatData(
+              label: 'Documents',
+              value:
+                  (data.typeCounts['Documents'] ?? 0) +
+                  (data.typeCounts['Document'] ?? 0),
+              icon: Icons.folder_copy_outlined,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final showSidePanel = constraints.maxWidth >= 880;
+            final recent = _DesktopPanel(
+              title: 'Recent Items',
+              trailing: TextButton(
+                onPressed: onViewAll,
+                child: Text(
+                  'View all',
+                  style: DashboardTypography.textLink(
+                    Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+              child: _WideDashboardRecentList(
+                recentItems: recentItems,
+                adapters: adapters,
+                keyForRow: keyForRow,
+                onOpenRow: onOpenRow,
+                onRowActions: onRowActions,
+              ),
+            );
+            final actions = _DesktopPanel(
+              title: 'Quick Actions',
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: _QuickActionGrid(
+                  actions: [
+                    _QuickActionTileData(
+                      icon: Icons.add,
+                      label: 'Add Item',
+                      onTap: onAddItem,
+                    ),
+                    _QuickActionTileData(
+                      icon: Icons.grid_view_outlined,
+                      label: 'All Items',
+                      onTap: onViewAll,
+                    ),
+                    _QuickActionTileData(
+                      icon: Icons.download_outlined,
+                      label: 'Import',
+                      onTap: onImportData,
+                    ),
+                    _QuickActionTileData(
+                      icon: Icons.switch_access_shortcut_outlined,
+                      label: 'Switch Vault',
+                      onTap: onSwitchVault,
+                    ),
+                  ],
+                ),
+              ),
+            );
+            if (!showSidePanel) {
+              return Column(
+                children: [recent, const SizedBox(height: 12), actions],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 7, child: recent),
+                const SizedBox(width: 14),
+                Expanded(flex: 3, child: actions),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _DemoDashboardNotice extends StatelessWidget {
+  const _DemoDashboardNotice({
+    required this.isActive,
+    required this.isExploreSession,
+    required this.onShowPreview,
+    required this.onHidePreview,
+  });
+
+  final bool isActive;
+  final bool isExploreSession;
+  final VoidCallback onShowPreview;
+  final VoidCallback onHidePreview;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final activeMessage = isExploreSession
+        ? AppStrings.exploreDemoActiveNotice
+        : 'Viewing sample data. Your vault has not been changed.';
+    final inactiveMessage =
+        'New here? Preview how a filled vault dashboard looks.';
+    final exitLabel = isExploreSession
+        ? AppStrings.exitExploreDemo
+        : 'Exit demo';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            isActive ? Icons.visibility_outlined : Icons.auto_awesome_outlined,
+            color: colorScheme.primary,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              isActive ? activeMessage : inactiveMessage,
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            fit: FlexFit.loose,
+            child: OutlinedButton(
+              key: ValueKey(
+                isActive
+                    ? 'dashboard-hide-demo-preview'
+                    : 'dashboard-show-demo-preview',
+              ),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: isActive ? onHidePreview : onShowPreview,
+              child: Text(isActive ? exitLabel : 'View demo preview'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardStatData {
+  const _DashboardStatData({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  final String label;
+  final int value;
+  final IconData icon;
+}
+
+class _DesktopDashboardStats extends StatelessWidget {
+  const _DesktopDashboardStats({required this.stats});
+
+  final List<_DashboardStatData> stats;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 1100 ? 6 : 3;
+        return GridView.builder(
+          key: const ValueKey('desktop-dashboard-stats'),
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            mainAxisExtent: 88,
+          ),
+          itemCount: stats.length,
+          itemBuilder: (context, index) {
+            final stat = stats[index];
+            return _DesktopDashboardStatCard(stat: stat);
+          },
+        );
+      },
+    );
+  }
+}
+
+class _DesktopDashboardStatCard extends StatelessWidget {
+  const _DesktopDashboardStatCard({required this.stat});
+
+  final _DashboardStatData stat;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      key: ValueKey<String>('desktop-dashboard-stat-${stat.label}'),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '${stat.value}',
+            style: DashboardTypography.statValue(colorScheme.onSurface),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            stat.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: DashboardTypography.statLabel(colorScheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeCategoryData {
+  const _HomeCategoryData({
+    required this.label,
+    required this.filterType,
+    required this.count,
+  });
+
+  final String label;
+  final String filterType;
+  final int count;
+}
+
+List<_HomeCategoryData> _homeDashboardCategories(_DashboardData data) {
+  final candidates = <_HomeCategoryData>[
+    _HomeCategoryData(
+      label: 'Notes',
+      filterType: 'Notes',
+      count: data.dashboardTypes
+          .firstWhere(
+            (entry) => entry.key == 'Notes',
+            orElse: () => const MapEntry<String, int>('Notes', 0),
+          )
+          .value,
+    ),
+    _HomeCategoryData(
+      label: 'Logins',
+      filterType: 'Login',
+      count: data.typeCounts['Login'] ?? 0,
+    ),
+    _HomeCategoryData(
+      label: 'Identities',
+      filterType: 'Identity',
+      count:
+          (data.typeCounts['Identity'] ?? 0) +
+          (data.typeCounts['Passport'] ?? 0) +
+          (data.typeCounts['Driver License'] ?? 0),
+    ),
+    _HomeCategoryData(
+      label: 'Documents',
+      filterType: data.typeCounts.containsKey('Documents')
+          ? 'Documents'
+          : 'Document',
+      count:
+          (data.typeCounts['Documents'] ?? 0) +
+          (data.typeCounts['Document'] ?? 0),
+    ),
+  ];
+  final coveredTypes = <String>{
+    'Notes',
+    'Login',
+    'Identity',
+    'Passport',
+    'Driver License',
+    'Documents',
+    'Document',
+  };
+  for (final entry in data.dashboardTypes) {
+    if (coveredTypes.contains(entry.key)) continue;
+    candidates.add(
+      _HomeCategoryData(
+        label: entry.key,
+        filterType: entry.key,
+        count: entry.value,
+      ),
+    );
+  }
+  return candidates.where((category) => category.count > 0).toList();
+}
+
+class _DashboardSectionTitle extends StatelessWidget {
+  const _DashboardSectionTitle({required this.title, required this.onViewAll});
+
+  final String title;
+  final VoidCallback onViewAll;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          title,
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const Spacer(),
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onViewAll,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Text('View all', style: TextStyle(color: Color(0xFF4F46E5))),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DashboardRecentList extends StatelessWidget {
+  const _DashboardRecentList({
+    required this.recentItems,
+    required this.adapters,
+    required this.keyForRow,
+    required this.onOpenRow,
+    required this.onRowActions,
+  });
+
+  final List<Map<String, dynamic>> recentItems;
+  final List<VaultListEntryAdapter> adapters;
+  final String Function(Map<String, dynamic> row) keyForRow;
+  final ValueChanged<Map<String, dynamic>> onOpenRow;
+  final ValueChanged<Map<String, dynamic>> onRowActions;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    if (recentItems.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: colorScheme.outlineVariant),
+        ),
+        child: Text(
+          'No recent items yet.',
+          style: TextStyle(color: colorScheme.onSurfaceVariant),
+        ),
+      );
+    }
+    return VaultEntryList(
+      rows: recentItems,
+      adapters: adapters,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
+      iconAlpha: 0.2,
+      rowPadding: const EdgeInsets.all(12),
+      trailingMode: VaultEntryTrailingMode.more,
+      keyForRow: keyForRow,
+      onTap: onOpenRow,
+      onMoreTap: onRowActions,
+    );
+  }
+}
+
 class _HomeTypeCard extends StatelessWidget {
   const _HomeTypeCard({
     required this.label,
@@ -4714,6 +6636,244 @@ class _AllItemsSelectionActionBar extends StatelessWidget {
   }
 }
 
+/// Desktop/tablet presentation for the existing All Items data and actions.
+/// Mobile intentionally continues to use [VaultEntryList].
+class _WideAllItemsIndex extends StatelessWidget {
+  const _WideAllItemsIndex({
+    required this.rows,
+    required this.adapters,
+    required this.selectionMode,
+    required this.selectedKeys,
+    required this.keyForRow,
+    required this.onTap,
+    this.onLongPress,
+    required this.onMoreTap,
+  });
+
+  final List<Map<String, dynamic>> rows;
+  final List<VaultListEntryAdapter> adapters;
+  final bool selectionMode;
+  final Set<String> selectedKeys;
+  final String Function(Map<String, dynamic> row) keyForRow;
+  final ValueChanged<Map<String, dynamic>> onTap;
+  final ValueChanged<Map<String, dynamic>>? onLongPress;
+  final ValueChanged<Map<String, dynamic>> onMoreTap;
+
+  VaultListEntry _entryFor(Map<String, dynamic> row) {
+    return adapters.firstWhere((adapter) => adapter.canAdapt(row)).adapt(row);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('wide-all-items-index'),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          const _WideAllItemsHeader(),
+          Expanded(
+            child: ListView.separated(
+              itemCount: rows.length,
+              separatorBuilder: (_, _) =>
+                  Divider(height: 1, color: colorScheme.outlineVariant),
+              itemBuilder: (context, index) {
+                final row = rows[index];
+                final entry = _entryFor(row);
+                final selected = selectedKeys.contains(keyForRow(row));
+                final folder = entry.entry['folder']?.toString().trim() ?? '';
+                return Material(
+                  color: selected
+                      ? colorScheme.primaryContainer.withValues(alpha: 0.42)
+                      : Colors.transparent,
+                  child: InkWell(
+                    onTap: () => onTap(row),
+                    onLongPress: onLongPress == null
+                        ? null
+                        : () => onLongPress!(row),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 36,
+                            child: selectionMode
+                                ? Checkbox(
+                                    value: selected,
+                                    onChanged: (_) => onTap(row),
+                                  )
+                                : Container(
+                                    width: 32,
+                                    height: 32,
+                                    decoration: BoxDecoration(
+                                      color:
+                                          (entry.color ?? colorScheme.primary)
+                                              .withValues(alpha: 0.16),
+                                      borderRadius: BorderRadius.circular(9),
+                                    ),
+                                    child: Icon(
+                                      entry.icon ?? Icons.inventory_2_outlined,
+                                      size: 18,
+                                      color: entry.color ?? colorScheme.primary,
+                                    ),
+                                  ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 4,
+                            child: _WideItemText(
+                              title: entry.title,
+                              subtitle: entry.subtitle,
+                              pinned: entry.pinned,
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: _WideItemCell(value: entry.type),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: _WideItemCell(
+                              value: folder.isEmpty ? 'No folder' : folder,
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: _WideItemCell(value: entry.updated),
+                          ),
+                          SizedBox(
+                            width: 36,
+                            child: selectionMode
+                                ? const Icon(Icons.chevron_right)
+                                : IconButton(
+                                    tooltip: 'Item actions',
+                                    onPressed: () => onMoreTap(row),
+                                    icon: const Icon(Icons.more_vert),
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WideAllItemsHeader extends StatelessWidget {
+  const _WideAllItemsHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    Text label(String value) => Text(
+      value,
+      style: TextStyle(
+        color: colorScheme.onSurfaceVariant,
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.4,
+      ),
+    );
+    return Container(
+      height: 42,
+      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.46),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: Row(
+        children: [
+          const SizedBox(width: 46),
+          Expanded(flex: 4, child: label('NAME')),
+          Expanded(flex: 2, child: label('TYPE')),
+          Expanded(flex: 2, child: label('FOLDER')),
+          Expanded(flex: 2, child: label('UPDATED')),
+          const SizedBox(width: 36),
+        ],
+      ),
+    );
+  }
+}
+
+class _WideItemText extends StatelessWidget {
+  const _WideItemText({
+    required this.title,
+    required this.subtitle,
+    required this.pinned,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool pinned;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            if (pinned) ...[
+              const SizedBox(width: 4),
+              Icon(Icons.star, size: 14, color: colorScheme.primary),
+            ],
+          ],
+        ),
+        if (subtitle.isNotEmpty)
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
+          ),
+      ],
+    );
+  }
+}
+
+class _WideItemCell extends StatelessWidget {
+  const _WideItemCell({required this.value});
+
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      value,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontSize: 12,
+      ),
+    );
+  }
+}
+
 class _SelectionActionNavItem extends StatelessWidget {
   const _SelectionActionNavItem({
     super.key,
@@ -4755,6 +6915,633 @@ class _SelectionActionNavItem extends StatelessWidget {
   }
 }
 
+class _VaultDesktopHeader extends StatelessWidget {
+  const _VaultDesktopHeader({
+    required this.title,
+    this.themeMode,
+    this.onThemeModeChanged,
+  });
+
+  final String title;
+  final ThemeMode? themeMode;
+  final VoidCallback? onThemeModeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Material(
+      color: colorScheme.surface,
+      child: Container(
+        height: 68,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'NIJA VAULT',
+                    style: DashboardTypography.workspaceBrand(
+                      colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    title,
+                    style: DashboardTypography.workspaceTitle(
+                      colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (onThemeModeChanged != null)
+              IconButton(
+                tooltip: themeMode == ThemeMode.dark
+                    ? 'Switch to light theme'
+                    : 'Switch to dark theme',
+                onPressed: onThemeModeChanged,
+                icon: Icon(
+                  themeMode == ThemeMode.dark
+                      ? Icons.light_mode_outlined
+                      : Icons.dark_mode_outlined,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopPanel extends StatelessWidget {
+  const _DesktopPanel({
+    required this.title,
+    this.trailing,
+    required this.child,
+  });
+
+  final String title;
+  final Widget? trailing;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            constraints: const BoxConstraints(minHeight: 50),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: colorScheme.outlineVariant),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      title,
+                      style: DashboardTypography.panelTitle(
+                        colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                ),
+                if (trailing != null) trailing!,
+              ],
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickActionTileData {
+  const _QuickActionTileData({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+}
+
+class _QuickActionGrid extends StatelessWidget {
+  const _QuickActionGrid({required this.actions});
+
+  final List<_QuickActionTileData> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        mainAxisExtent: 72,
+      ),
+      itemCount: actions.length,
+      itemBuilder: (context, index) {
+        final action = actions[index];
+        return Material(
+          color: colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(color: colorScheme.outlineVariant),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: action.onTap,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(action.icon, size: 22, color: colorScheme.onSurface),
+                const SizedBox(height: 8),
+                Text(
+                  action.label,
+                  textAlign: TextAlign.center,
+                  style: DashboardTypography.quickActionLabel(
+                    colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _WideDashboardRecentList extends StatelessWidget {
+  const _WideDashboardRecentList({
+    required this.recentItems,
+    required this.adapters,
+    required this.keyForRow,
+    required this.onOpenRow,
+    required this.onRowActions,
+  });
+
+  final List<Map<String, dynamic>> recentItems;
+  final List<VaultListEntryAdapter> adapters;
+  final String Function(Map<String, dynamic> row) keyForRow;
+  final ValueChanged<Map<String, dynamic>> onOpenRow;
+  final ValueChanged<Map<String, dynamic>> onRowActions;
+
+  VaultListEntry _entryFor(Map<String, dynamic> row) {
+    return adapters.firstWhere((adapter) => adapter.canAdapt(row)).adapt(row);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    if (recentItems.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(14),
+        child: Text(
+          'No recent items yet.',
+          style: TextStyle(color: colorScheme.onSurfaceVariant),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        for (var index = 0; index < recentItems.length; index++) ...[
+          if (index > 0) Divider(height: 1, color: colorScheme.outlineVariant),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => onOpenRow(recentItems[index]),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 13,
+                  vertical: 9,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer.withValues(
+                          alpha: 0.55,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _vaultDashboardTypeCode(
+                          _entryFor(recentItems[index]).type,
+                        ),
+                        style: DashboardTypography.typeCode(
+                          colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _entryFor(recentItems[index]).title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: DashboardTypography.recentTitle(
+                              colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            _entryFor(recentItems[index]).subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: DashboardTypography.recentSubtitle(
+                              colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: 130,
+                      child: Text(
+                        _entryFor(recentItems[index]).updated,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: DashboardTypography.recentTimestamp(
+                          colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      tooltip: 'Item actions',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => onRowActions(recentItems[index]),
+                      icon: Icon(
+                        Icons.more_vert,
+                        size: 18,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _VaultWideContentFrame extends StatelessWidget {
+  const _VaultWideContentFrame({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1180),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _VaultSideNavigation extends StatelessWidget {
+  const _VaultSideNavigation({
+    required this.selectedIndex,
+    required this.debugTabVisible,
+    required this.activeVaultName,
+    required this.itemCount,
+    required this.vaultMetaLabel,
+    required this.onLockNow,
+    this.onSwitchVault,
+    this.onThemeToggle,
+    this.themeMode,
+    required this.onDestinationSelected,
+  });
+
+  final int selectedIndex;
+  final bool debugTabVisible;
+  final String activeVaultName;
+  final int itemCount;
+  final String vaultMetaLabel;
+  final VoidCallback onLockNow;
+  final VoidCallback? onSwitchVault;
+  final VoidCallback? onThemeToggle;
+  final ThemeMode? themeMode;
+  final ValueChanged<int> onDestinationSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final viewportWidth = MediaQuery.sizeOf(context).width;
+    final largeDesktop = viewportWidth >= 1100;
+    final compactTablet = viewportWidth < 760;
+    final navWidth = largeDesktop
+        ? 320.0
+        : compactTablet
+        ? 240.0
+        : 296.0;
+    final railWidth = largeDesktop
+        ? 82.0
+        : compactTablet
+        ? 64.0
+        : 76.0;
+    final destinations = <_VaultNavDestination>[
+      _VaultNavDestination(
+        code: 'HM',
+        label: AppStrings.tabVault,
+        icon: Icons.shield_outlined,
+        selectedIcon: Icons.shield,
+        index: 0,
+      ),
+      _VaultNavDestination(
+        code: 'AI',
+        label: AppStrings.tabTypes,
+        icon: Icons.grid_view_outlined,
+        selectedIcon: Icons.grid_view,
+        index: 1,
+      ),
+      _VaultNavDestination(
+        code: 'FV',
+        label: AppStrings.tabNotes,
+        icon: Icons.star_outline,
+        selectedIcon: Icons.star,
+        index: 2,
+      ),
+      _VaultNavDestination(
+        code: 'ST',
+        label: AppStrings.tabSettings,
+        icon: Icons.settings_outlined,
+        selectedIcon: Icons.settings,
+        index: 3,
+      ),
+      if (debugTabVisible)
+        const _VaultNavDestination(
+          code: 'DG',
+          label: 'Debug',
+          icon: Icons.bug_report_outlined,
+          selectedIcon: Icons.bug_report,
+          index: 4,
+        ),
+    ];
+
+    return Container(
+      width: navWidth,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(right: BorderSide(color: colorScheme.outlineVariant)),
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Container(
+              width: railWidth,
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(color: colorScheme.outlineVariant),
+                ),
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 22),
+                  Image.asset(
+                    'assets/branding/nija_mark.png',
+                    width: 34,
+                    height: 34,
+                  ),
+                  const Spacer(),
+                  RotatedBox(
+                    quarterTurns: 3,
+                    child: Text(
+                      'private archive',
+                      style: TextStyle(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.6,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (onThemeToggle != null)
+                    IconButton(
+                      tooltip: themeMode == ThemeMode.dark
+                          ? 'Switch to light theme'
+                          : 'Switch to dark theme',
+                      onPressed: onThemeToggle,
+                      icon: Icon(
+                        themeMode == ThemeMode.dark
+                            ? Icons.light_mode_outlined
+                            : Icons.dark_mode_outlined,
+                        color: colorScheme.onSurfaceVariant,
+                        size: 22,
+                      ),
+                    )
+                  else
+                    Icon(
+                      Icons.verified_user_outlined,
+                      color: colorScheme.primary,
+                      size: 22,
+                    ),
+                  const SizedBox(height: 22),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Active vault',
+                      style: DashboardTypography.microLabel(
+                        colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      activeVaultName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: DashboardTypography.sidebarVaultName(
+                        colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      vaultMetaLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: DashboardTypography.sidebarVaultMeta(
+                        colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Divider(color: colorScheme.outlineVariant),
+                    const SizedBox(height: 10),
+                    ...destinations.map(
+                      (destination) => _VaultSidebarButton(
+                        key: ValueKey('sidebar-nav-${destination.code}'),
+                        destination: destination,
+                        selected: selectedIndex == destination.index,
+                        onTap: () => onDestinationSelected(destination.index),
+                      ),
+                    ),
+                    const Spacer(),
+                    Divider(color: colorScheme.outlineVariant),
+                    _VaultSidebarButton(
+                      destination: _VaultNavDestination(
+                        code: onSwitchVault != null ? 'SV' : 'LK',
+                        label: onSwitchVault != null
+                            ? 'Switch vault'
+                            : 'Lock vault',
+                        icon: onSwitchVault != null
+                            ? Icons.switch_access_shortcut_outlined
+                            : Icons.lock_outline,
+                        selectedIcon: onSwitchVault != null
+                            ? Icons.switch_access_shortcut
+                            : Icons.lock,
+                        index: -1,
+                      ),
+                      selected: false,
+                      onTap: onSwitchVault ?? onLockNow,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VaultNavDestination {
+  const _VaultNavDestination({
+    required this.code,
+    required this.label,
+    required this.icon,
+    required this.selectedIcon,
+    required this.index,
+  });
+
+  final String code;
+  final String label;
+  final IconData icon;
+  final IconData selectedIcon;
+  final int index;
+}
+
+class _VaultSidebarButton extends StatelessWidget {
+  const _VaultSidebarButton({
+    super.key,
+    required this.destination,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _VaultNavDestination destination;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: selected
+            ? colorScheme.surfaceContainerHighest
+            : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(
+            color: selected ? colorScheme.outlineVariant : Colors.transparent,
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 28,
+                  child: Text(
+                    destination.code,
+                    style: DashboardTypography.navCode(
+                      selected
+                          ? colorScheme.primary
+                          : colorScheme.onSurfaceVariant,
+                      selected: selected,
+                    ),
+                  ),
+                ),
+                Icon(
+                  selected ? destination.selectedIcon : destination.icon,
+                  size: 18,
+                  color: selected
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    destination.label,
+                    style: DashboardTypography.navLabel(
+                      selected
+                          ? colorScheme.onSurface
+                          : colorScheme.onSurfaceVariant,
+                      selected: selected,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _IndexedEntry {
   const _IndexedEntry({
     required this.kind,
@@ -4771,10 +7558,22 @@ class _DashboardData {
   const _DashboardData({
     required this.recentItems,
     required this.dashboardTypes,
+    required this.typeCounts,
+    required this.totalCount,
+    required this.folderCount,
+    required this.isDemo,
+    required this.canShowDemoPreview,
+    required this.isExploreSession,
   });
 
   final List<Map<String, dynamic>> recentItems;
   final List<MapEntry<String, int>> dashboardTypes;
+  final Map<String, int> typeCounts;
+  final int totalCount;
+  final int folderCount;
+  final bool isDemo;
+  final bool canShowDemoPreview;
+  final bool isExploreSession;
 }
 
 class _DashboardRecentCandidate {

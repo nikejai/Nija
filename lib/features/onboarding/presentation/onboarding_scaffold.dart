@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 
 class OnboardingScaffold extends StatelessWidget {
-  const OnboardingScaffold({super.key, required this.child});
+  const OnboardingScaffold({
+    super.key,
+    required this.child,
+    this.maxContentWidth = 430,
+    this.fullWidth = false,
+  });
 
   final Widget child;
+  final double maxContentWidth;
+  final bool fullWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -16,15 +23,18 @@ class OnboardingScaffold extends StatelessWidget {
             builder: (context, constraints) {
               return Center(
                 child: SizedBox(
-                  width: constraints.maxWidth > 430
-                      ? 430
+                  width: fullWidth
+                      ? constraints.maxWidth
+                      : constraints.maxWidth > maxContentWidth
+                      ? maxContentWidth
                       : constraints.maxWidth,
                   height: constraints.maxHeight,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: colorScheme.surface,
-                      border: Border.all(color: colorScheme.outlineVariant),
-                      borderRadius: BorderRadius.circular(26),
+                      border: fullWidth
+                          ? null
+                          : Border.all(color: colorScheme.outlineVariant),
                     ),
                     child: child,
                   ),

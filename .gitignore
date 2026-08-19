@@ -58,6 +58,7 @@ integration_test/screenshots/
 **/google-services.json
 **/GoogleService-Info.plist
 lib/app/client_secret_*.json
+client_secret_*.json
 
 # Local env/secrets files
 .env

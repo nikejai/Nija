@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/core/config/vault_item_templates.dart';
+import 'package:nija/features/vault/application/vault_home_demo_data.dart';
 import 'package:nija/features/vault/application/vault_list_helpers.dart';
 import 'package:nija/features/vault/application/vault_text_serializers.dart';
 import 'package:nija/features/vault/presentation/widgets/vault_entry_list.dart';
@@ -81,6 +82,36 @@ void main() {
     expect(entry.title, 'Health Insurance Card');
     expect(entry.type, 'PDF');
     expect(entry.updated, '3d ago · 1.2 MB');
+  });
+
+  test('homepage demo data covers dashboard item cases', () {
+    final itemTypes = VaultHomeDemoData.items
+        .map((item) => item['type']?.toString())
+        .toSet();
+
+    expect(
+      itemTypes,
+      containsAll(<String>['Login', 'Identity', 'Card', 'Documents']),
+    );
+    expect(VaultHomeDemoData.notes, hasLength(1));
+    expect(VaultHomeDemoData.folders, hasLength(4));
+
+    const itemAdapter = VaultItemListEntryAdapter();
+    for (final item in VaultHomeDemoData.items) {
+      final row = <String, dynamic>{'kind': 'item', 'entry': item};
+      expect(itemAdapter.canAdapt(row), isTrue);
+      final entry = itemAdapter.adapt(row);
+      expect(entry.title, isNotEmpty);
+      expect(entry.updated, isNotEmpty);
+    }
+
+    const noteAdapter = VaultNoteListEntryAdapter();
+    final noteRow = <String, dynamic>{
+      'kind': 'note',
+      'entry': VaultHomeDemoData.notes.single,
+    };
+    expect(noteAdapter.canAdapt(noteRow), isTrue);
+    expect(noteAdapter.adapt(noteRow).title, 'Recovery Phrase');
   });
 
   test('note plain text preserves rich delta markers', () {

@@ -12,7 +12,9 @@ import 'package:nija/infrastructure/adapters/prototype_crypto_adapter.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('e2e: onboarding, vault, notes, types, settings, lock/unlock', (tester) async {
+  testWidgets('e2e: onboarding, vault, notes, types, settings, lock/unlock', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(430, 932);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -29,10 +31,7 @@ void main() {
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
-        supportedLocales: const [
-          Locale('en'),
-          Locale('es'),
-        ],
+        supportedLocales: const [Locale('en'), Locale('es')],
         home: OnboardingFlow(
           languageMode: 'en',
           onLanguageModeChanged: (_) {},
@@ -55,15 +54,24 @@ void main() {
     await tester.enterText(find.byType(TextField).at(1), initialPassword);
     await _pumpForUi(tester);
 
-    final createButton = find.byKey(const ValueKey('create-encrypted-vault-button'));
-    await tester.scrollUntilVisible(createButton, 200, scrollable: find.byType(Scrollable).first);
+    final createButton = find.byKey(
+      const ValueKey('create-encrypted-vault-button'),
+    );
+    await tester.scrollUntilVisible(
+      createButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(createButton);
     await _waitForText(tester, 'Recovery phrase');
 
     final recoveryWords = _extractRecoveryWordsFromScreen(tester);
     expect(recoveryWords.length, 12);
     final currentRecoveryPhrase = recoveryWords.join(' ');
-    final rotatedRecoveryWords = <String>[...recoveryWords.skip(1), recoveryWords.first];
+    final rotatedRecoveryWords = <String>[
+      ...recoveryWords.skip(1),
+      recoveryWords.first,
+    ];
     final rotatedRecoveryPhrase = rotatedRecoveryWords.join(' ');
 
     await tester.tap(find.text('I saved my phrase'));
@@ -153,6 +161,10 @@ void main() {
     );
 
     await tester.tap(find.text('Lock vault now'));
+    await _waitForText(tester, 'Choose what to open');
+    await tester.tap(
+      find.byKey(const ValueKey('known-vault-card-integration-e2e.nija')),
+    );
     await _waitForText(tester, 'Unlock vault');
     await tester.enterText(find.byType(TextField).first, rotatedPassword);
     await tester.tap(find.text('Unlock'));
@@ -179,7 +191,9 @@ void main() {
 List<String> _extractRecoveryWordsFromScreen(WidgetTester tester) {
   final regex = RegExp(r'^(\d+)\.\s+([a-z]+)$');
   final indexedWords = <int, String>{};
-  for (final widget in tester.widgetList<SelectableText>(find.byType(SelectableText))) {
+  for (final widget in tester.widgetList<SelectableText>(
+    find.byType(SelectableText),
+  )) {
     final text = widget.data?.trim();
     if (text == null) continue;
     final match = regex.firstMatch(text);

@@ -122,4 +122,6 @@ abstract class VaultService {
   });
 
   Future<Map<String, dynamic>> readVaultInternals({required String filePath});
+
+  void clearUnlockedSession({required String filePath});
 }

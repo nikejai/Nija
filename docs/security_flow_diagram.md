@@ -8,6 +8,8 @@ Nija protects data with one random vault key and two unlock paths:
 
 - Path A: Master password
 - Path B: Recovery phrase
+- Optional local convenience path: App PIN unlocks an encrypted local helper after the user has already unlocked with the master password.
+- Optional web biometric path: WebAuthn PRF unlocks the app PIN, then the PIN unlocks the encrypted local helper.
 
 Both paths unlock the same vault key.
 
@@ -127,7 +129,9 @@ VaultFile
 ## 7) Current platform behavior
 
 - Android/iOS/desktop: file-backed adapter is used.
-- Web: currently uses in-memory adapter fallback (runtime-safe, not durable persistence yet).
+- Web: uses durable browser private app storage for encrypted vault snapshots.
+- Web PIN quick unlock stores an AES-GCM wrapped local unlock helper derived from the user PIN.
+- Web biometric quick unlock stores only WebAuthn credential metadata, a PRF salt, and an AES-GCM wrapped PIN helper. The PRF-derived wrapping key is recreated only after successful device verification and is not written to IndexedDB.
 
 ## 8) Current security baseline
 
@@ -139,5 +143,5 @@ VaultFile
 
 - Password reset UX that re-wraps vault key.
 - Recovery phrase rotation flow.
-- Web durable storage adapter.
+- Header-based production CSP and browser-storage threat-model review.
 - Secure-memory handling and full migration/versioning strategy.

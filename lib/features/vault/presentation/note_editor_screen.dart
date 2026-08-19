@@ -100,7 +100,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   Widget build(BuildContext context) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final keyboardVisible = keyboardInset > 0;
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final title = widget.initialNote == null ? 'New note' : 'Edit note';
 
     return PopScope(
       canPop: false,
@@ -110,120 +112,207 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       },
       child: Scaffold(
         resizeToAvoidBottomInset: true,
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: _saveAndPop,
-          ),
-          title: Text(widget.initialNote == null ? 'New note' : 'Edit note'),
-          actions: [
-            TextButton(
-              onPressed: _save,
-              style: TextButton.styleFrom(
-                minimumSize: Size.zero,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
+        backgroundColor: colorScheme.surface,
         body: SafeArea(
           bottom: false,
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-                child: TextField(
-                  controller: _titleController,
-                  style: TextStyle(
-                    color: colorScheme.onSurface,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
+              Container(
+                height: 64,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: colorScheme.surface,
+                  border: Border(
+                    bottom: BorderSide(color: colorScheme.outlineVariant),
                   ),
-                  decoration: InputDecoration(
-                    hintText: 'Untitled note',
-                    hintStyle: TextStyle(
-                      color: colorScheme.onSurfaceVariant,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: MaterialLocalizations.of(
+                        context,
+                      ).backButtonTooltip,
+                      icon: const Icon(Icons.arrow_back),
+                      onPressed: _saveAndPop,
                     ),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                ),
-              ),
-              quill.QuillSimpleToolbar(
-                controller: _quillController,
-                config: const quill.QuillSimpleToolbarConfig(
-                  multiRowsDisplay: false,
-                  showFontFamily: false,
-                  showFontSize: true,
-                  showSubscript: false,
-                  showSuperscript: false,
-                  showInlineCode: true,
-                  showCodeBlock: true,
-                  showColorButton: true,
-                  showBackgroundColorButton: true,
-                  showAlignmentButtons: true,
-                  showDirection: true,
-                  showIndent: true,
-                  showHeaderStyle: true,
-                  showQuote: true,
-                  showBoldButton: true,
-                  showItalicButton: true,
-                  showUnderLineButton: true,
-                  showStrikeThrough: true,
-                  showListBullets: true,
-                  showListCheck: true,
-                  showListNumbers: true,
-                  showLink: true,
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    16,
-                    12,
-                    16,
-                    keyboardVisible ? 0 : 12,
-                  ),
-                  child: ColoredBox(
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                    child: quill.QuillEditor.basic(
-                      controller: _quillController,
-                      focusNode: _editorFocusNode,
-                      scrollController: _editorScrollController,
-                      config: quill.QuillEditorConfig(
-                        placeholder: 'Start writing a private document...',
-                        scrollable: true,
-                        autoFocus: true,
-                        scrollBottomInset: keyboardVisible
-                            ? keyboardInset + 24
-                            : 80,
-                        padding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
-                        customStyles: quill.DefaultStyles(
-                          paragraph: quill.DefaultTextBlockStyle(
-                            TextStyle(
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
                               color: colorScheme.onSurface,
-                              fontSize: 15,
-                              height: 1.5,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
                             ),
-                            const quill.HorizontalSpacing(0, 0),
-                            const quill.VerticalSpacing(0, 0),
-                            const quill.VerticalSpacing(0, 0),
-                            null,
+                          ),
+                          Text(
+                            'Encrypted note',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    FilledButton(
+                      onPressed: _save,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: colorScheme.onSurface,
+                        foregroundColor: colorScheme.surface,
+                        minimumSize: const Size(76, 40),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: const Text('Save'),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        16,
+                        16,
+                        keyboardVisible ? keyboardInset + 12 : 16,
+                      ),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: 860,
+                            minHeight:
+                                constraints.maxHeight -
+                                (keyboardVisible ? keyboardInset : 0) -
+                                32,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _NoteEditorPanel(
+                                child: TextField(
+                                  controller: _titleController,
+                                  style: TextStyle(
+                                    color: colorScheme.onSurface,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.15,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: 'Untitled note',
+                                    hintStyle: TextStyle(
+                                      color: colorScheme.onSurfaceVariant,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    filled: false,
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              _NoteEditorPanel(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 6,
+                                ),
+                                child: quill.QuillSimpleToolbar(
+                                  controller: _quillController,
+                                  config: const quill.QuillSimpleToolbarConfig(
+                                    multiRowsDisplay: false,
+                                    showFontFamily: false,
+                                    showFontSize: true,
+                                    showSubscript: false,
+                                    showSuperscript: false,
+                                    showInlineCode: true,
+                                    showCodeBlock: true,
+                                    showColorButton: true,
+                                    showBackgroundColorButton: true,
+                                    showAlignmentButtons: true,
+                                    showDirection: true,
+                                    showIndent: true,
+                                    showHeaderStyle: true,
+                                    showQuote: true,
+                                    showBoldButton: true,
+                                    showItalicButton: true,
+                                    showUnderLineButton: true,
+                                    showStrikeThrough: true,
+                                    showListBullets: true,
+                                    showListCheck: true,
+                                    showListNumbers: true,
+                                    showLink: true,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              _NoteEditorPanel(
+                                padding: const EdgeInsets.fromLTRB(
+                                  18,
+                                  16,
+                                  18,
+                                  16,
+                                ),
+                                child: SizedBox(
+                                  height: (constraints.maxHeight - 170).clamp(
+                                    320.0,
+                                    720.0,
+                                  ),
+                                  child: quill.QuillEditor.basic(
+                                    controller: _quillController,
+                                    focusNode: _editorFocusNode,
+                                    scrollController: _editorScrollController,
+                                    config: quill.QuillEditorConfig(
+                                      placeholder:
+                                          'Start writing a private document...',
+                                      scrollable: true,
+                                      autoFocus: true,
+                                      scrollBottomInset: keyboardVisible
+                                          ? keyboardInset + 24
+                                          : 80,
+                                      padding: const EdgeInsets.fromLTRB(
+                                        0,
+                                        0,
+                                        0,
+                                        16,
+                                      ),
+                                      customStyles: quill.DefaultStyles(
+                                        paragraph: quill.DefaultTextBlockStyle(
+                                          TextStyle(
+                                            color: colorScheme.onSurface,
+                                            fontSize: 15,
+                                            height: 1.5,
+                                          ),
+                                          const quill.HorizontalSpacing(0, 0),
+                                          const quill.VerticalSpacing(0, 0),
+                                          const quill.VerticalSpacing(0, 0),
+                                          null,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
               ),
             ],
@@ -341,17 +430,46 @@ class _NoteEditorSnapshot {
   final Map<String, dynamic> payload;
 }
 
+class _NoteEditorPanel extends StatelessWidget {
+  const _NoteEditorPanel({
+    required this.child,
+    this.padding = const EdgeInsets.all(14),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: child,
+    );
+  }
+}
+
 class NoteViewScreen extends StatelessWidget {
   const NoteViewScreen({
     super.key,
     required this.note,
     this.showDeleteAction = false,
+    this.readOnly = false,
     this.onAutoSave,
+    this.onShareMenu,
   });
 
   final Map<String, dynamic> note;
   final bool showDeleteAction;
+  final bool readOnly;
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
+  final VoidCallback? onShareMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -380,27 +498,38 @@ class NoteViewScreen extends StatelessWidget {
         ),
         title: Text(note['title']?.toString() ?? 'Note'),
         actions: [
-          TextButton(
-            onPressed: () async {
-              final updated = await Navigator.of(context)
-                  .push<Map<String, dynamic>>(
-                    MaterialPageRoute(
-                      builder: (_) => NoteEditorScreen(
-                        initialNote: note,
-                        onAutoSave: onAutoSave,
-                      ),
-                    ),
-                  );
-              if (updated == null || !context.mounted) return;
-              Navigator.of(context).pop(updated);
-            },
-            style: TextButton.styleFrom(
-              minimumSize: Size.zero,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          if (onShareMenu != null)
+            IconButton(
+              key: const ValueKey('note-view-share-menu'),
+              onPressed: onShareMenu,
+              icon: const Icon(Icons.share_outlined),
+              tooltip: AppStrings.shareEncryptedFile,
             ),
-            child: Text(AppStrings.edit),
-          ),
+          if (!readOnly)
+            TextButton(
+              onPressed: () async {
+                final updated = await Navigator.of(context)
+                    .push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => NoteEditorScreen(
+                          initialNote: note,
+                          onAutoSave: onAutoSave,
+                        ),
+                      ),
+                    );
+                if (updated == null || !context.mounted) return;
+                Navigator.of(context).pop(updated);
+              },
+              style: TextButton.styleFrom(
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(AppStrings.edit),
+            ),
           if (showDeleteAction)
             IconButton(
               onPressed: () => Navigator.of(

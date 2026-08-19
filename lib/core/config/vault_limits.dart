@@ -7,8 +7,9 @@ class VaultLimits {
   static const int paidVaultBytes = 1024 * 1024 * 1024;
   static const int maxDocumentBytes = 5 * 1024 * 1024;
 
-  static int get maxVaultBytes =>
-      AppFeatures.isPaidBuild ? paidVaultBytes : freeVaultBytes;
+  static int get maxVaultBytes => AppFeatures.supportsExpandedVaultStorage
+      ? paidVaultBytes
+      : freeVaultBytes;
 
   static String formatBytes(int bytes) {
     if (bytes <= 0) return '0 B';

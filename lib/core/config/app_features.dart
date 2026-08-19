@@ -7,4 +7,12 @@ class AppFeatures {
     'NIJA_PAID_BUILD',
     defaultValue: false,
   );
+
+  static const String paidUnavailableLabel = 'Available in paid version';
+
+  static bool get supportsCloudBackup => isPaidBuild;
+
+  static bool get supportsDebugInternals => isPaidBuild;
+
+  static bool get supportsExpandedVaultStorage => isPaidBuild;
 }

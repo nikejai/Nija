@@ -3,6 +3,7 @@ package com.nija
 import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
+import android.content.pm.PackageManager
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import io.flutter.embedding.engine.FlutterEngine
@@ -15,16 +16,21 @@ class MainActivity : FlutterFragmentActivity() {
     private val documentOpenChannelName = "nija/document_open"
     private var pendingSecretUri: Uri? = null
     private var pendingSecretLabel: String? = null
+    private var pendingSharedText: String? = null
+    private var pendingSharedSourceApplication: String? = null
+    private var pendingSharedSourcePackage: String? = null
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         captureSecretFromIntent(intent)
+        captureSharedTextFromIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         captureSecretFromIntent(intent)
+        captureSharedTextFromIntent(intent)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -58,6 +64,25 @@ class MainActivity : FlutterFragmentActivity() {
                             }
                         }
                     }.start()
+                }
+                "consumePendingSharedText" -> {
+                    val text = pendingSharedText
+                    if (text.isNullOrBlank()) {
+                        result.success(null)
+                        return@setMethodCallHandler
+                    }
+                    val sourceApplication = pendingSharedSourceApplication ?: "Unknown app"
+                    val sourcePackage = pendingSharedSourcePackage ?: ""
+                    pendingSharedText = null
+                    pendingSharedSourceApplication = null
+                    pendingSharedSourcePackage = null
+                    result.success(
+                        mapOf(
+                            "text" to text,
+                            "sourceApplication" to sourceApplication,
+                            "sourcePackage" to sourcePackage
+                        )
+                    )
                 }
                 else -> result.notImplemented()
             }
@@ -127,6 +152,49 @@ class MainActivity : FlutterFragmentActivity() {
         if (!looksLikeEncryptedSecret) return
         pendingSecretLabel = if (normalizedLabel.endsWith(".nijas")) label else "secret.nijas"
         pendingSecretUri = uri
+    }
+
+    private fun captureSharedTextFromIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val mime = (intent.type ?: "").lowercase()
+        if (mime != "text/plain") return
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+        if (text.isBlank()) return
+        val sourcePackage = sourcePackageFromIntent(intent)
+        pendingSharedText = text
+        pendingSharedSourcePackage = sourcePackage
+        pendingSharedSourceApplication =
+            sourcePackage?.let { applicationLabelForPackage(it) }
+                ?: intent.getStringExtra(Intent.EXTRA_TITLE)?.trim()?.takeIf { it.isNotBlank() }
+                ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)?.trim()?.takeIf { it.isNotBlank() }
+                ?: "Unknown app"
+    }
+
+    private fun sourcePackageFromIntent(intent: Intent): String? {
+        val referrerPackage = referrer?.host?.takeIf { it.isNotBlank() }
+        if (referrerPackage != null) return referrerPackage
+        val referrerName = intent.getStringExtra(Intent.EXTRA_REFERRER_NAME)
+            ?.removePrefix("android-app://")
+            ?.substringBefore('/')
+            ?.takeIf { it.isNotBlank() }
+        return referrerName
+    }
+
+    private fun applicationLabelForPackage(packageName: String): String? {
+        return try {
+            val appInfo = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getApplicationInfo(
+                    packageName,
+                    PackageManager.ApplicationInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getApplicationInfo(packageName, 0)
+            }
+            packageManager.getApplicationLabel(appInfo).toString().takeIf { it.isNotBlank() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun extractFileName(uri: Uri): String {

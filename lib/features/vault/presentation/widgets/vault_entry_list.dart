@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../application/vault_entry_activity.dart';
+
 enum VaultEntryTrailingMode { none, chevron, more }
 
 class VaultListEntry {
@@ -60,8 +62,7 @@ class VaultItemListEntryAdapter extends VaultListEntryAdapter {
       subtitle: _safeVaultItemSubtitle(entry),
       updated:
           row['updatedLabel']?.toString() ??
-          entry['updated']?.toString() ??
-          'Now',
+          vaultEntryRelativeTimeLabel(entry, fallback: 'Unknown'),
       pinned: entry['pinned'] == true,
       tags: _entryTags(entry),
       icon: iconForType?.call(entry['type']?.toString() ?? 'Unknown'),
@@ -112,8 +113,7 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
       subtitle: _noteListPreviewText(entry),
       updated:
           row['updatedLabel']?.toString() ??
-          entry['updated']?.toString() ??
-          'Now',
+          vaultEntryRelativeTimeLabel(entry, fallback: 'Unknown'),
       pinned: entry['pinned'] == true,
       tags: _entryTags(entry),
       icon: Icons.description_outlined,
@@ -206,8 +206,7 @@ class VaultDocumentListEntryAdapter extends VaultListEntryAdapter {
     final sizeBytes = _documentSizeBytes(entry, document);
     final updated =
         row['updatedLabel']?.toString() ??
-        entry['updated']?.toString() ??
-        'Now';
+        vaultEntryRelativeTimeLabel(entry, fallback: 'Unknown');
     return VaultListEntry(
       entry: entry,
       kind: 'item',
@@ -243,7 +242,7 @@ class VaultEntryList extends StatefulWidget {
     required this.adapters,
     required this.keyForRow,
     required this.onTap,
-    required this.onLongPress,
+    this.onLongPress,
     this.onMoreTap,
     this.selectionMode = false,
     this.selectedKeys = const <String>{},
@@ -260,7 +259,7 @@ class VaultEntryList extends StatefulWidget {
   final List<VaultListEntryAdapter> adapters;
   final String Function(Map<String, dynamic> row) keyForRow;
   final void Function(Map<String, dynamic> row) onTap;
-  final void Function(Map<String, dynamic> row) onLongPress;
+  final void Function(Map<String, dynamic> row)? onLongPress;
   final void Function(Map<String, dynamic> row)? onMoreTap;
   final bool selectionMode;
   final Set<String> selectedKeys;
@@ -308,7 +307,9 @@ class _VaultEntryListState extends State<VaultEntryList> {
           iconAlpha: widget.iconAlpha,
           padding: widget.rowPadding,
           onTap: () => widget.onTap(row),
-          onLongPress: () => widget.onLongPress(row),
+          onLongPress: widget.onLongPress == null
+              ? null
+              : () => widget.onLongPress!(row),
           onMoreTap: widget.onMoreTap == null
               ? null
               : () => widget.onMoreTap!(row),
@@ -342,7 +343,7 @@ class _VaultEntryTile extends StatelessWidget {
     required this.iconAlpha,
     required this.padding,
     required this.onTap,
-    required this.onLongPress,
+    this.onLongPress,
     this.onMoreTap,
   });
 
@@ -354,7 +355,7 @@ class _VaultEntryTile extends StatelessWidget {
   final double iconAlpha;
   final EdgeInsetsGeometry padding;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
+  final VoidCallback? onLongPress;
   final VoidCallback? onMoreTap;
 
   @override

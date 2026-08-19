@@ -1,10 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/app/theme/app_theme.dart';
+import 'package:nija/core/localization/app_strings.dart';
+import 'package:nija/features/vault/application/vault_home_demo_data.dart';
 import 'package:nija/features/vault/presentation/add_vault_item_screen.dart';
 import 'package:nija/features/vault/presentation/vault_app_shell.dart';
 import 'package:nija/features/vault/presentation/widgets/vault_entry_list.dart';
+import 'package:nija/infrastructure/adapters/secret_share_model.dart';
+import 'package:nija/infrastructure/adapters/secret_share_portability_base.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   Future<void> openCategoriesSettings(WidgetTester tester) async {
@@ -33,6 +40,16 @@ void main() {
     fail('Timed out waiting for $finder');
   }
 
+  Future<void> tapAllItemsTab(WidgetTester tester) async {
+    final sidebar = find.byKey(const ValueKey('sidebar-nav-AI'));
+    if (sidebar.evaluate().isNotEmpty) {
+      await tester.tap(sidebar);
+    } else {
+      await tester.tap(find.byIcon(Icons.grid_view_outlined));
+    }
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('new item category list uses themed surfaces in dark mode', (
     tester,
   ) async {
@@ -50,6 +67,104 @@ void main() {
     );
 
     expect(categoryTile.color, AppTheme.dark().colorScheme.surface);
+  });
+
+  testWidgets('wide new item category list is bounded', (tester) async {
+    tester.view.physicalSize = const Size(2048, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const MaterialApp(home: NewItemCategoryScreen(customTypeDefinitions: [])),
+    );
+
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('new-item-category-shell')))
+          .width,
+      lessThanOrEqualTo(680),
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('new-item-category-item-Login')))
+          .width,
+      lessThanOrEqualTo(648),
+    );
+  });
+
+  testWidgets('wide saved confirmation uses a constrained dialog', (
+    tester,
+  ) async {
+    AppStrings.setLanguageCode('en');
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    Object? result;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () async {
+              result = await Navigator.of(context).push<Object?>(
+                MaterialPageRoute(
+                  builder: (_) => NewItemCategoryScreen(
+                    customTypeDefinitions: const [],
+                    onCreateNote: () async => const {
+                      'id': 'note-1',
+                      'type': 'Notes',
+                      'title': 'Recovery Phrase',
+                    },
+                  ),
+                ),
+              );
+            },
+            child: const Text('Open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Notes'));
+    await tester.pumpAndSettle();
+
+    final dialog = find.byType(Dialog);
+    expect(dialog, findsOneWidget);
+    expect(find.text('Entry saved'), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('saved-success-content'))).width,
+      lessThanOrEqualTo(460),
+    );
+
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(result, isA<Map<String, dynamic>>());
+  });
+
+  testWidgets('wide item editor keeps the mobile form at a readable width', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 820);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: AddVaultItemScreen(fixedType: 'Login', customTypeDefinitions: []),
+      ),
+    );
+
+    expect(
+      tester.getSize(find.byType(Card).first).width,
+      lessThanOrEqualTo(860),
+    );
+    expect(find.text('Save'), findsOneWidget);
   });
 
   testWidgets('custom password-only item does not expose value in subtitle', (
@@ -132,7 +247,6 @@ void main() {
           keyForRow: (row) =>
               (row['entry'] as Map<String, dynamic>)['id'].toString(),
           onTap: (_) {},
-          onLongPress: (_) {},
         ),
       ),
     );
@@ -244,7 +358,15 @@ void main() {
               'subtitle': 'Ada Lovelace',
               'updated': 'Now',
               'fields': [
+                {'label': 'Title', 'value': 'Passport'},
                 {'label': 'Full name', 'value': 'Ada Lovelace'},
+                {
+                  'label': 'Document number',
+                  'value': 'P1234567',
+                  'sensitive': true,
+                },
+                {'label': 'Country', 'value': ''},
+                {'label': 'Expiry', 'value': ' '},
               ],
               'idPhotos': [
                 {
@@ -291,11 +413,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.grid_view_outlined));
-    await tester.pumpAndSettle();
+    await tapAllItemsTab(tester);
     await tester.tap(find.text('Passport'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Copy document number'), findsOneWidget);
+    expect(find.text('Copy Password'), findsNothing);
+    expect(find.text('TITLE'), findsNothing);
+    expect(find.text('COUNTRY'), findsNothing);
+    expect(find.text('EXPIRY'), findsNothing);
+    expect(find.text('FULL NAME'), findsOneWidget);
+    expect(find.text('DOCUMENT NUMBER'), findsOneWidget);
     expect(find.text('ID photos'), findsOneWidget);
     expect(find.text('front.png'), findsOneWidget);
     expect(find.text('back.png'), findsOneWidget);
@@ -318,6 +446,229 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [
+            {
+              'id': 'item-0',
+              'type': 'Login',
+              'title': 'Seed item',
+              'subtitle': 'seed@example.com',
+              'updated': 'Now',
+              'fields': [],
+            },
+            {
+              'id': 'item-1',
+              'type': 'Bank Account',
+              'title': 'Bank',
+              'updated': 'Now',
+              'fields': [],
+            },
+            {
+              'id': 'item-2',
+              'type': 'Passport',
+              'title': 'Passport',
+              'updated': 'Now',
+              'fields': [],
+            },
+            {
+              'id': 'item-3',
+              'type': 'Password',
+              'title': 'Password',
+              'updated': 'Now',
+              'fields': [],
+            },
+            {
+              'id': 'item-4',
+              'type': 'Card',
+              'title': 'Card',
+              'updated': 'Now',
+              'fields': [],
+            },
+          ],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+
+    expect(find.text('Home'), findsWidgets);
+    expect(find.text('Favorites'), findsWidgets);
+    expect(find.text('All Items'), findsAtLeastNWidgets(1));
+    expect(find.text('Settings'), findsOneWidget);
+    expect(find.text('Recent'), findsOneWidget);
+    expect(find.text('View all'), findsOneWidget);
+  });
+
+  testWidgets('wide vault shell uses rail/sidebar wireframe', (tester) async {
+    tester.view.physicalSize = const Size(1280, 820);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'personal.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [
+            {
+              'id': 'item-0',
+              'type': 'Login',
+              'title': 'Seed item',
+              'subtitle': 'seed@example.com',
+              'updated': 'Now',
+              'fields': [],
+            },
+            {
+              'id': 'item-1',
+              'type': 'Bank Account',
+              'title': 'Bank',
+              'updated': 'Now',
+              'fields': [],
+            },
+            {
+              'id': 'item-2',
+              'type': 'Passport',
+              'title': 'Passport',
+              'updated': 'Now',
+              'fields': [],
+            },
+            {
+              'id': 'item-3',
+              'type': 'Password',
+              'title': 'Password',
+              'updated': 'Now',
+              'fields': [],
+            },
+            {
+              'id': 'item-4',
+              'type': 'Card',
+              'title': 'Card',
+              'updated': 'Now',
+              'fields': [],
+            },
+          ],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('private archive'), findsOneWidget);
+    expect(find.text('Active vault'), findsOneWidget);
+    expect(find.text('personal.nija'), findsWidgets);
+    expect(find.text('Lock vault'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('desktop-dashboard-stats')),
+      findsOneWidget,
+    );
+    expect(find.text('Total Items'), findsOneWidget);
+    expect(find.text('Logins'), findsOneWidget);
+    expect(find.text('Card'), findsWidgets);
+    expect(find.text('Quick Actions'), findsOneWidget);
+    expect(find.text('Recent Items'), findsOneWidget);
+
+    await tapAllItemsTab(tester);
+
+    expect(find.byKey(const ValueKey('wide-all-items-index')), findsOneWidget);
+    expect(find.text('NAME'), findsOneWidget);
+    expect(find.text('TYPE'), findsOneWidget);
+    expect(find.text('FOLDER'), findsOneWidget);
+    expect(find.text('UPDATED'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.tune));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.text('Filters'), findsOneWidget);
+  });
+
+  testWidgets('foldable tablet portrait uses expanded vault shell', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(673, 841);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'tablet.nija',
           recoveryWords: const [
             'anchor',
             'apple',
@@ -371,13 +722,1131 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
 
-    expect(find.text('Home'), findsWidgets);
-    expect(find.text('Favorites'), findsWidgets);
-    expect(find.text('All items'), findsOneWidget);
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byKey(const ValueKey('sidebar-nav-HM')), findsOneWidget);
+    expect(find.text('Active vault'), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+
+    await tapAllItemsTab(tester);
+    expect(find.byKey(const ValueKey('wide-all-items-index')), findsOneWidget);
+  });
+
+  testWidgets('wide homepage offers optional demo dashboard preview', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 820);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var importCalls = 0;
+    var lockCalls = 0;
+    var switchCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'empty.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async => importCalls++,
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () => lockCalls++,
+          onSwitchVault: () => switchCalls++,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Good '), findsOneWidget);
+    expect(find.text('View demo preview'), findsOneWidget);
+    expect(find.text('GitHub'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('desktop-dashboard-stats')),
+      findsOneWidget,
+    );
+    expect(find.text('Total Items'), findsOneWidget);
+    expect(find.text('Folders'), findsWidgets);
+    expect(find.text('Notes'), findsWidgets);
+    expect(find.text('Recovery Phrase'), findsOneWidget);
+    expect(find.text('Quick Actions'), findsOneWidget);
+    expect(find.text('Import'), findsOneWidget);
+    expect(find.text('Switch Vault'), findsWidgets);
+    expect(find.text('NIJA VAULT'), findsOneWidget);
+
+    await tester.tap(find.text('View demo preview'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Viewing sample data. Your vault has not been changed.'),
+      findsOneWidget,
+    );
+    expect(find.text('Exit demo'), findsOneWidget);
+    expect(find.text('Logins'), findsOneWidget);
+    expect(find.text('Identities'), findsOneWidget);
+    expect(find.text('Documents'), findsWidgets);
+    expect(find.text('GitHub'), findsOneWidget);
+
+    await tester.tap(find.text('Exit demo'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('GitHub'), findsNothing);
+    expect(find.text('View demo preview'), findsOneWidget);
+    expect(find.text('Quick Actions'), findsOneWidget);
+    expect(find.text('Import'), findsOneWidget);
+    expect(find.text('Switch Vault'), findsWidgets);
+    expect(find.text('NIJA VAULT'), findsOneWidget);
+
+    await tester.tap(find.text('Import'));
+    await tester.pumpAndSettle();
+    expect(importCalls, 1);
+
+    await tester.tap(find.text('Switch vault').last);
+    await tester.pumpAndSettle();
+    expect(switchCalls, 1);
+    expect(lockCalls, 0);
+  });
+
+  testWidgets('demo preview does not replace real all-items data', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 820);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'empty.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('View demo preview'));
+    await tester.pumpAndSettle();
+    expect(find.text('GitHub'), findsOneWidget);
+
+    await tester.tap(find.text('All Items').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('GitHub'), findsNothing);
+    expect(find.text('Demo · sample data'), findsNothing);
+    expect(find.text('Recovery Phrase'), findsOneWidget);
+  });
+
+  testWidgets('explore demo session shows sample data and opens item details', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 820);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var exitCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: VaultHomeDemoData.vaultName,
+          isExploreDemoSession: true,
+          onExitExploreDemo: () => exitCalls++,
+          cloudBackupFeatureAvailableOverride: false,
+          debugInternalsFeatureAvailableOverride: false,
+          recoveryWords: VaultHomeDemoData.recoveryWords,
+          initialItems: VaultHomeDemoData.cloneItems(),
+          initialNotes: VaultHomeDemoData.cloneNotes(),
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () => exitCalls++,
+          onSwitchVault: () => exitCalls++,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.exploreDemoActiveNotice), findsOneWidget);
+    expect(find.text('View demo preview'), findsNothing);
+    expect(find.text('Demo · sample data'), findsOneWidget);
+    expect(find.text('GitHub'), findsOneWidget);
+    expect(find.text('Debug'), findsNothing);
+
+    await tester.tap(find.text('GitHub').first);
+    await tester.pumpAndSettle();
+    expect(find.text('nitesh@example.com'), findsWidgets);
+
+    await tester.tap(find.byIcon(Icons.arrow_back).first);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text(AppStrings.exitExploreDemo));
+    expect(exitCalls, 1);
+  });
+
+  testWidgets('wide homepage does not show demo preview for persisted vault', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'real.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [
+            {
+              'id': 'note-recovery-phrase',
+              'title': 'Recovery Phrase',
+              'preview': 'Recovery phrase (plain copyable text).',
+              'updated': 'Now',
+              'updatedAt': '2026-08-13T10:00:00Z',
+              'pinned': true,
+              'tags': ['recovery', 'security'],
+              'delta': [
+                {'insert': 'anchor apple arrow atlas\n'},
+              ],
+            },
+          ],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('View demo preview'), findsNothing);
+    expect(find.text('GitHub'), findsNothing);
+    expect(find.text('Recovery Phrase'), findsOneWidget);
+  });
+
+  testWidgets('mobile homepage category tiles route to filtered all items', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'demo.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: VaultHomeDemoData.items,
+          initialNotes: VaultHomeDemoData.notes,
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Logins'), findsOneWidget);
+    expect(find.text('Identities'), findsOneWidget);
+    expect(find.text('Documents'), findsOneWidget);
     expect(find.text('Recent'), findsOneWidget);
-    expect(find.text('View all'), findsOneWidget);
+
+    await tester.tap(find.text('Logins'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('All Items'), findsAtLeastNWidgets(1));
+    expect(find.text('GitHub'), findsOneWidget);
+    expect(find.text('AWS'), findsOneWidget);
+    expect(find.text('Health Insurance'), findsNothing);
+  });
+
+  testWidgets('mobile homepage hides categories with no saved entries', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'personal.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [
+            {
+              'id': 'login-1',
+              'type': 'Login',
+              'title': 'Mail',
+              'updated': 'Now',
+              'fields': [],
+            },
+          ],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Logins'), findsOneWidget);
+    expect(find.text('Notes'), findsOneWidget);
+    expect(find.text('Identities'), findsNothing);
+    expect(find.text('Documents'), findsNothing);
+  });
+
+  testWidgets('homepage search clears stale category filters', (tester) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'demo.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: VaultHomeDemoData.items,
+          initialNotes: VaultHomeDemoData.notes,
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Logins'));
+    await tester.pumpAndSettle();
+    expect(find.text('GitHub'), findsOneWidget);
+    expect(find.text('AWS'), findsOneWidget);
+    expect(find.text('Health Insurance'), findsNothing);
+
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'Passport');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    expect(find.text('All Items'), findsAtLeastNWidgets(1));
+    expect(find.text('Health Insurance'), findsNothing);
+    expect(find.textContaining('Passport'), findsWidgets);
+    expect(find.text('GitHub'), findsNothing);
+  });
+
+  testWidgets('all items search includes fields folders tags and type', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'search.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [
+            {
+              'id': 'item-field',
+              'type': 'Login',
+              'title': 'Developer Account',
+              'subtitle': '',
+              'folder': 'Work',
+              'updated': 'Now',
+              'fields': [
+                {'label': 'Website', 'value': 'github.com'},
+              ],
+            },
+            {
+              'id': 'item-other',
+              'type': 'Card',
+              'title': 'Primary Card',
+              'subtitle': 'Visa',
+              'folder': 'Finance',
+              'updated': 'Now',
+              'fields': [],
+            },
+          ],
+          initialNotes: const [
+            {
+              'id': 'note-tagged',
+              'title': 'Checklist',
+              'preview': 'Private note',
+              'updated': 'Now',
+              'pinned': false,
+              'tags': ['travel'],
+              'delta': [
+                {'insert': 'Bring passport\n'},
+              ],
+            },
+          ],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('All Items').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'github.com');
+    await tester.pumpAndSettle();
+    expect(find.text('Developer Account'), findsOneWidget);
+    expect(find.text('Primary Card'), findsNothing);
+
+    await tester.enterText(find.byType(TextField).first, 'travel');
+    await tester.pumpAndSettle();
+    expect(find.text('Checklist'), findsOneWidget);
+    expect(find.text('Developer Account'), findsNothing);
+  });
+
+  testWidgets('normal vault items show multiple document attachments', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [
+            {
+              'id': 'item-login',
+              'type': 'Login',
+              'title': 'Work Mail',
+              'subtitle': 'mail@example.com',
+              'updated': 'Now',
+              'fields': [],
+              'attachments': [
+                {
+                  'id': 'attachment-1',
+                  'documentFileName': 'contract.txt',
+                  'documentExtension': 'txt',
+                  'documentSizeBytes': 1024,
+                  'documentSection': 'document_attachment_1.manifest.enc',
+                  'documentStorage': 'private-section',
+                },
+                {
+                  'id': 'attachment-2',
+                  'documentFileName': 'receipt.txt',
+                  'documentExtension': 'txt',
+                  'documentSizeBytes': 2048,
+                  'documentSection': 'document_attachment_2.manifest.enc',
+                  'documentStorage': 'private-section',
+                },
+              ],
+            },
+          ],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          onReadVaultDocument: ({required sectionName, onProgress}) async {
+            if (sectionName == 'document_attachment_2.manifest.enc') {
+              return 'receipt preview\n'.codeUnits;
+            }
+            return 'contract preview\n'.codeUnits;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('All Items').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Work Mail'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Attachments'), findsOneWidget);
+    expect(find.text('Add document'), findsOneWidget);
+    expect(find.text('contract.txt'), findsOneWidget);
+    expect(find.text('receipt.txt'), findsOneWidget);
+    expect(find.textContaining('contract preview'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('attachment-preview-interaction-boundary')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('attachment-preview-fullscreen')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('attachment-preview-fullscreen')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('document-fullscreen-close')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('document-fullscreen-save-copy')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('document-fullscreen-export-encrypted')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('contract preview'), findsWidgets);
+
+    await tester.tap(find.byKey(const ValueKey('document-fullscreen-close')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('item-attachment-attachment-2')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('receipt preview'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey('item-attachment-actions-attachment-1')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open document'), findsOneWidget);
+    expect(find.text('Share file'), findsOneWidget);
+    expect(find.text('Share encrypted file'), findsOneWidget);
+    expect(find.text('Export encrypted file'), findsOneWidget);
+    expect(find.text('Save copy'), findsWidgets);
+  });
+
+  testWidgets('vault persistence strips runtime attachment picker metadata', (
+    tester,
+  ) async {
+    List<Map<String, dynamic>>? persistedItems;
+    final initialItems = [
+      {
+        'id': 'doc-1',
+        'type': 'Documents',
+        'title': 'Passport scan',
+        'subtitle': 'passport.txt',
+        'updated': 'Now',
+        'fields': [],
+        'documentSection': 'document_doc_1',
+        'documentFileName': 'passport.txt',
+        'documentExtension': 'txt',
+        'documentSizeBytes': 12,
+        'attachments': [
+          {
+            'id': 'attachment-1',
+            'documentSection': 'document_attachment_1',
+            'documentFileName': 'visa.txt',
+            'documentExtension': 'txt',
+            'documentSizeBytes': 13,
+            '__documentReadStream__': Object(),
+          },
+        ],
+      },
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: initialItems,
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {
+                persistedItems = items
+                    .map((entry) => Map<String, dynamic>.from(entry))
+                    .toList();
+              },
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          onReadVaultDocument: ({required sectionName, onProgress}) async =>
+              'document\n'.codeUnits,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tapAllItemsTab(tester);
+    await tester.tap(find.byIcon(Icons.more_vert).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('document-action-pin')));
+    await tester.pumpAndSettle();
+
+    final persistedAttachment =
+        (persistedItems!.single['attachments'] as List).single as Map;
+    expect(persistedAttachment.containsKey('__documentReadStream__'), isFalse);
+  });
+
+  testWidgets('shell init does not auto-persist recovery note', (tester) async {
+    var persistCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {
+                persistCalls++;
+              },
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(persistCalls, 0);
+    expect(find.text('Recovery Phrase'), findsWidgets);
+  });
+
+  testWidgets('shell init does not persist when recovery note already seeded', (
+    tester,
+  ) async {
+    var persistCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [
+            {
+              'id': 'note-recovery-phrase',
+              'title': 'Recovery Phrase',
+              'preview': 'Recovery phrase (plain copyable text).',
+              'updated': 'Now',
+              'pinned': true,
+              'tags': ['recovery', 'security'],
+              'delta': [
+                {'insert': 'anchor apple arrow atlas\n'},
+              ],
+            },
+          ],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {
+                persistCalls++;
+              },
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(persistCalls, 0);
+    expect(find.text('Recovery Phrase'), findsWidgets);
+  });
+
+  testWidgets('vault shows busy overlay while persisting updates', (
+    tester,
+  ) async {
+    final persistCompleter = Completer<void>();
+    var persistCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [
+            {
+              'id': 'doc-1',
+              'type': 'Documents',
+              'title': 'Passport scan',
+              'subtitle': 'passport.txt',
+              'updated': 'Now',
+              'fields': [],
+              'documentSection': 'document_doc_1',
+              'documentFileName': 'passport.txt',
+              'documentExtension': 'txt',
+              'documentSizeBytes': 12,
+            },
+          ],
+          initialNotes: const [
+            {
+              'id': 'note-recovery-phrase',
+              'title': 'Recovery Phrase',
+              'preview': 'Recovery phrase (plain copyable text).',
+              'updated': 'Now',
+              'pinned': true,
+              'tags': ['recovery', 'security'],
+              'delta': [
+                {'insert': 'Recovery phrase\n'},
+              ],
+              'blocks': [
+                {'type': 'heading', 'text': 'Recovery phrase'},
+              ],
+            },
+          ],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) {
+                persistCalls++;
+                return persistCompleter.future;
+              },
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          onReadVaultDocument: ({required sectionName, onProgress}) async =>
+              'document\n'.codeUnits,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tapAllItemsTab(tester);
+    await tester.tap(find.byIcon(Icons.more_vert).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('document-action-pin')));
+    await tester.pump();
+
+    expect(find.text('Saving vault updates...'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    persistCompleter.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saving vault updates...'), findsNothing);
   });
 
   testWidgets(
@@ -459,9 +1928,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('No recent items yet.'), findsOneWidget);
+      expect(find.text('Older item'), findsOneWidget);
 
-      await tester.tap(find.text('All items'));
+      await tester.tap(find.text('All Items').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Older item'));
       await tester.pumpAndSettle();
@@ -479,8 +1948,8 @@ void main() {
       await tester.tap(find.text('Home'));
       await tester.pumpAndSettle();
       expect(find.text('Older item'), findsOneWidget);
-      expect(find.text('Newer item'), findsNothing);
-      expect(find.textContaining('Just now'), findsOneWidget);
+      expect(find.text('Newer item'), findsOneWidget);
+      expect(find.textContaining('Just now'), findsWidgets);
     },
   );
 
@@ -1005,6 +2474,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.tap(find.text('Vehicle'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Car'));
       await tester.pumpAndSettle();
 
@@ -1114,8 +2585,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.grid_view_outlined));
-      await tester.pumpAndSettle();
+      await tapAllItemsTab(tester);
       expect(find.text('All'), findsWidgets);
       expect(find.text('Card'), findsWidgets);
       await tester.tap(find.text('Card').last);
@@ -1124,8 +2594,7 @@ void main() {
 
       await tester.tap(find.text('All').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.grid_view_outlined));
-      await tester.pumpAndSettle();
+      await tapAllItemsTab(tester);
       expect(find.text('work'), findsWidgets);
     },
   );
@@ -1201,8 +2670,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.grid_view_outlined));
-    await tester.pumpAndSettle();
+    await tapAllItemsTab(tester);
 
     await tester.tap(find.byIcon(Icons.more_vert).first);
     await tester.pumpAndSettle();
@@ -1311,8 +2779,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.grid_view_outlined));
-    await tester.pumpAndSettle();
+    await tapAllItemsTab(tester);
 
     await tester.longPress(find.text('Email'));
     await tester.pumpAndSettle();
@@ -1439,8 +2906,7 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.grid_view_outlined));
-    await tester.pumpAndSettle();
+    await tapAllItemsTab(tester);
     expect(find.text('Home Wi-Fi Password'), findsOneWidget);
   });
 
@@ -1537,8 +3003,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.grid_view_outlined));
-    await tester.pumpAndSettle();
+    await tapAllItemsTab(tester);
 
     expect(find.textContaining('1. Buy milk'), findsOneWidget);
     expect(find.textContaining('2. Call mom'), findsOneWidget);
@@ -1637,8 +3102,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.grid_view_outlined));
-    await tester.pumpAndSettle();
+    await tapAllItemsTab(tester);
     await tester.tap(find.byIcon(Icons.more_vert).first);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('note-action-share')));
@@ -1714,8 +3178,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.grid_view_outlined));
-    await tester.pumpAndSettle();
+    await tapAllItemsTab(tester);
     await tester.tap(find.byIcon(Icons.more_vert).first);
     await tester.pumpAndSettle();
 
@@ -1724,7 +3187,9 @@ void main() {
     expect(find.text('Export encrypted file'), findsOneWidget);
   });
 
-  testWidgets('document preview and actions expose save copy', (tester) async {
+  testWidgets('document preview exposes edit, document list, and save copy', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(900, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -1759,6 +3224,15 @@ void main() {
               'documentFileName': 'passport.txt',
               'documentExtension': 'txt',
               'documentSizeBytes': 12,
+              'attachments': [
+                {
+                  'id': 'attachment-1',
+                  'documentSection': 'document_attachment_1',
+                  'documentFileName': 'visa.txt',
+                  'documentExtension': 'txt',
+                  'documentSizeBytes': 13,
+                },
+              ],
             },
           ],
           initialNotes: const [],
@@ -1787,22 +3261,23 @@ void main() {
           onReadCloudBackupAccount: () async => null,
           onChangeCloudBackupAccount: () async => false,
           onLockNow: () {},
-          onReadVaultDocument: ({required sectionName}) async =>
-              'hello world\n'.codeUnits,
+          onReadVaultDocument: ({required sectionName, onProgress}) async =>
+              sectionName == 'document_attachment_1'
+              ? 'visa document\n'.codeUnits
+              : 'passport document\n'.codeUnits,
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.grid_view_outlined));
-    await tester.pumpAndSettle();
+    await tapAllItemsTab(tester);
     await tester.tap(find.byIcon(Icons.more_vert).first);
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('document-action-save-copy')),
       findsOneWidget,
     );
-    expect(find.text('Save copy'), findsOneWidget);
+    expect(find.text('Save copy'), findsWidgets);
 
     await tester.tap(find.byKey(const ValueKey('document-action-open')));
     await tester.pumpAndSettle();
@@ -1810,7 +3285,66 @@ void main() {
       find.byKey(const ValueKey('document-detail-save-copy')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const ValueKey('document-detail-fullscreen')),
+      findsOneWidget,
+    );
     expect(find.text('Save copy'), findsOneWidget);
+    expect(find.byIcon(Icons.edit_outlined), findsOneWidget);
+    expect(find.text('Attachments'), findsNothing);
+    expect(find.text('Documents'), findsOneWidget);
+    expect(find.text('Add document'), findsOneWidget);
+    expect(find.text('passport.txt'), findsOneWidget);
+    expect(find.text('visa.txt'), findsOneWidget);
+
+    await tester.tap(find.text('visa.txt'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('visa document'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('document-detail-fullscreen')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('document-fullscreen-close')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('document-fullscreen-save-copy')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('document-fullscreen-export-encrypted')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('visa document'), findsWidgets);
+
+    await tester.tap(find.byKey(const ValueKey('document-fullscreen-close')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open document'), findsOneWidget);
+    expect(find.text('Share file'), findsOneWidget);
+    expect(find.text('Share encrypted file'), findsOneWidget);
+    expect(find.text('Export encrypted file'), findsOneWidget);
+    expect(find.text('Save copy'), findsWidgets);
+
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit item'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Title'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Description'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'File name'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Extension'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Size'), findsNothing);
+    expect(find.text('passport.txt'), findsOneWidget);
+    expect(find.textContaining('Current document'), findsOneWidget);
   });
 
   testWidgets('settings shows encrypted secret import entry point', (
@@ -1876,6 +3410,81 @@ void main() {
       find.byKey(const ValueKey('settings-import-encrypted-secret')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('settings import cancel keeps import row usable', (tester) async {
+    final portability = _CancelingSecretSharePortabilityAdapter();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          secretSharePortability: portability,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    final importRow = find.byKey(
+      const ValueKey('settings-import-encrypted-secret'),
+    );
+    await tester.scrollUntilVisible(
+      importRow,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(importRow);
+    await tester.pumpAndSettle();
+
+    expect(portability.importCalls, 1);
+    expect(find.text('Import data from a file'), findsOneWidget);
+    expect(find.text('Importing data...'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    await tester.tap(importRow);
+    await tester.pumpAndSettle();
+    expect(portability.importCalls, 2);
   });
 
   testWidgets('security encryption settings show sanitized metadata', (
@@ -1985,7 +3594,8 @@ void main() {
     expect(find.text('Present'), findsOneWidget);
     expect(find.text('Auto-lock'), findsOneWidget);
     expect(find.text('120 sec'), findsWidgets);
-    expect(find.text('Change master password'), findsOneWidget);
+    expect(find.text('Change master password'), findsNothing);
+    expect(find.text('Manage biometrics'), findsNothing);
 
     expect(find.text('payload.secret'), findsNothing);
     expect(find.text('/tmp/private-vault'), findsNothing);
@@ -1995,6 +3605,7 @@ void main() {
   testWidgets('debug internals are cached and refreshed explicitly', (
     tester,
   ) async {
+    SharedPreferences.setMockInitialValues({});
     tester.view.physicalSize = const Size(900, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -2045,6 +3656,7 @@ void main() {
           onReadCloudBackupAccount: () async => null,
           onChangeCloudBackupAccount: () async => false,
           onLockNow: () {},
+          debugInternalsFeatureAvailableOverride: true,
           onReadVaultInternals: () async {
             readCount++;
             return {
@@ -2054,6 +3666,7 @@ void main() {
               'storageLayoutVersion': 1,
               'manifestVersion': 1,
               'snapshotBytes': 100,
+              'workingStoreBytes': 7240,
               'vaultId': 'vault-id',
               'vaultVersionId': 'version-id',
               'revision': readCount,
@@ -2061,7 +3674,12 @@ void main() {
               'updatedAt': '2026-05-30T00:00:00.000Z',
               'lastModifiedByDeviceId': 'device-1',
               'crypto': {'kdf': 'Argon2id', 'cipher': 'AES-256-GCM'},
-              'encryptedSections': {'items': 42},
+              'encryptedSections': {
+                'items': 42,
+                'document_doc.manifest.enc': 100,
+                'document_doc_chunk_000000.enc': 200,
+                'document_doc_chunk_000001.enc': 50,
+              },
               'workingStore': {
                 'type': 'memory',
                 'root': 'memory://vaults/test',
@@ -2076,19 +3694,71 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Debug'), findsNothing);
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('settings-debug-internals-switch')),
+      findsNothing,
+    );
+    final aboutNijaRow = find.byKey(const ValueKey('settings-about-nija-row'));
+    await tester.scrollUntilVisible(
+      aboutNijaRow,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(aboutNijaRow);
+    await tester.pump();
+    expect(find.textContaining('taps away from debug options.'), findsNothing);
+
+    await tester.tap(aboutNijaRow);
+    await tester.pump();
+    expect(find.textContaining('taps away from debug options.'), findsNothing);
+
+    await tester.tap(aboutNijaRow);
+    await tester.pump();
+    expect(find.text('4 taps away from debug options.'), findsOneWidget);
+
+    await tester.tap(aboutNijaRow);
+    await tester.pump();
+    expect(find.text('4 taps away from debug options.'), findsNothing);
+    expect(find.text('3 taps away from debug options.'), findsOneWidget);
+
+    for (var i = 0; i < 3; i++) {
+      await tester.tap(aboutNijaRow);
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('settings-debug-internals-switch')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('settings-debug-internals-switch')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Debug'), findsOneWidget);
+
     await tester.tap(find.text('Debug'));
     await pumpUntilFound(tester, find.text('Vault internals'));
     await tester.pumpAndSettle();
     expect(readCount, 1);
-    final hiddenFilesMessage = find.textContaining(
-      'more files hidden to keep Debug responsive',
+    expect(find.text('workingStoreBytes'), findsOneWidget);
+    expect(find.text('7240'), findsOneWidget);
+    expect(find.text('document manifests'), findsOneWidget);
+    expect(find.text('document chunks'), findsOneWidget);
+    expect(find.text('document bytes'), findsOneWidget);
+    expect(find.text('document doc'), findsOneWidget);
+    expect(find.text('document_doc.manifest.enc'), findsNothing);
+    expect(find.text('document_doc_chunk_0.enc'), findsNothing);
+    expect(
+      find.textContaining('more files hidden to keep Debug responsive'),
+      findsNothing,
     );
-    await tester.scrollUntilVisible(
-      hiddenFilesMessage,
-      400,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(hiddenFilesMessage, findsOneWidget);
 
     await tester.tap(find.text('Home'));
     await tester.pumpAndSettle();
@@ -2318,6 +3988,9 @@ void main() {
       MaterialApp(
         home: VaultAppShell(
           activeVaultName: 'family-vault.nija',
+          activeVaultRevision: 12,
+          activeVaultVersionId: 'abcdef1234567890',
+          activeVaultUpdatedAt: '2026-07-22T12:34:00.000',
           recoveryWords: const [
             'anchor',
             'apple',
@@ -2368,6 +4041,9 @@ void main() {
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('family-vault.nija'), findsOneWidget);
+    expect(find.text('Current version'), findsOneWidget);
+    expect(find.text('r12 - abcdef12'), findsOneWidget);
+    expect(find.text('Updated 2026-07-22 12:34'), findsOneWidget);
   });
 
   testWidgets('settings can rename active vault name', (tester) async {
@@ -2438,4 +4114,309 @@ void main() {
     expect(renamedTo, 'Personal vault');
     expect(find.text('Personal vault'), findsOneWidget);
   });
+
+  testWidgets('paid cloud backup shows last backup and backed up version', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'nija_pref_cloud_backup_enabled_v1': true,
+      'nija_pref_cloud_backup_last_at_v1': DateTime(
+        2026,
+        7,
+        22,
+        9,
+        30,
+      ).millisecondsSinceEpoch,
+      'nija_pref_cloud_backup_revision_v1': 8,
+      'nija_pref_cloud_backup_version_id_v1': '1234567890abcdef',
+      'nija_pref_cloud_backup_updated_at_v1': '2026-07-22T09:15:00.000',
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultRevision: 9,
+          activeVaultVersionId: 'fedcba0987654321',
+          activeVaultUpdatedAt: '2026-07-22T10:00:00.000',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => 'paid@example.com',
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          cloudBackupFeatureAvailableOverride: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Current version'), findsOneWidget);
+    expect(find.text('r9 - fedcba09'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-cloud-backup-last-at')),
+      200,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Last backup'), findsOneWidget);
+    expect(find.text('2026-07-22 09:30'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-cloud-backup-version')),
+      200,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Backed up version'), findsOneWidget);
+    expect(find.text('r8 - 12345678'), findsOneWidget);
+    expect(find.text('Vault updated: 2026-07-22 09:15'), findsOneWidget);
+  });
+
+  testWidgets('back is blocked while cloud backup is running', (tester) async {
+    final backupCompleter = Completer<void>();
+    var lockCalls = 0;
+    SharedPreferences.setMockInitialValues({
+      'nija_pref_cloud_backup_enabled_v1': true,
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultRevision: 2,
+          activeVaultVersionId: 'abcdef1234567890',
+          activeVaultUpdatedAt: '2026-07-22T10:00:00.000',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () => backupCompleter.future,
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => 'paid@example.com',
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () => lockCalls++,
+          cloudBackupFeatureAvailableOverride: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    final backupNow = find.byKey(const ValueKey('settings-cloud-backup-now'));
+    await tester.scrollUntilVisible(backupNow, 200);
+    await tester.pumpAndSettle();
+
+    await tester.tap(backupNow);
+    await tester.pump();
+    expect(find.text('Cloud backup in progress...'), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+
+    expect(lockCalls, 0);
+    expect(find.text('Settings'), findsOneWidget);
+    expect(
+      find.text('Please wait for the operation to finish.'),
+      findsOneWidget,
+    );
+
+    backupCompleter.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Cloud backup in progress...'), findsNothing);
+  });
+
+  testWidgets('free build shows paid cloud backup gate in settings', (
+    tester,
+  ) async {
+    var cloudAccountReads = 0;
+    var backupCalls = 0;
+    SharedPreferences.setMockInitialValues({
+      'nija_pref_cloud_backup_enabled_v1': true,
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async => backupCalls++,
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async {
+            cloudAccountReads++;
+            return 'paid@example.com';
+          },
+          onChangeCloudBackupAccount: () async => true,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(cloudAccountReads, 0);
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+
+    final cloudBackupRow = find.byKey(
+      const ValueKey('settings-cloud-backup-switch'),
+    );
+    await tester.scrollUntilVisible(cloudBackupRow, 200);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cloud Backup'), findsOneWidget);
+    expect(find.text('Available in paid version'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-cloud-backup-now')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('settings-cloud-restore-now')),
+      findsNothing,
+    );
+
+    await tester.tap(cloudBackupRow);
+    await tester.pumpAndSettle();
+    expect(backupCalls, 0);
+    expect(
+      find.byKey(const ValueKey('settings-cloud-backup-now')),
+      findsNothing,
+    );
+  });
+}
+
+class _CancelingSecretSharePortabilityAdapter
+    implements SecretSharePortabilityAdapter {
+  int importCalls = 0;
+
+  @override
+  Future<bool> exportEncryptedFile({
+    required String suggestedName,
+    required String content,
+  }) async {
+    return true;
+  }
+
+  @override
+  Future<bool> exportPlainFile({
+    required String suggestedName,
+    required Uint8List bytes,
+    required String mimeType,
+  }) async {
+    return true;
+  }
+
+  @override
+  Future<ImportedSecretFile?> importEncryptedFile() async {
+    importCalls++;
+    return null;
+  }
+
+  @override
+  Future<bool> shareEncryptedFile({
+    required String suggestedName,
+    required String content,
+  }) async {
+    return true;
+  }
 }

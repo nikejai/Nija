@@ -42,12 +42,12 @@ The app follows a layered approach:
   - supports key rotation workflows from Settings:
     - rotate master-password wrapper
     - rotate recovery-phrase wrapper
-  - web runtime uses durable browser storage (`localStorage`) through `WebVaultStorageAdapter`
+  - web runtime uses durable browser private app storage through `WebVaultStorageAdapter`; vault bytes and source metadata are not stored in HTTP cookies
   - non-web targets use file-based persistence (`FileVaultStorageAdapter`)
   - cross-platform vault import/export:
     - import encrypted vault from local file/upload,
     - export current encrypted vault to local storage with user-selected file name,
-    - cached known-vault references (via app preferences) for quick reopen from `Open existing vault`
+    - cached known-vault references (via app preferences) for quick reopen from `Open existing vault`, including non-sensitive source hints such as browser private storage and selected file name
   - lock/background transitions clear in-memory master-password input before returning to unlock
 - Notes:
   - rich text create/edit/view via `flutter_quill`
@@ -74,6 +74,8 @@ The app follows a layered approach:
   - long-press item actions now include encrypted sharing (`.nijas`) with a user-entered share password
   - long-press item actions now include local encrypted export (`.nijas`) to filesystem
   - item detail now supports edit and delete actions in the app bar
+  - item detail uses a constrained desktop/tablet layout with a main content panel, side metadata panel, filtered non-empty fields, and type-aware primary quick actions
+  - document previews include an enlarge/fullscreen action for standalone documents and item attachments
   - Gmail-style multi-select mode for vault items (enter via left icon tap, selected-count top bar with pin/delete)
   - list rows now show `Last accessed: ...` metadata for both vault items and notes
   - key list supports:
@@ -104,13 +106,31 @@ The app follows a layered approach:
     - auto backup toggle (while app is active)
     - frequency selection (`Daily`, `Weekly`, `Monthly`)
     - `Restore backup` action from the same section
+- App PIN can be set or changed from Settings -> Security and provides local quick unlock when biometrics are unavailable.
 - Biometric enable/disable in Settings uses a slider switch control with confirmation dialogs for both enable and disable.
+- On web, biometric/device unlock uses secure WebAuthn PRF quick unlock after a successful master-password login. PIN setup is required first; PRF wraps the PIN, and the PIN unlocks the encrypted local helper. Browsers or devices without secure PRF support keep biometrics disabled and use PIN or master-password unlock.
 - Encrypted secret sharing:
   - app-specific portable secret file extension: `.nijas`
   - content uses JSON envelope with PBKDF2-HMAC-SHA256 key derivation + AES-256-GCM payload encryption
   - sender chooses both file name and per-file share password at share time
   - Android/iOS app metadata now registers `.nijas` document type association for open-with flows
 - Unlock flow enhancements:
+  - Wide WebApp first page and unlock now use the same Nija app-themed onboarding surfaces as mobile, scaled for tablet/web.
+  - Wide WebApp/tablet vault screens use a narrow brand/status rail plus a separate vault navigation sidebar and constrained content frame while mobile keeps bottom navigation.
+  - Wide WebApp/tablet vault picker opens as a centered dialog; mobile keeps the bottom sheet picker.
+  - Wide WebApp/tablet add-item saved confirmation opens as a centered constrained dialog; mobile keeps the bottom sheet confirmation.
+  - Wide WebApp/tablet New Item category selection is bounded to a readable column instead of stretching rows across the full browser width.
+  - First-page `Import data` imports a vault instead of opening create-vault onboarding, and successful imported-vault password entry opens the vault directly.
+  - Wide dashboard uses compact wrapping category tiles plus a recent/quick-actions split layout so all folders/types remain visible without stretched empty cards.
+  - Web/tablet dashboard now uses a wireframe-aligned homepage with a constrained search row, six stat cards, recent items, quick actions, and an optional homepage-only demo preview CTA for new empty vaults.
+  - Home dashboard search now opens All Items with stale category/filter state cleared, and All Items search matches titles, subtitles, item type, folder, tags, note text, and field values.
+  - Mobile remains the source experience below `760px` and in short landscape windows; tablet/web adds the bounded rail/sidebar workspace only when there is sufficient vertical room.
+  - Tablet/web All Items uses a bounded index with type, folder, and modified columns, while mobile retains compact rows and horizontal filters.
+  - Dashboard category tiles render only saved categories; folders remain inferred item metadata until a dedicated folder-management flow is introduced.
+  - Web install metadata now uses the Nija name, description, icon set, and app theme color rather than Flutter defaults.
+  - The first entry screen now uses one responsive, mobile-first Nija vault flow at every breakpoint: select a known vault, open a vault file, create a vault, import data, or restore from supported cloud storage. Selecting, switching, or locking a vault opens the same compact full-page local-reference list from the web flow reference, then advances directly to one unlock step; `Select different vault file` stays wired to the local import path.
+  - Opening or importing a vault that is already known validates the entered password and enters the app directly instead of showing a second unlock screen.
+  - Imported-vault password validation reuses the normal unlock UI and `Unlock` action; there is no separate `Unlock imported vault` step in the login flow.
   - `Create vault` is available directly from unlock screen.
   - `Open encrypted secret` on unlock screen decrypts `.nijas` with file password and opens a key-value viewer page.
   - encrypted secret viewer provides:
@@ -126,6 +146,8 @@ The app follows a layered approach:
 - Multi-vault behavior:
   - vault picker sorting is based on `last opened` metadata (most recent first)
   - biometric enrollment/prompt is tracked per vault in app-local storage
+  - web PIN quick unlock stores a per-vault encrypted unlock helper derived from the user PIN
+  - web biometric quick unlock stores per-vault WebAuthn enrollment metadata, a PRF salt, and an encrypted PIN helper; the PRF wrapping key is recreated only after device verification and is not stored
 
 ## Security status
 
@@ -306,6 +328,8 @@ flutter drive -d chrome --driver=test_driver/integration_test.dart --target=inte
 - Design rules: `docs/design.md`
 - Architecture and wireframes: `docs/architecture_wireframe.md`
 - Web prototype reference: `docs/web_prototype.tsx`
+- Web revamp tracker: `docs/web-revampt-todo.md`
+- Ops runbook: `docs/ops_readme.md`
 - Encryption and recovery model: `docs/encryption_and_recovery.md`
 - Security flow diagrams: `docs/security_flow_diagram.md`
 - Screen and feature flow graph: `docs/screen_flow_graph.md`
