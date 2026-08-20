@@ -1,0 +1,22 @@
+name: flutter_secure_storage_web
+description: Wasm-safe web shim for Nija. The app avoids this storage path on web.
+version: 1.2.1
+publish_to: 'none'
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_secure_storage_platform_interface: ^1.1.1
+  flutter_web_plugins:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      web:
+        pluginClass: FlutterSecureStorageWeb
+        fileName: flutter_secure_storage_web.dart

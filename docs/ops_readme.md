@@ -767,13 +767,32 @@ flutter run -d <web-device-id>
 
 ```bash
 flutter pub get
-flutter build web --release
+flutter build web --release --wasm -O4 --no-source-maps --csp
 ```
+
+This is the strongest deployable web build for the current codebase:
+
+- `--wasm` builds the Flutter app to WebAssembly for supported browsers, with
+  JavaScript fallback output included by Flutter for browsers that cannot run
+  the wasm renderer.
+- `-O4` uses the highest Dart web compiler optimization level.
+- `--no-source-maps` keeps source maps out of the deployable artifact.
+- `--csp` disables dynamic code generation in the generated app output.
+- Flutter web does not support the native `--obfuscate` flag. Web release code
+  is minified and tree-shaken, but client-side code must not be treated as a
+  secret.
+- Web platform APIs used by vault storage, import/export, sharing, PWA install,
+  page lifecycle, and WebAuthn quick unlock are routed through the wasm-safe
+  `web/nija_browser_bridge.js` plus Dart JS interop wrappers.
+- The project overrides `flutter_secure_storage_web` with
+  `packages/flutter_secure_storage_web_wasm` so Flutter's web plugin registrant
+  does not import the upstream `dart:html` implementation during wasm builds.
+  Nija web vault secrets are not stored through this shim.
 
 Paid WebApp release build with Google Drive configuration:
 
 ```bash
-flutter build web --release \
+flutter build web --release --wasm -O4 --no-source-maps --csp \
   --dart-define=NIJA_PAID_BUILD=true \
   --dart-define=GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
 ```
@@ -802,7 +821,7 @@ For mobile device testing on the same network, serve from the host machine and o
 ### Deploy / Release Options
 
 - Static hosting:
-  1. Build with `flutter build web --release`.
+  1. Build with `flutter build web --release --wasm -O4 --no-source-maps --csp`.
   2. Upload the full `build/web` directory to the host.
   3. Serve over HTTPS.
   4. Configure SPA fallback to `index.html`.
@@ -820,7 +839,7 @@ For mobile device testing on the same network, serve from the host machine and o
   5. Deploy with Firebase CLI.
 
 ```bash
-flutter build web --release
+flutter build web --release --wasm -O4 --no-source-maps --csp
 firebase deploy --only hosting
 ```
 
@@ -842,7 +861,7 @@ The production web build includes two deployable header configurations:
 Required production headers:
 
 ```text
-Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://apis.google.com; connect-src 'self' https://www.gstatic.com https://fonts.gstatic.com https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://www.google.com wss: blob:; img-src 'self' data: blob: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; frame-src https://accounts.google.com; worker-src 'self' blob: https://www.gstatic.com; manifest-src 'self'
+Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://apis.google.com; connect-src 'self' https://www.gstatic.com https://fonts.gstatic.com https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://www.google.com wss: blob:; img-src 'self' data: blob: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; frame-src https://accounts.google.com; worker-src 'self' blob: https://www.gstatic.com; manifest-src 'self'
 Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
@@ -854,7 +873,8 @@ Cross-Origin-Resource-Policy: same-origin
 
 Policy notes:
 
-- Flutter web currently requires inline/eval/WebAssembly allowances for its bootstrap/runtime. Keep these allowances scoped to the app origin and Google origins needed for Identity/Drive.
+- Build production web artifacts with `flutter build web --release --wasm -O4 --no-source-maps --csp`.
+- Flutter web currently requires inline script/style allowances for its bootstrap/runtime and may require `wasm-unsafe-eval` for CanvasKit WebAssembly assets. General JavaScript `unsafe-eval` is intentionally not allowed.
 - Keep `Cross-Origin-Opener-Policy` at `same-origin-allow-popups` so Google OAuth popup flows continue to work.
 - Do not enable `Cross-Origin-Embedder-Policy` until Google sign-in, fonts, CanvasKit, service-worker behavior, and OAuth popups are validated with that isolation mode.
 - Keep HSTS only on HTTPS production domains. Do not preload a domain until all subdomains are HTTPS-ready.
@@ -1040,7 +1060,7 @@ flutter run -d <device-id> --dart-define=NIJA_PAID_BUILD=true
 flutter build apk --release
 flutter build appbundle --release
 flutter build ipa --release
-flutter build web --release
+flutter build web --release --wasm -O4 --no-source-maps --csp
 ```
 
 Release hardening builds:
@@ -1064,7 +1084,7 @@ flutter build ipa --release \
   --obfuscate \
   --split-debug-info=build/symbols/ios
 
-flutter build web --release \
+flutter build web --release --wasm -O4 --no-source-maps --csp \
   --dart-define=NIJA_PAID_BUILD=true
 ```
 
@@ -1099,7 +1119,7 @@ Keep obfuscation symbols private. They are required to decode release stack trac
 ### Web Release Smoke Run
 
 ```bash
-flutter build web --release
+flutter build web --release --wasm -O4 --no-source-maps --csp
 cd build/web
 python3 -m http.server 8000
 ```
@@ -1122,7 +1142,7 @@ Run platform builds:
 flutter build apk --release --obfuscate --split-debug-info=build/symbols/android
 flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/android
 flutter build ipa --release --obfuscate --split-debug-info=build/symbols/ios
-flutter build web --release
+flutter build web --release --wasm -O4 --no-source-maps --csp
 ```
 
 Release gate reference: `docs/release_hardening_gates.md`.

@@ -76,6 +76,17 @@ https://<your-production-domain>/privacy.html
   optional Android cloud backup uploads encrypted vault files to the user's
   Google Drive account
 
+## Store Assets
+
+- Google Play app icon: `assets/store/play_store_icon.png`
+  - 512x512 PNG
+  - under 1024 KB
+  - square artwork; Google Play applies the final mask and shadow
+- Google Play feature graphic: `assets/store/play_feature_graphic.jpg`
+  - 1024x500 JPEG
+  - RGB/sRGB
+  - no alpha channel
+
 ## Keywords
 
 password vault, secure notes, encrypted vault, private storage, local-first,

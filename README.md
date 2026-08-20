@@ -195,6 +195,16 @@ flutter analyze
 flutter test
 ```
 
+Web release build:
+
+```bash
+flutter build web --release --wasm -O4 --no-source-maps --csp
+```
+
+The web release uses Flutter WebAssembly output with hardened CSP-compatible
+flags. Detailed deployment headers, OAuth origin setup, and hosting checks are
+documented in `docs/ops_readme.md`.
+
 Paid build run example:
 
 ```bash
@@ -345,3 +355,5 @@ flutter drive -d chrome --driver=test_driver/integration_test.dart --target=inte
 
 - Source branding image: `nija.png`
 - Launcher icon source: `assets/branding/nija_mark.png`
+- Google Play listing icon: `assets/store/play_store_icon.png`
+- Google Play feature graphic: `assets/store/play_feature_graphic.jpg`

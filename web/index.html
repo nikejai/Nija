@@ -23,7 +23,7 @@
     CSP baseline for the web vault. Flutter CanvasKit and Material fonts load from
     gstatic.com unless you self-host them at build time. Mirror on your CDN/host.
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://apis.google.com; connect-src 'self' https://www.gstatic.com https://fonts.gstatic.com https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://www.google.com wss: blob:; img-src 'self' data: blob: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; frame-src https://accounts.google.com; worker-src 'self' blob: https://www.gstatic.com; manifest-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://accounts.google.com https://apis.google.com; connect-src 'self' https://www.gstatic.com https://fonts.gstatic.com https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://www.google.com wss: blob:; img-src 'self' data: blob: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; frame-src https://accounts.google.com; worker-src 'self' blob: https://www.gstatic.com; manifest-src 'self';">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <meta name="description" content="Your private, local-first digital vault.">
   <meta name="theme-color" content="#27272A">
@@ -58,6 +58,7 @@
 <body>
   <script src="pwa_install.js"></script>
   <script src="webauthn_quick_unlock.js"></script>
+  <script src="nija_browser_bridge.js"></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

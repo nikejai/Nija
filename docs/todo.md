@@ -315,9 +315,9 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Scope: update tests expecting old `Custom templates`, `All types`, note action keys, selection/share actions, and related labels.
 - [ ] Re-run release readiness gates.
   - Goal: `./scripts/release_hardening_gate.sh`, `flutter test`, and `flutter build apk --release` all pass.
-- [ ] Add WebApp release build steps.
+- [x] Add WebApp release build steps.
   - Goal: document and validate repeatable release steps for the web app.
-  - Scope: add commands for clean Flutter web release build, build artifact location, hosting assumptions, cache headers/service-worker behavior, and release smoke checks.
+  - Scope: added commands for clean Flutter wasm web release build, build artifact location, hosting assumptions, cache headers/service-worker behavior, and release smoke checks.
   - Include a release note/template for producing the web app release artifact and confirming it can be deployed without dev-only flags.
 - [ ] Implement WebApp/tablet UX consistent with the Nija app theme.
   - Work these one item at a time and validate each item before moving to the next.
@@ -389,7 +389,7 @@ Work these items strictly one at a time. Each item should be fully implemented, 
     - tablet landscape,
     - document/PDF fullscreen preview.
   - Add WebApp release smoke tests:
-    - `flutter build web --release`,
+    - `flutter build web --release --wasm -O4 --no-source-maps --csp`,
     - serve `build/web` locally,
     - load app online,
     - create vault,

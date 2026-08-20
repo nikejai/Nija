@@ -2,6 +2,40 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-08-20 01:10:16 IST
+
+- Added a Google Play compatible feature graphic.
+  - Generated `assets/store/play_feature_graphic.jpg` from the Nija brand artwork.
+  - Verified the asset is 1024x500 JPEG, RGB/sRGB, and has no alpha channel.
+
+## 2026-08-20 01:03:56 IST
+
+- Added a Google Play compatible store icon asset.
+  - Generated `assets/store/play_store_icon.png` as a 512x512 PNG under the Play listing size limit.
+  - Documented the Play Store icon asset path in app info.
+
+## 2026-08-20 00:46:43 IST
+
+- Enabled a deployable Flutter web WebAssembly release build.
+  - Replaced app web `dart:html`/IndexedDB/file/share/PWA access with a wasm-safe JS interop bridge loaded from `web/nija_browser_bridge.js`.
+  - Switched web platform conditionals to `dart.library.js_interop` so wasm builds use the real web adapters instead of stubs.
+  - Added a local wasm-safe `flutter_secure_storage_web` shim to avoid the upstream plugin's `dart:html` web registrant during wasm compilation.
+  - Updated web release documentation to include `flutter build web --release --wasm -O4 --no-source-maps --csp`.
+
+## 2026-08-19 23:43:28 IST
+
+- Added Nija branding to the web/PWA icon package.
+  - Enabled web icon generation in `flutter_launcher_icons`.
+  - Regenerated `web/favicon.png` and the web manifest icon set from `assets/branding/nija_mark.png`.
+  - Rebuilt the hardened web release artifact so `build/web` includes the Nija logo.
+
+## 2026-08-19 23:09:29 IST
+
+- Hardened the production web release build path.
+  - Updated web release guidance to use `flutter build web --release -O4 --no-source-maps --csp`.
+  - Removed general JavaScript `unsafe-eval` from the web CSP while retaining the scoped WebAssembly allowance needed by Flutter CanvasKit assets.
+  - Documented that wasm production builds are currently blocked by `dart:html`/`dart:js_util` dependencies.
+
 ## 2026-08-19 23:04:33 IST
 
 - Added a direct web privacy policy page.
