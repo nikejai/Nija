@@ -81,7 +81,7 @@ void main() {
             onReadCloudBackupAccount: () async => null,
             onChangeCloudBackupAccount: () async => false,
             onLockNow: () {},
-            onReadVaultDocument: ({required sectionName}) async =>
+            onReadVaultDocument: ({required sectionName, onProgress}) async =>
                 _samplePdfBytes(),
           ),
         ),

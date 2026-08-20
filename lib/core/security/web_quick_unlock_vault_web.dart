@@ -1,12 +1,8 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use, uri_does_not_exist
-
 import 'dart:convert';
-import 'dart:html' as html;
-import 'dart:indexed_db' as idb;
-import 'dart:js_util' as js_util;
 
 import 'package:cryptography/cryptography.dart';
 
+import '../platform/nija_browser_bridge.dart';
 import 'web_quick_unlock_vault_base.dart';
 
 WebQuickUnlockVault createWebQuickUnlockVault() => WebQuickUnlockVaultWeb();
@@ -17,35 +13,13 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
   static const _dbVersion = 1;
   static const _recordVersion = 4;
 
-  static idb.Database? _db;
   String? _authenticatedVaultId;
   String? _authenticatedPrfKeyBase64Url;
 
-  Future<idb.Database> _openDatabase() async {
-    if (_db != null) return _db!;
-    _db = await html.window.indexedDB!.open(
-      _dbName,
-      version: _dbVersion,
-      onUpgradeNeeded: (idb.VersionChangeEvent event) {
-        final db = event.target.result as idb.Database;
-        if (!db.objectStoreNames!.contains(_storeName)) {
-          db.createObjectStore(_storeName);
-        }
-      },
-    );
-    return _db!;
-  }
-
-  dynamic _webAuthn() => js_util.getProperty(html.window, 'nijaWebAuthn');
-
   @override
   Future<bool> isAvailable() async {
-    final bridge = _webAuthn();
-    if (bridge == null) return false;
     try {
-      return await js_util.promiseToFuture<bool>(
-        js_util.callMethod(bridge, 'isAvailable', const []),
-      );
+      return nijaWebAuthnIsAvailable();
     } catch (_) {
       return false;
     }
@@ -53,12 +27,8 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
 
   @override
   Future<bool> isWebAuthnSupported() async {
-    final bridge = _webAuthn();
-    if (bridge == null) return false;
     try {
-      return await js_util.promiseToFuture<bool>(
-        js_util.callMethod(bridge, 'isWebAuthnSupported', const []),
-      );
+      return nijaWebAuthnIsSupported();
     } catch (_) {
       return false;
     }
@@ -66,12 +36,8 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
 
   @override
   Future<bool> supportsSecureQuickUnlock() async {
-    final bridge = _webAuthn();
-    if (bridge == null) return false;
     try {
-      return await js_util.promiseToFuture<bool>(
-        js_util.callMethod(bridge, 'supportsPrf', const []),
-      );
+      return nijaWebAuthnSupportsPrf();
     } catch (_) {
       return false;
     }
@@ -144,17 +110,11 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
     required String password,
     required String displayName,
   }) async {
-    final bridge = _webAuthn();
-    if (bridge == null) {
-      throw StateError('WebAuthn is unavailable in this browser.');
-    }
-    Object? registration;
+    NijaWebAuthnRegistration? registration;
     try {
-      registration = await js_util.promiseToFuture<Object?>(
-        js_util.callMethod(bridge, 'registerQuickUnlock', [
-          vaultId,
-          displayName,
-        ]),
+      registration = await nijaWebAuthnRegisterQuickUnlock(
+        vaultId: vaultId,
+        displayName: displayName,
       );
     } catch (error) {
       throw StateError(
@@ -164,12 +124,9 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
     if (registration == null) {
       throw StateError('WebAuthn registration failed.');
     }
-    final credentialId =
-        js_util.getProperty(registration, 'credentialId')?.toString() ?? '';
-    final prfSaltBase64Url =
-        js_util.getProperty(registration, 'prfSalt')?.toString() ?? '';
-    final prfKeyBase64Url =
-        js_util.getProperty(registration, 'prfKey')?.toString() ?? '';
+    final credentialId = registration.credentialId;
+    final prfSaltBase64Url = registration.prfSalt;
+    final prfKeyBase64Url = registration.prfKey;
     if (credentialId.isEmpty) {
       throw StateError('WebAuthn registration failed.');
     }
@@ -210,20 +167,14 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
     clearAuthentication();
     final record = await _readRecord(vaultId);
     if (record == null || record.version != _recordVersion) return false;
-    final bridge = _webAuthn();
-    if (bridge == null) return false;
     try {
-      final result = await js_util.promiseToFuture<Object?>(
-        js_util.callMethod(bridge, 'authenticateQuickUnlock', [
-          record.credentialId,
-          record.prfSaltBase64Url,
-        ]),
+      final result = await nijaWebAuthnAuthenticateQuickUnlock(
+        credentialId: record.credentialId,
+        prfSalt: record.prfSaltBase64Url,
       );
       if (result == null) return false;
-      final ok = js_util.getProperty(result, 'ok') == true;
-      if (!ok) return false;
-      final prfKeyBase64Url =
-          js_util.getProperty(result, 'prfKey')?.toString() ?? '';
+      if (!result.ok) return false;
+      final prfKeyBase64Url = result.prfKey;
       if (prfKeyBase64Url.isEmpty) return false;
       _authenticatedVaultId = vaultId;
       _authenticatedPrfKeyBase64Url = prfKeyBase64Url;
@@ -261,10 +212,12 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
 
   @override
   Future<void> remove({required String vaultId}) async {
-    final db = await _openDatabase();
-    final txn = db.transaction(_storeName, 'readwrite');
-    await txn.objectStore(_storeName).delete(vaultId);
-    await txn.completed;
+    await nijaDeleteIndexedText(
+      dbName: _dbName,
+      storeName: _storeName,
+      key: vaultId,
+      version: _dbVersion,
+    );
     if (_authenticatedVaultId == vaultId) {
       clearAuthentication();
     }
@@ -286,27 +239,33 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
     required String vaultId,
     required _QuickUnlockRecord record,
   }) async {
-    final db = await _openDatabase();
-    final txn = db.transaction(_storeName, 'readwrite');
-    await txn.objectStore(_storeName).put(<String, Object>{
-      'version': record.version,
-      'credentialId': record.credentialId,
-      'prfSalt': record.prfSaltBase64Url,
-      'cipherText': record.cipherTextBase64,
-      'nonce': record.nonceBase64,
-      'mac': record.macBase64,
-    }, vaultId);
-    await txn.completed;
+    await nijaWriteIndexedText(
+      dbName: _dbName,
+      storeName: _storeName,
+      key: vaultId,
+      value: jsonEncode(<String, Object>{
+        'version': record.version,
+        'credentialId': record.credentialId,
+        'prfSalt': record.prfSaltBase64Url,
+        'cipherText': record.cipherTextBase64,
+        'nonce': record.nonceBase64,
+        'mac': record.macBase64,
+      }),
+      version: _dbVersion,
+    );
   }
 
   Future<_QuickUnlockRecord?> _readRecord(String vaultId) async {
-    final db = await _openDatabase();
-    final txn = db.transaction(_storeName, 'readonly');
-    final Object? rawResult =
-        await txn.objectStore(_storeName).getObject(vaultId) as Object?;
-    await txn.completed;
-    if (rawResult is! Map) return null;
-    final result = rawResult;
+    final rawResult = await nijaReadIndexedText(
+      dbName: _dbName,
+      storeName: _storeName,
+      key: vaultId,
+      version: _dbVersion,
+    );
+    if (rawResult == null || rawResult.isEmpty) return null;
+    final decoded = jsonDecode(rawResult);
+    if (decoded is! Map) return null;
+    final result = decoded;
     final versionRaw = result['version'];
     final version = versionRaw is num ? versionRaw.toInt() : 0;
     final credentialId = result['credentialId']?.toString() ?? '';

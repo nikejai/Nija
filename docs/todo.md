@@ -182,17 +182,18 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [x] Add first paid feature: Google backup integration (paid-only).
   - Show backup entry as disabled in free mode.
   - Show hint text: `Available in paid version`.
-  - Added build-gated cloud-backup toggle in Settings (`NIJA_PAID_BUILD`): Android label `Backup to Google Drive`, iOS label `Backup to iCloud`, disabled in free build with paid hint text.
+  - Android cloud backup is gated by the Google Play expanded-storage entitlement; `NIJA_PAID_BUILD` remains a development override.
   - Implemented paid-build `Backup now` action via native share sheet to save encrypted vault file into Google Drive/iCloud Drive.
   - Centralized cloud-backup and expanded-storage capability checks in `AppFeatures`, and added free-build regression coverage for the Settings gate.
-- [ ] Move paid feature unlocks from build-only flags to runtime entitlements.
+- [x] Move paid feature unlocks from build-only flags to runtime entitlements.
   - Paid features must be toggleable at runtime based on a locally cached entitlement and the latest Play Billing purchase state.
   - Keep build flags only for development/testing overrides, not as the production source of truth.
   - Centralize runtime entitlement state so Settings UI, backup actions, storage limits, and future paid features all read the same source.
   - Default to free features until a trusted runtime entitlement is loaded.
   - Add tests proving paid UI/actions can unlock and relock without rebuilding the app.
-- [ ] Add Google Play Billing lifetime supporter unlock.
-  - Create a Play Billing product: `nija_supporter_lifetime`.
+  - Web storage limits are currently client-enforced: new/small vaults cap at 100 MB, and legacy vaults already above 100 MB can continue up to 1 GB until runtime entitlement exists.
+- [x] Add Google Play Billing lifetime storage unlock.
+  - Create a Play Billing product: `nija_expanded_vault_lifetime`.
   - Product type: non-consumable one-time purchase.
   - On purchase, Google Play records entitlement against the user's Google account.
   - On every Nija start, call the Play Billing API and unlock premium features when the product is returned as purchased.
@@ -219,7 +220,7 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Store attachment metadata on the item and encrypted bytes in private document sections.
   - Keep document bytes out of item payload JSON.
   - Enforce existing per-document limit: `VaultLimits.maxDocumentBytes` (`5 MB`).
-  - Continue enforcing total vault size through `VaultLimits.maxVaultBytes`.
+  - Continue enforcing total vault size through `VaultLimits.maxVaultBytesFor`.
 - [x] Add support for multiple documents per vault item.
   - Use an `attachments` list instead of single-document fields such as `documentSection`, `documentFileName`, and `documentSizeBytes`.
   - Support adding, opening, exporting, and deleting individual attachments.
@@ -314,9 +315,9 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Scope: update tests expecting old `Custom templates`, `All types`, note action keys, selection/share actions, and related labels.
 - [ ] Re-run release readiness gates.
   - Goal: `./scripts/release_hardening_gate.sh`, `flutter test`, and `flutter build apk --release` all pass.
-- [ ] Add WebApp release build steps.
+- [x] Add WebApp release build steps.
   - Goal: document and validate repeatable release steps for the web app.
-  - Scope: add commands for clean Flutter web release build, build artifact location, hosting assumptions, cache headers/service-worker behavior, and release smoke checks.
+  - Scope: added commands for clean Flutter wasm web release build, build artifact location, hosting assumptions, cache headers/service-worker behavior, and release smoke checks.
   - Include a release note/template for producing the web app release artifact and confirming it can be deployed without dev-only flags.
 - [ ] Implement WebApp/tablet UX consistent with the Nija app theme.
   - Work these one item at a time and validate each item before moving to the next.
@@ -388,7 +389,7 @@ Work these items strictly one at a time. Each item should be fully implemented, 
     - tablet landscape,
     - document/PDF fullscreen preview.
   - Add WebApp release smoke tests:
-    - `flutter build web --release`,
+    - `flutter build web --release --wasm -O4 --no-source-maps --csp`,
     - serve `build/web` locally,
     - load app online,
     - create vault,

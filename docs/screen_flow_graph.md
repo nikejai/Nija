@@ -166,8 +166,12 @@ flowchart TD
   - Navigation: note view or item detail based on type.
 
 - `Settings Tab`
-  - Features: language picker, visible active vault name, app PIN setup/change row, biometric slider switch (enable/disable confirmations), secure WebAuthn PRF device-unlock enrollment on web with unsupported-browser guidance, rotate master password, import encrypted secret, default sort for keys/notes, single export-vault button, lock now.
+  - Features: language picker, visible active vault name, Storage section with vault usage, Play entitlement status, restore purchase, and Android expanded-storage upgrade, app PIN setup/change row, biometric slider switch (enable/disable confirmations), secure WebAuthn PRF device-unlock enrollment on web with unsupported-browser guidance, rotate master password, import encrypted secret, default sort for keys/notes, single export-vault button, privacy policy/about/terms links, lock now.
   - Export flow: prompts for desired output file name before writing vault file.
+
+- `Web Privacy Policy Page`
+  - Route: `/privacy.html`.
+  - Features: static direct-link privacy policy for store review, website metadata, and users who need policy access outside the Flutter app shell.
 
 - `Language Picker BottomSheet`
   - Features: choose `System`, `English`, `Español`.
@@ -188,7 +192,7 @@ flowchart TD
 - Vault tab detail + add item.
 - Notes add/view/edit with tags.
 - Types create custom type + type items view.
-- Settings language, biometric slider switch, master rotation, export action, lock now.
+- Settings language, storage entitlement restore/upgrade, biometric slider switch, master rotation, export action, lock now.
 - Settings encrypted-secret import action.
 - Vault/Notes long-press quick actions (pin/unpin/delete) and detail-screen delete actions.
 - Vault/Notes multi-select mode (left-icon entry, selected-count top bar, bulk pin/delete).

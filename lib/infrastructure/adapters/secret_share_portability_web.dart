@@ -1,11 +1,7 @@
-// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
-
-import 'dart:async';
 import 'dart:convert';
-import 'dart:html' as html;
-import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 
+import '../../../core/platform/nija_browser_bridge.dart';
 import 'secret_share_portability_base.dart';
 import 'secret_share_model.dart';
 
@@ -58,37 +54,9 @@ class SecretSharePortabilityAdapterImpl
 
   @override
   Future<ImportedSecretFile?> importEncryptedFile() async {
-    final input = html.FileUploadInputElement()..accept = '.nijas';
-    final completer = Completer<ImportedSecretFile?>();
-
-    void complete(ImportedSecretFile? file) {
-      if (!completer.isCompleted) {
-        completer.complete(file);
-      }
-    }
-
-    input.onChange.first.then((_) {
-      final file = input.files?.isNotEmpty == true ? input.files!.first : null;
-      if (file == null) {
-        complete(null);
-        return;
-      }
-      final reader = html.FileReader();
-      reader.readAsText(file);
-      reader.onLoad.first.then((_) {
-        final content = reader.result?.toString();
-        if (content == null || content.isEmpty) {
-          complete(null);
-          return;
-        }
-        complete(ImportedSecretFile(label: file.name, content: content));
-      });
-      reader.onError.first.then((_) => complete(null));
-    });
-
-    input.addEventListener('cancel', (_) => complete(null));
-    input.click();
-    return completer.future;
+    final file = await nijaPickTextFile('.nijas');
+    if (file == null) return null;
+    return ImportedSecretFile(label: file.name, content: file.content);
   }
 
   Future<bool> _tryWebShareFile({
@@ -96,36 +64,10 @@ class SecretSharePortabilityAdapterImpl
     required String fileName,
     required String mimeType,
   }) async {
-    final navigator = html.window.navigator;
-    if (!js_util.hasProperty(navigator, 'share')) return false;
-    if (js_util.hasProperty(navigator, 'canShare')) {
-      final canShare = js_util.callMethod<bool?>(navigator, 'canShare', [
-        js_util.jsify(<String, Object>{
-          'files': <Object>[_webFile(bytes, fileName, mimeType)],
-        }),
-      ]);
-      if (canShare != true) return false;
-    }
-    try {
-      final sharePromise = js_util.callMethod(navigator, 'share', [
-        js_util.jsify(<String, Object>{
-          'files': <Object>[_webFile(bytes, fileName, mimeType)],
-          'title': fileName,
-        }),
-      ]);
-      await js_util.promiseToFuture<void>(sharePromise);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  html.File _webFile(List<int> bytes, String fileName, String mimeType) {
-    final blob = html.Blob(<dynamic>[bytes], mimeType);
-    return html.File(
-      <Object>[blob],
-      fileName,
-      <String, String>{'type': mimeType},
+    return nijaShareBase64File(
+      fileName: fileName,
+      base64: base64Encode(bytes),
+      mimeType: mimeType,
     );
   }
 
@@ -135,16 +77,11 @@ class SecretSharePortabilityAdapterImpl
     required String mimeType,
   }) {
     try {
-      final blob = html.Blob(<dynamic>[bytes], mimeType);
-      final url = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)
-        ..download = fileName
-        ..style.display = 'none';
-      html.document.body?.append(anchor);
-      anchor.click();
-      anchor.remove();
-      html.Url.revokeObjectUrl(url);
-      return true;
+      return nijaDownloadBase64File(
+        fileName: fileName,
+        base64: base64Encode(bytes),
+        mimeType: mimeType,
+      );
     } catch (_) {
       return false;
     }

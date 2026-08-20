@@ -10,4 +10,14 @@ class GoogleOAuthConfig {
     defaultValue:
         '698262730675-ui2upcjqi4c3mpu8lm9ci3bv1okrbp2v.apps.googleusercontent.com',
   );
+
+  /// Optional Web OAuth client id used as the native Google Sign-In
+  /// `serverClientId` for Android/iOS Drive backup.
+  ///
+  /// Native Android sign-in still requires an Android OAuth client with package
+  /// `com.nija` and the installed build's SHA-1 fingerprint.
+  static const String nativeServerClientId = String.fromEnvironment(
+    'NIJA_GOOGLE_NATIVE_SERVER_CLIENT_ID',
+    defaultValue: '',
+  );
 }

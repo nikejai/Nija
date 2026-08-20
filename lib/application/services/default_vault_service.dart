@@ -704,10 +704,7 @@ class DefaultVaultService implements VaultService {
         out.add(chunk);
       }
       onProgress?.call(
-        const VaultOperationProgress(
-          value: 1.0,
-          message: 'Document ready.',
-        ),
+        const VaultOperationProgress(value: 1.0, message: 'Document ready.'),
       );
       return out.takeBytes();
     }
@@ -812,6 +809,7 @@ class DefaultVaultService implements VaultService {
 
       final local = await _privateVaultStore.readHeader(existing.id);
       if (incoming.vaultVersionId == local.vaultVersionId) {
+        _handleToVaultStoreId[filePath] = existing.id;
         return ImportResult(
           status: ImportStatus.alreadyUpToDate,
           vaultId: incoming.vaultId,
@@ -823,6 +821,7 @@ class DefaultVaultService implements VaultService {
         );
       }
       if (local.resolvedFromVersionIds.contains(incoming.vaultVersionId)) {
+        _handleToVaultStoreId[filePath] = existing.id;
         return ImportResult(
           status: ImportStatus.alreadyUpToDate,
           vaultId: incoming.vaultId,
@@ -992,7 +991,8 @@ class DefaultVaultService implements VaultService {
     onProgress?.call(
       VaultOperationProgress(value: 0.35, message: deriveMessage),
     );
-    final vaultKey = encryptedVaultKeyBase64 == file.encryptedVaultKey &&
+    final vaultKey =
+        encryptedVaultKeyBase64 == file.encryptedVaultKey &&
             kdf.salt == file.kdf.salt
         ? await _resolveVaultKey(
             filePath: filePath,
@@ -1074,6 +1074,7 @@ class DefaultVaultService implements VaultService {
       payload: payload,
       vaultKey: vaultKey,
     );
+    _handleToVaultStoreId[filePath] = nextHeader.vaultId;
     await _rememberRegistry(nextHeader, label: _displayLabel(nextHeader));
     await _writeSnapshotToHandle(filePath, nextHeader.vaultId);
   }
@@ -1609,6 +1610,7 @@ class DefaultVaultService implements VaultService {
     String handle,
     String vaultStoreId,
   ) async {
+    if (handle == vaultStoreId) return;
     final snapshot = await _snapshotForHandle(handle);
     await _storageAdapter.write(
       filePath: handle,

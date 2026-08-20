@@ -23,8 +23,11 @@ dependencies:
   google_sign_in_web: ^0.12.4
   googleapis: ^14.0.0
   http: ^1.5.0
+  in_app_purchase: ^3.2.3
+  in_app_purchase_android: ^0.5.2
   pdfrx: ^2.4.1
   google_fonts: ^6.3.2
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
@@ -43,6 +46,15 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
+  web:
+    generate: true
+    image_path: "assets/branding/nija_mark.png"
+    background_color: "#FFFFFF"
+    theme_color: "#27272A"
   image_path: "assets/branding/nija_mark.png"
   min_sdk_android: 21
   remove_alpha_ios: true
+
+dependency_overrides:
+  flutter_secure_storage_web:
+    path: packages/flutter_secure_storage_web_wasm

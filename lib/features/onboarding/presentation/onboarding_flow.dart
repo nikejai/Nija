@@ -18,6 +18,7 @@ import '../../../core/config/guardian_profiles.dart';
 import '../../../core/config/recovery_phrase_dictionary.dart';
 import '../../../core/config/recovery_phrase_generator.dart';
 import '../../../core/config/vault_limits.dart';
+import '../../../core/entitlements/entitlement_state.dart';
 import '../../../core/localization/app_strings.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/biometric_auth_service.dart';
@@ -62,7 +63,7 @@ enum OnboardingStep {
 
 enum _CloudMergeOutcome { noMergeNeeded, merged, cancelled }
 
-enum _VaultPickerAction { importFromDevice, importFromCloud }
+enum _VaultPickerAction { importFromDevice }
 
 enum _VaultSelectionMode { known, cloudBackup }
 
@@ -94,6 +95,12 @@ class OnboardingFlow extends StatefulWidget {
     this.biometricCredentialStore,
     this.biometricEnrollmentStore,
     this.firstInstallWalkthroughCompletedOverride,
+    this.entitlementState = const EntitlementState.free(),
+    this.canPurchaseExpandedVaultStorage = false,
+    this.purchaseInProgress = false,
+    this.entitlementErrorMessage,
+    this.onRefreshEntitlements,
+    this.onPurchaseExpandedVaultStorage,
   });
 
   final String languageMode;
@@ -109,6 +116,12 @@ class OnboardingFlow extends StatefulWidget {
   final BiometricCredentialStore? biometricCredentialStore;
   final BiometricEnrollmentStore? biometricEnrollmentStore;
   final bool? firstInstallWalkthroughCompletedOverride;
+  final EntitlementState entitlementState;
+  final bool canPurchaseExpandedVaultStorage;
+  final bool purchaseInProgress;
+  final String? entitlementErrorMessage;
+  final Future<void> Function()? onRefreshEntitlements;
+  final Future<bool> Function()? onPurchaseExpandedVaultStorage;
 
   @override
   State<OnboardingFlow> createState() => _OnboardingFlowState();
@@ -460,6 +473,21 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         debugInternalsFeatureAvailableOverride: _isExploreDemoSession
             ? false
             : null,
+        expandedVaultStorageEntitled:
+            !_isExploreDemoSession &&
+            widget.entitlementState.expandedVaultStorage,
+        canPurchaseExpandedVaultStorage:
+            !_isExploreDemoSession && widget.canPurchaseExpandedVaultStorage,
+        purchaseInProgress: !_isExploreDemoSession && widget.purchaseInProgress,
+        entitlementSource: widget.entitlementState.source,
+        entitlementLastVerifiedAt: widget.entitlementState.lastVerifiedAt,
+        entitlementErrorMessage: widget.entitlementErrorMessage,
+        onRefreshEntitlements: _isExploreDemoSession
+            ? null
+            : widget.onRefreshEntitlements,
+        onPurchaseExpandedVaultStorage: _isExploreDemoSession
+            ? null
+            : widget.onPurchaseExpandedVaultStorage,
       ),
     };
 
@@ -968,31 +996,6 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<void> _selectKnownVault() async {
     if (!_storageReady || !mounted) return;
     await _presentSelectVaultStep(returnOnCancel: OnboardingStep.welcome);
-  }
-
-  Future<Object?> _showVaultPicker() {
-    final useDialog = MediaQuery.sizeOf(context).width >= 720;
-    final picker = _VaultPickerSurface(knownVaults: _knownVaults);
-    if (useDialog) {
-      return showDialog<Object>(
-        context: context,
-        builder: (context) => Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 32,
-            vertical: 32,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: picker,
-          ),
-        ),
-      );
-    }
-    return showModalBottomSheet<Object>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(child: picker),
-    );
   }
 
   Future<VaultReference?> _pickVaultFileForUnlock() async {
@@ -2023,9 +2026,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return false;
     }
     final projected = _activeVaultSizeBytes + bytes;
-    if (projected > VaultLimits.maxVaultBytes) {
+    final maxVaultBytes = VaultLimits.maxVaultBytesFor(
+      currentVaultSizeBytes: _activeVaultSizeBytes,
+      expandedStorageEntitled: widget.entitlementState.expandedVaultStorage,
+    );
+    if (projected > maxVaultBytes) {
       _showVaultLimitMessage(
-        'Not enough vault space. Limit is ${VaultLimits.formatBytes(VaultLimits.maxVaultBytes)}.',
+        'Not enough vault space. Limit is ${VaultLimits.formatBytes(maxVaultBytes)}.',
       );
       return false;
     }
@@ -2680,7 +2687,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       if (!didReset || !mounted) return;
       _passwordController.clear();
       await _presentUnlockStep();
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.showSnackBar(
         const SnackBar(
           content: Text(
             'Recovery successful. Please log in with your new master password.',
@@ -2886,6 +2895,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (message.contains('DetailedApiRequestError') &&
         message.contains('insufficientPermissions')) {
       return 'Google Drive permissions are missing. Reconnect and allow Drive access.';
+    }
+    if (message.contains('ApiException: 10') ||
+        message.contains('DEVELOPER_ERROR') ||
+        message.contains('signed application') ||
+        message.contains('selecting the google account')) {
+      return 'Google sign-in is not configured for this app signature. Add the installed build SHA-1 (debug, release, or Play signing) to the Google Cloud Android OAuth client for com.nija, reinstall, then retry.';
     }
     if (message.contains('QuotaExceededError') ||
         message.contains('exceeded the quota')) {
@@ -3303,7 +3318,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       if (selected == null || !mounted) return;
       final hydrated = await _ensureCloudBackupContent(selected);
       if (!mounted) return;
-      final importedPath = await _localPathForCloudBackup(hydrated.storageId);
+      final importedPath = await _localPathForCloudBackup(hydrated);
       await _importVaultFile(
         imported: ImportedVaultFile(
           storageId: importedPath,
@@ -4074,7 +4089,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     required bool askBackupAfterMerge,
   }) async {
     final hydrated = await _ensureCloudBackupContent(backup);
-    final backupFilePath = await _localPathForCloudBackup(hydrated.storageId);
+    final backupFilePath = await _localPathForCloudBackup(hydrated);
     await _vaultService.writeRawVaultFile(
       filePath: backupFilePath,
       rawContent: hydrated.content,
@@ -4094,6 +4109,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       filePath: backupFilePath,
       unlockCredential: credential,
     );
+    if (_cloudImportNeedsReplaceConfirmation(result)) {
+      final replace = await _confirmReplaceNewerImportedVault(result);
+      if (!replace) return _CloudMergeOutcome.cancelled;
+      result = await _vaultService.importNijaFile(
+        filePath: backupFilePath,
+        unlockCredential: credential,
+        confirmReplace: true,
+      );
+    }
     if (result.status == ImportStatus.failed) {
       final prompted = await _promptImportVaultCredential(
         title: 'Unlock cloud backup',
@@ -4111,6 +4135,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         filePath: backupFilePath,
         unlockCredential: credential,
       );
+      if (_cloudImportNeedsReplaceConfirmation(result)) {
+        final replace = await _confirmReplaceNewerImportedVault(result);
+        if (!replace) return _CloudMergeOutcome.cancelled;
+        result = await _vaultService.importNijaFile(
+          filePath: backupFilePath,
+          unlockCredential: credential,
+          confirmReplace: true,
+        );
+      }
     }
     if (result.status == ImportStatus.alreadyUpToDate) {
       if (!mounted) return _CloudMergeOutcome.cancelled;
@@ -4118,10 +4151,24 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return _CloudMergeOutcome.noMergeNeeded;
     }
     if (result.status == ImportStatus.imported) {
-      await _resetBiometricForVault(_vaultFilePath);
+      final activeId = result.vaultId;
+      final restoredLabel = await _resolveVaultLabel(activeId);
+      await _resetBiometricForVault(activeId);
+      await _rememberVaultReference(
+        activeId,
+        label: restoredLabel,
+        sourceDescription: AppStrings.googleDriveBackup,
+      );
+      if (!mounted) return _CloudMergeOutcome.cancelled;
+      setState(() {
+        _vaultFilePath = activeId;
+        _activeVaultName = restoredLabel;
+        _vaultCreatedInSession = false;
+      });
       _passwordController.text = credential;
       await _loadVaultData(credential);
       await _refreshVaultSize();
+      await _refreshBiometricStateForActiveVault();
       if (!mounted) return _CloudMergeOutcome.cancelled;
       _showOperationSnackBar('Cloud backup restored.');
       return _CloudMergeOutcome.noMergeNeeded;
@@ -4145,10 +4192,19 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     return _CloudMergeOutcome.cancelled;
   }
 
-  Future<String> _localPathForCloudBackup(String storageId) async {
-    final safeName = storageId
+  bool _cloudImportNeedsReplaceConfirmation(ImportResult result) {
+    return result.status == ImportStatus.failed &&
+        result.userSafeMessage.contains('Confirm replace');
+  }
+
+  Future<String> _localPathForCloudBackup(CloudVaultBackupFile backup) async {
+    final contentName = backup.hasContent
+        ? _importStagingNameFromRaw(backup.content)
+        : '';
+    final fallbackName = backup.storageId
         .replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_')
         .replaceAll(RegExp(r'_+'), '_');
+    final safeName = contentName.isNotEmpty ? contentName : fallbackName;
     if (kIsWeb) return safeName;
     final tempDir = await getTemporaryDirectory();
     return '${tempDir.path}/$safeName';
@@ -5835,170 +5891,6 @@ class _CloudVaultEmptyState extends StatelessWidget {
             style: EntryTypography.emptyStateBody(colorScheme.onSurfaceVariant),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _VaultPickerSurface extends StatelessWidget {
-  const _VaultPickerSurface({required this.knownVaults});
-
-  final List<VaultReference> knownVaults;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  AppStrings.selectVaultToOpen,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              IconButton(
-                onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (knownVaults.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: colorScheme.outlineVariant),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    AppStrings.noSavedVaultLocations,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    AppStrings.importVaultToContinue,
-                    style: TextStyle(color: colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            )
-          else
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: knownVaults.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final entry = knownVaults[index];
-                  return _VaultPickerTile(
-                    icon: Icons.lock_outline,
-                    title: entry.label,
-                    subtitle: entry.id,
-                    onTap: () => Navigator.of(context).pop(entry),
-                  );
-                },
-              ),
-            ),
-          ...[
-            const SizedBox(height: 12),
-            _VaultPickerTile(
-              icon: Icons.file_open_outlined,
-              title: AppStrings.importVaultFromDevice,
-              onTap: () => Navigator.of(
-                context,
-              ).pop(_VaultPickerAction.importFromDevice),
-            ),
-            const SizedBox(height: 8),
-            _VaultPickerTile(
-              icon: Icons.cloud_download_outlined,
-              title: AppStrings.importVaultFromCloud,
-              onTap: () =>
-                  Navigator.of(context).pop(_VaultPickerAction.importFromCloud),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _VaultPickerTile extends StatelessWidget {
-  const _VaultPickerTile({
-    required this.icon,
-    required this.title,
-    required this.onTap,
-    this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colorScheme.outlineVariant),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, color: colorScheme.onSurfaceVariant),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: colorScheme.onSurface,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

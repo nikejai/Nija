@@ -364,7 +364,7 @@ Acceptance criteria:
 
 - [ ] Review web storage and service worker cache behavior.
 - [ ] Ensure plaintext vault content is not cached in static assets or service worker caches.
-- [ ] Add production security headers guidance to ops docs.
+- [x] Add production security headers guidance to ops docs.
 - [ ] Add platform hardening notes:
   - web minification.
   - web source-map policy.

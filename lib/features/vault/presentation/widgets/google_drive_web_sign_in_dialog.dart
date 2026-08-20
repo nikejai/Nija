@@ -22,7 +22,8 @@ class GoogleDriveWebSignInDialog extends StatefulWidget {
       _GoogleDriveWebSignInDialogState();
 }
 
-class _GoogleDriveWebSignInDialogState extends State<GoogleDriveWebSignInDialog> {
+class _GoogleDriveWebSignInDialogState
+    extends State<GoogleDriveWebSignInDialog> {
   final GoogleSignIn _googleSignIn = googleDriveSignInClient();
   StreamSubscription<GoogleSignInAccount?>? _userSubscription;
   GoogleSignInAccount? _authenticatedUser;
@@ -219,7 +220,8 @@ class _GoogleDriveWebSignInDialogState extends State<GoogleDriveWebSignInDialog>
                                 padding: const EdgeInsets.only(top: 12),
                                 child: Align(
                                   alignment: Alignment.centerLeft,
-                                  child: gsi_button.buildGoogleDriveSignInButton(),
+                                  child: gsi_button
+                                      .buildGoogleDriveSignInButton(),
                                 ),
                               )
                             : null,
@@ -228,7 +230,8 @@ class _GoogleDriveWebSignInDialogState extends State<GoogleDriveWebSignInDialog>
                       _DriveSetupStep(
                         code: '02',
                         title: 'Allow Drive access',
-                        subtitle: 'Grant permission to find and restore backups.',
+                        subtitle:
+                            'Grant permission to find and restore backups.',
                         complete: false,
                         active: stepOneComplete,
                         child: signedIn == null
@@ -236,23 +239,28 @@ class _GoogleDriveWebSignInDialogState extends State<GoogleDriveWebSignInDialog>
                             : Padding(
                                 padding: const EdgeInsets.only(top: 12),
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
                                   children: [
                                     _ConnectedAccountCard(account: signedIn),
                                     const SizedBox(height: 12),
                                     FilledButton.icon(
-                                      onPressed:
-                                          canAuthorize ? _authorizeDriveAccess : null,
+                                      onPressed: canAuthorize
+                                          ? _authorizeDriveAccess
+                                          : null,
                                       style: FilledButton.styleFrom(
                                         minimumSize: const Size.fromHeight(44),
                                         backgroundColor: colorScheme.primary,
                                         foregroundColor: colorScheme.onPrimary,
                                         shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
                                         ),
-                                        textStyle: EntryTypography.restoreButton(
-                                          colorScheme.onPrimary,
-                                        ),
+                                        textStyle:
+                                            EntryTypography.restoreButton(
+                                              colorScheme.onPrimary,
+                                            ),
                                       ),
                                       icon: _authorizing
                                           ? SizedBox(
@@ -263,7 +271,9 @@ class _GoogleDriveWebSignInDialogState extends State<GoogleDriveWebSignInDialog>
                                                 color: colorScheme.onPrimary,
                                               ),
                                             )
-                                          : const Icon(Icons.cloud_done_outlined),
+                                          : const Icon(
+                                              Icons.cloud_done_outlined,
+                                            ),
                                       label: Text(
                                         _authorizing
                                             ? 'Authorizing…'
@@ -274,14 +284,18 @@ class _GoogleDriveWebSignInDialogState extends State<GoogleDriveWebSignInDialog>
                                     Align(
                                       alignment: Alignment.center,
                                       child: TextButton(
-                                        onPressed:
-                                            _authorizing ? null : _resetSession,
+                                        onPressed: _authorizing
+                                            ? null
+                                            : _resetSession,
                                         style: TextButton.styleFrom(
-                                          textStyle: EntryTypography.restoreButton(
-                                            colorScheme.onSurfaceVariant,
-                                          ),
+                                          textStyle:
+                                              EntryTypography.restoreButton(
+                                                colorScheme.onSurfaceVariant,
+                                              ),
                                         ),
-                                        child: const Text('Use a different account'),
+                                        child: const Text(
+                                          'Use a different account',
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -419,7 +433,7 @@ class _DriveSetupStep extends StatelessWidget {
               ),
             ],
           ),
-          if (child != null) child!,
+          ?child,
         ],
       ),
     );

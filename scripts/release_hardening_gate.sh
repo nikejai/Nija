@@ -22,5 +22,20 @@ fi
 echo "[gate] ensure release hardening checklist exists"
 test -f docs/release_hardening_gates.md
 
-echo "Release hardening gate passed."
+echo "[gate] ensure web security headers are configured"
+test -f web/_headers
+test -f firebase.json
+if ! rg -n "Content-Security-Policy" web/index.html web/_headers firebase.json >/dev/null; then
+  echo "ERROR: Web Content-Security-Policy is not configured."
+  exit 1
+fi
+if ! rg -n "Strict-Transport-Security" web/_headers firebase.json >/dev/null; then
+  echo "ERROR: Web Strict-Transport-Security header is not configured."
+  exit 1
+fi
+if ! rg -n "Permissions-Policy" web/_headers firebase.json >/dev/null; then
+  echo "ERROR: Web Permissions-Policy header is not configured."
+  exit 1
+fi
 
+echo "Release hardening gate passed."

@@ -300,6 +300,9 @@ class _VaultEntryListState extends State<VaultEntryList> {
         final selected = widget.selectedKeys.contains(widget.keyForRow(row));
         return _VaultEntryTile(
           entry: listEntry,
+          actionKey: ValueKey<String>(
+            'vault-entry-actions-${widget.keyForRow(row)}',
+          ),
           selected: selected,
           selectionMode: widget.selectionMode,
           trailingMode: widget.trailingMode,
@@ -336,6 +339,7 @@ class _VaultEntryListState extends State<VaultEntryList> {
 class _VaultEntryTile extends StatelessWidget {
   const _VaultEntryTile({
     required this.entry,
+    required this.actionKey,
     required this.selected,
     required this.selectionMode,
     required this.trailingMode,
@@ -348,6 +352,7 @@ class _VaultEntryTile extends StatelessWidget {
   });
 
   final VaultListEntry entry;
+  final Key actionKey;
   final bool selected;
   final bool selectionMode;
   final VaultEntryTrailingMode trailingMode;
@@ -458,6 +463,7 @@ class _VaultEntryTile extends StatelessWidget {
         );
       case VaultEntryTrailingMode.more:
         return IconButton(
+          key: actionKey,
           onPressed: onMoreTap,
           icon: Icon(
             Icons.more_vert,

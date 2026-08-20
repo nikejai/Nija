@@ -44,8 +44,15 @@ void main() {
     final sidebar = find.byKey(const ValueKey('sidebar-nav-AI'));
     if (sidebar.evaluate().isNotEmpty) {
       await tester.tap(sidebar);
+    } else if (find.text('All Items').evaluate().isNotEmpty) {
+      await tester.tap(find.text('All Items').first);
     } else {
-      await tester.tap(find.byIcon(Icons.grid_view_outlined));
+      final outlinedIcon = find.byIcon(Icons.grid_view_outlined);
+      if (outlinedIcon.evaluate().isNotEmpty) {
+        await tester.tap(outlinedIcon);
+      } else {
+        await tester.tap(find.byIcon(Icons.grid_view));
+      }
     }
     await tester.pumpAndSettle();
   }
@@ -165,6 +172,92 @@ void main() {
       lessThanOrEqualTo(860),
     );
     expect(find.text('Save'), findsOneWidget);
+  });
+
+  testWidgets('settings exposes expanded storage entitlement actions', (
+    tester,
+  ) async {
+    var purchaseStarted = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          vaultSizeBytes: 42 * 1024 * 1024,
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          canPurchaseExpandedVaultStorage: true,
+          onRefreshEntitlements: () async {},
+          onPurchaseExpandedVaultStorage: () async {
+            purchaseStarted = true;
+            return true;
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text(AppStrings.tabSettings).last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-vault-storage-row')),
+      300,
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('settings-vault-storage-row')),
+      findsOneWidget,
+    );
+    expect(find.text('42.0 MB of 100 MB'), findsAtLeastNWidgets(1));
+    expect(
+      find.byKey(const ValueKey('settings-buy-expanded-storage')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('settings-buy-expanded-storage')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(purchaseStarted, isTrue);
   });
 
   testWidgets('custom password-only item does not expose value in subtitle', (
@@ -639,7 +732,7 @@ void main() {
     );
     expect(find.text('Total Items'), findsOneWidget);
     expect(find.text('Logins'), findsOneWidget);
-    expect(find.text('Card'), findsWidgets);
+    expect(find.text('Documents'), findsOneWidget);
     expect(find.text('Quick Actions'), findsOneWidget);
     expect(find.text('Recent Items'), findsOneWidget);
 
@@ -1606,7 +1699,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await tapAllItemsTab(tester);
-    await tester.tap(find.byIcon(Icons.more_vert).first);
+    await tester.tap(
+      find.byKey(const ValueKey('vault-entry-actions-item:doc-1')).last,
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('document-action-pin')));
     await tester.pumpAndSettle();
@@ -1671,6 +1766,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(persistCalls, 0);
+    await tester.tap(find.text('Favorites').first);
+    await tester.pumpAndSettle();
     expect(find.text('Recovery Phrase'), findsWidgets);
   });
 
@@ -1743,6 +1840,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(persistCalls, 0);
+    await tester.tap(find.text('Favorites').first);
+    await tester.pumpAndSettle();
     expect(find.text('Recovery Phrase'), findsWidgets);
   });
 
@@ -1835,11 +1934,14 @@ void main() {
     await tester.pumpAndSettle();
 
     await tapAllItemsTab(tester);
-    await tester.tap(find.byIcon(Icons.more_vert).first);
+    await tester.tap(
+      find.byKey(const ValueKey('vault-entry-actions-item:doc-1')).last,
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('document-action-pin')));
     await tester.pump();
 
+    expect(persistCalls, 1);
     expect(find.text('Saving vault updates...'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
@@ -3103,7 +3205,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await tapAllItemsTab(tester);
-    await tester.tap(find.byIcon(Icons.more_vert).first);
+    await tester.tap(
+      find.byKey(const ValueKey('vault-entry-actions-note:note-share-1')).last,
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('note-action-share')));
     await tester.pumpAndSettle();
@@ -3179,7 +3283,11 @@ void main() {
     await tester.pumpAndSettle();
 
     await tapAllItemsTab(tester);
-    await tester.tap(find.byIcon(Icons.more_vert).first);
+    await tester.tap(
+      find
+          .byKey(const ValueKey('vault-entry-actions-note:note-share-menu-1'))
+          .last,
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Share plain text'), findsOneWidget);
@@ -3271,7 +3379,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await tapAllItemsTab(tester);
-    await tester.tap(find.byIcon(Icons.more_vert).first);
+    await tester.tap(
+      find.byKey(const ValueKey('vault-entry-actions-item:doc-1')).last,
+    );
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('document-action-save-copy')),
@@ -3293,7 +3403,10 @@ void main() {
     expect(find.byIcon(Icons.edit_outlined), findsOneWidget);
     expect(find.text('Attachments'), findsNothing);
     expect(find.text('Documents'), findsOneWidget);
-    expect(find.text('Add document'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('document-detail-add-document')),
+      findsOneWidget,
+    );
     expect(find.text('passport.txt'), findsOneWidget);
     expect(find.text('visa.txt'), findsOneWidget);
 
@@ -3752,6 +3865,12 @@ void main() {
     expect(find.text('document manifests'), findsOneWidget);
     expect(find.text('document chunks'), findsOneWidget);
     expect(find.text('document bytes'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('document doc'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('document doc'), findsOneWidget);
     expect(find.text('document_doc.manifest.enc'), findsNothing);
     expect(find.text('document_doc_chunk_0.enc'), findsNothing);
@@ -4179,7 +4298,7 @@ void main() {
           onReadCloudBackupAccount: () async => 'paid@example.com',
           onChangeCloudBackupAccount: () async => false,
           onLockNow: () {},
-          cloudBackupFeatureAvailableOverride: true,
+          expandedVaultStorageEntitled: true,
         ),
       ),
     );
@@ -4261,7 +4380,7 @@ void main() {
           onReadCloudBackupAccount: () async => 'paid@example.com',
           onChangeCloudBackupAccount: () async => false,
           onLockNow: () => lockCalls++,
-          cloudBackupFeatureAvailableOverride: true,
+          expandedVaultStorageEntitled: true,
         ),
       ),
     );

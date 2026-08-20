@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nija/app/theme/app_theme.dart';
 import 'package:nija/application/services/default_vault_service.dart';
 import 'package:nija/domain/models/vault_reference.dart';
 import 'package:nija/core/localization/app_strings.dart';
@@ -162,6 +163,49 @@ void main() {
     },
   );
 
+  testWidgets('first install walkthrough uses Nija button theme', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: OnboardingFlow(
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          vaultService: DefaultVaultService(
+            storageAdapter: InMemoryVaultStorageAdapter(),
+            cryptoAdapter: _FastTestCryptoAdapter(),
+          ),
+          vaultFilePath: 'test.nija',
+          firstInstallWalkthroughCompletedOverride: false,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final buttonContext = tester.element(
+      find.byKey(const ValueKey('first-install-walkthrough-next')),
+    );
+    final buttonStyle = Theme.of(buttonContext).filledButtonTheme.style;
+    final background = buttonStyle?.backgroundColor?.resolve(
+      const <WidgetState>{},
+    );
+    final shape = buttonStyle?.shape?.resolve(const <WidgetState>{});
+
+    expect(background, const Color(0xFF27272A));
+    expect(shape, isA<RoundedRectangleBorder>());
+    expect(
+      (shape! as RoundedRectangleBorder).borderRadius,
+      BorderRadius.circular(6),
+    );
+  });
+
   testWidgets('first install walkthrough can be skipped', (tester) async {
     SharedPreferences.setMockInitialValues({});
     tester.view.physicalSize = const Size(430, 932);
@@ -254,11 +298,11 @@ void main() {
     expect(find.byKey(const ValueKey('brand-name-nija')), findsWidgets);
     expect(find.text('Nija'), findsWidgets);
     expect(find.text('निज'), findsWidgets);
+    expect(find.text('Your digital life, under your control.'), findsOneWidget);
     expect(
-      find.text('Your digital life, under your control.'),
+      find.byKey(const ValueKey('vault-entry-product-story')),
       findsOneWidget,
     );
-    expect(find.byKey(const ValueKey('vault-entry-product-story')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-select-vault')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-open-vault-file')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-create-vault')), findsOneWidget);
@@ -431,7 +475,10 @@ void main() {
       ),
     );
 
-    expect(find.byKey(const ValueKey('known-vault-restore-cloud')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('known-vault-restore-cloud')),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const ValueKey('known-vault-restore-cloud')));
     await tester.pumpAndSettle();
@@ -439,7 +486,9 @@ void main() {
     expect(cloudRequested, isTrue);
   });
 
-  testWidgets('welcome recent vaults section opens known vault', (tester) async {
+  testWidgets('welcome recent vaults section opens known vault', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1200, 760);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -506,11 +555,17 @@ void main() {
     expect(find.byKey(const ValueKey('brand-name-nija')), findsWidgets);
     expect(find.text('Nija'), findsWidgets);
     expect(find.text('निज'), findsWidgets);
-    expect(find.textContaining('Your data stays local by default'), findsOneWidget);
+    expect(
+      find.textContaining('Your data stays local by default'),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('entry-create-vault')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-explore-demo')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-restore-cloud')), findsOneWidget);
-    expect(find.byKey(const ValueKey('vault-entry-product-story')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('vault-entry-product-story')),
+      findsNothing,
+    );
     expect(find.byKey(const ValueKey('entry-about-nija-toggle')), findsNothing);
   });
 
@@ -574,7 +629,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.byKey(const ValueKey('entry-explore-demo')));
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('entry-explore-demo')),
+    );
     await tester.tap(find.byKey(const ValueKey('entry-explore-demo')));
     await tester.pump();
     await tester.pumpAndSettle();
@@ -839,10 +896,7 @@ void main() {
 
     expect(find.text('Unlock vault'), findsOneWidget);
     expect(find.text('Protected by Owl Guardian'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('unlock-password-field')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('unlock-password-field')), findsOneWidget);
     expect(find.byKey(const ValueKey('unlock-submit-button')), findsOneWidget);
     expect(find.text('Recover with phrase'), findsOneWidget);
     expect(find.text('Select different vault'), findsOneWidget);
@@ -1275,7 +1329,9 @@ void main() {
     );
 
     expect(
-      payload.items.any((item) => item['title']?.toString() == 'Persisted Login'),
+      payload.items.any(
+        (item) => item['title']?.toString() == 'Persisted Login',
+      ),
       isTrue,
     );
   });
