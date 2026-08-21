@@ -112,56 +112,67 @@ void main() {
     expect(find.text('Unlock vault'), findsOneWidget);
   }
 
-  testWidgets(
-    'first install walkthrough shows pages and continues to welcome',
-    (tester) async {
-      SharedPreferences.setMockInitialValues({});
-      tester.view.physicalSize = const Size(430, 932);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets('first install walkthrough shows pages and continues to welcome', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: OnboardingFlow(
-            languageMode: 'en',
-            onLanguageModeChanged: (_) {},
-            vaultService: DefaultVaultService(
-              storageAdapter: InMemoryVaultStorageAdapter(),
-              cryptoAdapter: _FastTestCryptoAdapter(),
-            ),
-            vaultFilePath: 'test.nija',
-            firstInstallWalkthroughCompletedOverride: false,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnboardingFlow(
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          vaultService: DefaultVaultService(
+            storageAdapter: InMemoryVaultStorageAdapter(),
+            cryptoAdapter: _FastTestCryptoAdapter(),
           ),
+          vaultFilePath: 'test.nija',
+          firstInstallWalkthroughCompletedOverride: false,
         ),
-      );
-      await tester.pumpAndSettle();
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      expect(find.text('Create or open a vault'), findsOneWidget);
-      expect(find.text('Step 1 of 5'), findsOneWidget);
+    expect(find.text('Create or open a vault'), findsOneWidget);
+    expect(find.text('Step 1 of 6'), findsOneWidget);
 
-      for (var i = 0; i < 4; i++) {
-        await tester.tap(
-          find.byKey(const ValueKey('first-install-walkthrough-next')),
-        );
-        await tester.pumpAndSettle();
-      }
-
-      expect(find.text('Back up and recover'), findsOneWidget);
-      expect(find.text('Get started'), findsOneWidget);
+    for (var i = 0; i < 4; i++) {
       await tester.tap(
         find.byKey(const ValueKey('first-install-walkthrough-next')),
       );
       await tester.pumpAndSettle();
+    }
 
-      expect(find.text('Create vault'), findsOneWidget);
-      final prefs = await SharedPreferences.getInstance();
-      expect(
-        prefs.getBool('nija_first_install_walkthrough_completed_v1'),
-        isTrue,
-      );
-    },
-  );
+    expect(find.text('Share secrets securely'), findsOneWidget);
+    expect(
+      find.text(
+        'Export password-protected secret files and share them over any channel without exposing the original vault.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('first-install-walkthrough-next')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Back up and recover'), findsOneWidget);
+    expect(find.text('Get started'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('first-install-walkthrough-next')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Create vault'), findsOneWidget);
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getBool('nija_first_install_walkthrough_completed_v1'),
+      isTrue,
+    );
+  });
 
   testWidgets('first install walkthrough uses Nija button theme', (
     tester,
@@ -268,6 +279,42 @@ void main() {
 
     expect(find.text('Create or open a vault'), findsNothing);
     expect(find.text('Create vault'), findsOneWidget);
+  });
+
+  testWidgets('free app blocks creating a second vault', (tester) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnboardingFlow(
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          vaultService: DefaultVaultService(
+            storageAdapter: InMemoryVaultStorageAdapter(),
+            cryptoAdapter: _FastTestCryptoAdapter(),
+          ),
+          vaultFilePath: 'test.nija',
+          firstInstallWalkthroughCompletedOverride: true,
+          initialKnownVaults: const [
+            VaultReference(
+              id: 'existing.nija',
+              label: 'Existing vault',
+              addedAtEpochMs: 1,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.vaultLimitReached), findsOneWidget);
+    expect(find.text('Choose Guardian'), findsNothing);
   });
 
   testWidgets('entry page uses the same grouped vault flow on wide screens', (

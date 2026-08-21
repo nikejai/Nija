@@ -14,6 +14,7 @@ import '../../../application/services/default_vault_service.dart';
 import '../../../application/services/vault_service.dart';
 import '../../../application/services/vault_merge_helper.dart';
 import '../../../app/theme/entry_typography.dart';
+import '../../../core/config/app_features.dart';
 import '../../../core/config/guardian_profiles.dart';
 import '../../../core/config/recovery_phrase_dictionary.dart';
 import '../../../core/config/recovery_phrase_generator.dart';
@@ -67,6 +68,15 @@ enum _VaultPickerAction { importFromDevice }
 
 enum _VaultSelectionMode { known, cloudBackup }
 
+class _UserSafeOperationException implements Exception {
+  const _UserSafeOperationException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class _ImportVaultCredentialChoice {
   const _ImportVaultCredentialChoice.password(this.password)
     : recoverWithPhrase = false;
@@ -95,9 +105,11 @@ class OnboardingFlow extends StatefulWidget {
     this.biometricCredentialStore,
     this.biometricEnrollmentStore,
     this.firstInstallWalkthroughCompletedOverride,
+    this.initialKnownVaults = const <VaultReference>[],
     this.entitlementState = const EntitlementState.free(),
     this.canPurchaseExpandedVaultStorage = false,
     this.purchaseInProgress = false,
+    this.entitlementRefreshInProgress = false,
     this.entitlementErrorMessage,
     this.onRefreshEntitlements,
     this.onPurchaseExpandedVaultStorage,
@@ -116,9 +128,11 @@ class OnboardingFlow extends StatefulWidget {
   final BiometricCredentialStore? biometricCredentialStore;
   final BiometricEnrollmentStore? biometricEnrollmentStore;
   final bool? firstInstallWalkthroughCompletedOverride;
+  final List<VaultReference> initialKnownVaults;
   final EntitlementState entitlementState;
   final bool canPurchaseExpandedVaultStorage;
   final bool purchaseInProgress;
+  final bool entitlementRefreshInProgress;
   final String? entitlementErrorMessage;
   final Future<void> Function()? onRefreshEntitlements;
   final Future<bool> Function()? onPurchaseExpandedVaultStorage;
@@ -221,6 +235,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (kIsWeb) {
       registerWebPageHiddenListener(_handleWebPageHidden);
     }
+    _knownVaults = List<VaultReference>.from(widget.initialKnownVaults);
     _prepareVaultDraft();
     unawaited(_initializeDeviceMetadata());
     _initializeFirstInstallWalkthroughState();
@@ -298,13 +313,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onFinish: _completeFirstInstallWalkthrough,
       ),
       OnboardingStep.welcome => WelcomeScreen(
-        onCreateVault: () {
-          _prepareVaultDraft();
-          setState(() {
-            _setupOpenedFromUnlock = false;
-            _step = OnboardingStep.setup;
-          });
-        },
+        onCreateVault: () => unawaited(_openCreateVaultFromWelcome()),
         onSelectKnownVault: _selectKnownVault,
         onOpenVaultFile: () =>
             unawaited(_importVaultFromLocal(continueToUnlock: true)),
@@ -457,6 +466,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onChangeCloudBackupAccount: _isExploreDemoSession
             ? () async => false
             : _changeCloudBackupAccount,
+        onReadCloudBackupSummary: _isExploreDemoSession
+            ? null
+            : _readCurrentCloudBackupSummary,
         onRenameVault: _isExploreDemoSession ? null : _renameActiveVault,
         onReadVaultInternals: kDebugMode && !_isExploreDemoSession
             ? _readVaultInternals
@@ -479,6 +491,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         canPurchaseExpandedVaultStorage:
             !_isExploreDemoSession && widget.canPurchaseExpandedVaultStorage,
         purchaseInProgress: !_isExploreDemoSession && widget.purchaseInProgress,
+        entitlementRefreshInProgress:
+            !_isExploreDemoSession && widget.entitlementRefreshInProgress,
         entitlementSource: widget.entitlementState.source,
         entitlementLastVerifiedAt: widget.entitlementState.lastVerifiedAt,
         entitlementErrorMessage: widget.entitlementErrorMessage,
@@ -999,6 +1013,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<VaultReference?> _pickVaultFileForUnlock() async {
+    if (!(await _ensureCanAddVaultReference())) return null;
     try {
       final imported = await _vaultPortability.importVaultFromLocal();
       if (imported == null) return null;
@@ -1029,6 +1044,16 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       ).showSnackBar(SnackBar(content: Text(AppStrings.vaultImportFailed)));
       return null;
     }
+  }
+
+  Future<void> _openCreateVaultFromWelcome() async {
+    if (!(await _ensureCanAddVaultReference())) return;
+    _prepareVaultDraft();
+    if (!mounted) return;
+    setState(() {
+      _setupOpenedFromUnlock = false;
+      _step = OnboardingStep.setup;
+    });
   }
 
   Future<void> _createVaultAndProceed() async {
@@ -1247,6 +1272,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _openCreateVaultFromUnlock() async {
+    if (!(await _ensureCanAddVaultReference())) return;
     _passwordController.clear();
     _prepareVaultDraft();
     if (!mounted) return;
@@ -2879,6 +2905,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   String _errorHint(Object error) {
+    if (error is _UserSafeOperationException) {
+      return error.message;
+    }
     final message = error.toString();
     if (message.contains('abortTrigger') ||
         message.contains('Request aborted')) {
@@ -2892,9 +2921,16 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         message.contains('Timed out while searching')) {
       return 'Cloud backup search timed out. Check your connection and retry.';
     }
-    if (message.contains('DetailedApiRequestError') &&
-        message.contains('insufficientPermissions')) {
-      return 'Google Drive permissions are missing. Reconnect and allow Drive access.';
+    if (_looksLikeObfuscatedTypeCastError(message)) {
+      return 'Google services returned an unexpected response. Update Google Play Store and Play services, install or update Nija from Google Play, then retry.';
+    }
+    if ((message.contains('DetailedApiRequestError') &&
+            message.contains('insufficientPermissions')) ||
+        message.contains('insufficientFilePermissions') ||
+        message.contains('accessNotConfigured') ||
+        message.contains('appDataFolder') ||
+        message.contains('drive.appdata')) {
+      return 'Google Drive permissions are missing. Reconnect and allow Drive access. If this is an installed app build, make sure the OAuth consent screen includes the Drive appdata scope.';
     }
     if (message.contains('ApiException: 10') ||
         message.contains('DEVELOPER_ERROR') ||
@@ -2910,10 +2946,63 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         message.contains('allow Drive access')) {
       return 'Google Drive is not connected. Sign in again and allow Drive access.';
     }
+    if (message.contains('Selected cloud backup could not be downloaded')) {
+      return 'The selected cloud backup could not be downloaded. Reconnect Google Drive and retry.';
+    }
+    if (message.contains('NIJA_GOOGLE_WEB_CLIENT_ID')) {
+      return 'This web build is missing Google Drive restore configuration. Update the app and retry.';
+    }
+    if (message.contains('Failed to import vault.')) {
+      return _importFailureException(message).message;
+    }
     if (kDebugMode) {
       return '($error)';
     }
     return 'Please retry.';
+  }
+
+  _UserSafeOperationException _importFailureException(String rawMessage) {
+    final message = rawMessage.trim();
+    if (message.isEmpty) {
+      return const _UserSafeOperationException(
+        'The selected vault could not be imported. Check the vault password and retry.',
+      );
+    }
+    if (message.contains('Confirm replace')) {
+      return _UserSafeOperationException(message);
+    }
+    if (message.contains('Unsupported vault file format')) {
+      return const _UserSafeOperationException(
+        'The selected file is not a supported Nija vault backup.',
+      );
+    }
+    if (message.contains('Vault file not found')) {
+      return const _UserSafeOperationException(
+        'The cloud backup could not be staged locally. Reload and retry.',
+      );
+    }
+    if (message.contains('FormatException') ||
+        message.contains('Invalid argument') ||
+        message.contains('Invalid vault file') ||
+        message.contains('Invalid vault password') ||
+        message.contains('Mac check failed') ||
+        message.contains('decrypt')) {
+      return const _UserSafeOperationException(
+        'The cloud vault could not be unlocked. Check the vault password or use the recovery phrase.',
+      );
+    }
+    if (message.startsWith('Failed to import vault.')) {
+      return const _UserSafeOperationException(
+        'The selected cloud backup could not be imported. Check the vault password and retry.',
+      );
+    }
+    return _UserSafeOperationException(message);
+  }
+
+  bool _looksLikeObfuscatedTypeCastError(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('is not a subtype of type') ||
+        (lower.contains('type ') && lower.contains('subtype'));
   }
 
   Future<bool> _requestFileAccessConsent({
@@ -3262,6 +3351,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _importVaultFromLocal({required bool continueToUnlock}) async {
+    if (continueToUnlock && !(await _ensureCanAddVaultReference())) return;
     try {
       final imported = await _vaultPortability.importVaultFromLocal();
       if (imported == null) return;
@@ -3289,7 +3379,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     required bool continueToUnlock,
     OnboardingStep returnOnCancel = OnboardingStep.welcome,
   }) async {
+    if (continueToUnlock && !(await _ensureCanAddVaultReference())) return;
     try {
+      await _refreshEntitlementsBeforeCloudOperation('importVaultFromCloud');
+      if (!mounted) return;
       final signedIn = await _ensureCloudBackupGoogleAccountSelected();
       if (!signedIn || !mounted) return;
 
@@ -3475,7 +3568,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
               'Selected vault: $selectedVaultLabel\n\nThe selected file did not unlock with the active vault password. Enter the password that was valid when this file was exported.',
         );
         if (prompted == null) {
-          throw StateError(result.userSafeMessage);
+          throw _importFailureException(result.userSafeMessage);
         }
         if (prompted.recoverWithPhrase) {
           await _recoverImportedVault(
@@ -3486,7 +3579,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           return;
         }
         if (prompted.password.isEmpty || prompted.password == credential) {
-          throw StateError(result.userSafeMessage);
+          throw _importFailureException(result.userSafeMessage);
         }
         credential = prompted.password;
         _startBusy('Importing vault...');
@@ -3509,7 +3602,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         }
       }
       if (result.status == ImportStatus.failed) {
-        throw StateError(result.userSafeMessage);
+        throw _importFailureException(result.userSafeMessage);
       }
       if (result.status == ImportStatus.alreadyUpToDate ||
           result.status == ImportStatus.incomingOlder) {
@@ -3637,7 +3730,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         unlockCredential: newPassword,
       );
       if (result.status == ImportStatus.failed) {
-        throw StateError(result.userSafeMessage);
+        throw _importFailureException(result.userSafeMessage);
       }
       final activeId = result.conflictVaultId ?? result.vaultId;
       final resolvedLabel = await _resolveVaultLabel(activeId);
@@ -3902,6 +3995,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _backupCurrentVaultToCloud() async {
+    if (!_cloudBackupFeatureAvailable) {
+      _showOperationSnackBar(AppFeatures.paidUnavailableLabel);
+      return;
+    }
     var busyActive = false;
     void startCloudBusy(String message) {
       _startBusy(
@@ -3920,6 +4017,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     try {
+      await _refreshEntitlementsBeforeCloudOperation(
+        'backupCurrentVaultToCloud',
+      );
+      if (!mounted) return;
       final signedIn = await _ensureCloudBackupGoogleAccountSelected();
       if (!signedIn || !mounted) return;
 
@@ -4010,6 +4111,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     try {
+      await _refreshEntitlementsBeforeCloudOperation(
+        'restoreCurrentVaultFromCloud',
+      );
+      if (!mounted) return;
       final signedIn = await _ensureCloudBackupGoogleAccountSelected();
       if (!signedIn || !mounted) return;
 
@@ -4125,9 +4230,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             'The cloud backup did not unlock with the active vault password. Enter the password that was valid when it was backed up.',
         allowRecovery: false,
       );
-      if (prompted == null ||
-          prompted.password.isEmpty ||
-          prompted.password == credential) {
+      if (prompted == null || prompted.password.isEmpty) {
+        return _CloudMergeOutcome.cancelled;
+      }
+      if (prompted.password == credential) {
+        if (!mounted) return _CloudMergeOutcome.cancelled;
+        _showOperationSnackBar(
+          _importFailureException(result.userSafeMessage).message,
+        );
         return _CloudMergeOutcome.cancelled;
       }
       credential = prompted.password;
@@ -4188,13 +4298,47 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return _CloudMergeOutcome.merged;
     }
     if (!mounted) return _CloudMergeOutcome.cancelled;
-    _showOperationSnackBar(result.userSafeMessage);
+    if (result.status == ImportStatus.failed) {
+      _showOperationSnackBar(
+        _importFailureException(result.userSafeMessage).message,
+      );
+    } else {
+      _showOperationSnackBar(result.userSafeMessage);
+    }
     return _CloudMergeOutcome.cancelled;
   }
 
   bool _cloudImportNeedsReplaceConfirmation(ImportResult result) {
     return result.status == ImportStatus.failed &&
         result.userSafeMessage.contains('Confirm replace');
+  }
+
+  bool get _cloudBackupFeatureAvailable =>
+      AppFeatures.supportsCloudBackup ||
+      widget.entitlementState.expandedVaultStorage;
+
+  bool get _isPaidAndroidMultiVaultEnabled =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android &&
+      widget.entitlementState.expandedVaultStorage;
+
+  int get _maxSupportedVaultCount => VaultLimits.maxVaultCountFor(
+    isAndroid: !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
+    expandedStorageEntitled: widget.entitlementState.expandedVaultStorage,
+  );
+
+  Future<bool> _ensureCanAddVaultReference() async {
+    final known = _enableVaultReferenceCache && !_isExploreDemoSession
+        ? await _mergedKnownAndPrivateVaultReferences()
+        : _knownVaults;
+    if (!mounted) return false;
+    if (!listEquals(_knownVaults, known)) {
+      setState(() => _knownVaults = known);
+    }
+    if (known.length < _maxSupportedVaultCount) return true;
+    if (_isPaidAndroidMultiVaultEnabled) return true;
+    _showOperationSnackBar(AppStrings.vaultLimitReached);
+    return false;
   }
 
   Future<String> _localPathForCloudBackup(CloudVaultBackupFile backup) async {
@@ -4248,7 +4392,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _confirmBackupAfterCloudMerge() async {
-    if (!mounted) return;
+    if (!mounted || !_cloudBackupFeatureAvailable) return;
     final backupNow = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -4275,6 +4419,43 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<String?> _readCloudBackupAccountLabel() {
     return _vaultPortability.getCloudBackupAccountLabel();
+  }
+
+  Future<CloudVaultBackupFile?> _readCurrentCloudBackupSummary() async {
+    try {
+      final label = await _readCloudBackupAccountLabel();
+      if (label == null || label.trim().isEmpty) return null;
+      final rawContent = await _vaultService.readRawVaultFile(
+        filePath: _vaultFilePath,
+      );
+      final decoded = jsonDecode(rawContent);
+      if (decoded is! Map) return null;
+      final vaultId = decoded['vaultId']?.toString().trim() ?? '';
+      if (vaultId.isEmpty) return null;
+      return _vaultPortability.readCloudBackup(
+        vaultId: vaultId,
+        forceAccountChooser: false,
+      );
+    } catch (error, stackTrace) {
+      _logOperationError('readCurrentCloudBackupSummary', error, stackTrace);
+      return null;
+    }
+  }
+
+  Future<void> _refreshEntitlementsBeforeCloudOperation(
+    String operation,
+  ) async {
+    final refresh = widget.onRefreshEntitlements;
+    if (refresh == null) return;
+    try {
+      await refresh();
+    } catch (error, stackTrace) {
+      _logOperationError(
+        'refreshEntitlementsBeforeCloud:$operation',
+        error,
+        stackTrace,
+      );
+    }
   }
 
   Future<bool> _changeCloudBackupAccount() {

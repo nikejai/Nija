@@ -70,7 +70,6 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   bool _isLoadingDocument = true;
   String _loadMessage = 'Decrypting document...';
   double _loadProgress = 0;
-  bool _isPdfRendering = false;
   int _documentLoadToken = 0;
   late bool _isFavorite;
   final _textPreviewScrollController = ScrollController();
@@ -137,7 +136,6 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   Future<void> _loadSelectedDocument() async {
     final loadToken = ++_documentLoadToken;
     final document = _selectedDocument;
-    final extension = _documentExtension(document);
     widget.onLifecycleLockSuppressed?.call(true);
     if (mounted) {
       setState(() {
@@ -146,7 +144,6 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         _documentBytes = null;
         _loadMessage = 'Decrypting document...';
         _loadProgress = 0;
-        _isPdfRendering = false;
       });
     }
     try {
@@ -164,7 +161,6 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
       setState(() {
         _documentBytes = bytes;
         _isLoadingDocument = false;
-        _isPdfRendering = _isPdfExtension(extension);
         _loadProgress = 1;
       });
     } catch (error) {
@@ -172,7 +168,6 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
       setState(() {
         _documentLoadError = error;
         _isLoadingDocument = false;
-        _isPdfRendering = false;
       });
     } finally {
       widget.onLifecycleLockSuppressed?.call(false);
@@ -357,12 +352,10 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                       },
                     ),
             ),
-            if (_isLoadingDocument || _isPdfRendering)
+            if (_isLoadingDocument)
               _DocumentPreviewLoadOverlay(
-                message: _isLoadingDocument
-                    ? _loadMessage
-                    : 'Rendering PDF preview...',
-                progress: _isLoadingDocument ? _loadProgress : null,
+                message: _loadMessage,
+                progress: _loadProgress,
               ),
             if (_busyCount > 0) _VaultDetailBusyOverlay(message: _busyMessage),
           ],
@@ -570,12 +563,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         child: PdfViewer.data(
           Uint8List.fromList(bytes),
           sourceName: '${_documentId(document)}-${bytes.length}',
-          params: _buildPdfViewerParams(
-            onDocumentLoadFinished: (_, succeeded) {
-              if (!mounted || !succeeded) return;
-              setState(() => _isPdfRendering = false);
-            },
-          ),
+          params: _buildPdfViewerParams(),
         ),
       );
     }

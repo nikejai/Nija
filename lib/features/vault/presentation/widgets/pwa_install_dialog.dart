@@ -167,21 +167,82 @@ class _PwaInstallOfferButtonState extends State<PwaInstallOfferButton> {
     final label = pwaInstallOfferTitle(status);
     final icon = pwaInstallOfferIcon(status);
     final compact = MediaQuery.sizeOf(context).width < 520;
+    final signLabel = compact
+        ? AppStrings.pwaInstallSignCompact
+        : AppStrings.pwaInstallDownloadApp;
 
     if (compact) {
-      return IconButton(
+      return Row(
         key: const ValueKey('pwa-install-offer-button'),
-        tooltip: label,
-        onPressed: _handleTap,
-        icon: Icon(icon),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _PwaInstallArrowSign(label: signLabel),
+          IconButton(tooltip: label, onPressed: _handleTap, icon: Icon(icon)),
+        ],
       );
     }
 
-    return TextButton.icon(
+    return Row(
       key: const ValueKey('pwa-install-offer-button'),
-      onPressed: _handleTap,
-      icon: Icon(icon, size: 18),
-      label: Text(label),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _PwaInstallArrowSign(label: signLabel),
+        const SizedBox(width: 6),
+        TextButton.icon(
+          onPressed: _handleTap,
+          icon: Icon(icon, size: 18),
+          label: Text(label),
+        ),
+      ],
+    );
+  }
+}
+
+class _PwaInstallArrowSign extends StatelessWidget {
+  const _PwaInstallArrowSign({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = colorScheme.brightness == Brightness.dark;
+    final background = isDark ? Colors.white : const Color(0xFF18181B);
+    final foreground = isDark ? const Color(0xFF18181B) : Colors.white;
+    const border = Color(0xFFAA8B4D);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: background,
+        border: Border.all(color: border, width: 1.2),
+        borderRadius: BorderRadius.circular(7),
+        boxShadow: [
+          BoxShadow(
+            color: border.withValues(alpha: 0.20),
+            offset: const Offset(0, 2),
+            blurRadius: 6,
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: foreground,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_right_alt_rounded, size: 16, color: foreground),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -11,6 +11,7 @@ import 'package:nija/features/vault/presentation/vault_app_shell.dart';
 import 'package:nija/features/vault/presentation/widgets/vault_entry_list.dart';
 import 'package:nija/infrastructure/adapters/secret_share_model.dart';
 import 'package:nija/infrastructure/adapters/secret_share_portability_base.dart';
+import 'package:nija/infrastructure/adapters/vault_portability_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -246,7 +247,7 @@ void main() {
       find.byKey(const ValueKey('settings-vault-storage-row')),
       findsOneWidget,
     );
-    expect(find.text('42.0 MB of 100 MB'), findsAtLeastNWidgets(1));
+    expect(find.text('42.0 MB of 151 MB'), findsAtLeastNWidgets(1));
     expect(
       find.byKey(const ValueKey('settings-buy-expanded-storage')),
       findsOneWidget,
@@ -257,7 +258,350 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(purchaseStarted, isFalse);
+    expect(find.text('Use the right Play account'), findsOneWidget);
+    expect(
+      find.textContaining('switch accounts in the Play Store app first'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
     expect(purchaseStarted, isTrue);
+  });
+
+  testWidgets('restore purchase confirms Google Play account first', (
+    tester,
+  ) async {
+    var refreshCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          vaultSizeBytes: 42 * 1024 * 1024,
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          canPurchaseExpandedVaultStorage: true,
+          onRefreshEntitlements: () async => refreshCalls++,
+          onPurchaseExpandedVaultStorage: () async => true,
+        ),
+      ),
+    );
+
+    await tester.tap(find.text(AppStrings.tabSettings).last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-refresh-entitlement')),
+      300,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('settings-refresh-entitlement')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(refreshCalls, 0);
+    expect(find.text('Use the right Play account'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Restore purchase'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(refreshCalls, 1);
+    expect(
+      find.text('Storage purchase status refreshed.'),
+      findsAtLeastNWidgets(1),
+    );
+  });
+
+  testWidgets('settings shows startup Play entitlement refresh status', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          vaultSizeBytes: 42 * 1024 * 1024,
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          entitlementRefreshInProgress: true,
+          onRefreshEntitlements: () async {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.text(AppStrings.tabSettings).last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-storage-entitlement-row')),
+      300,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Checking Google Play purchase...'), findsWidgets);
+    expect(find.text('Checking'), findsOneWidget);
+  });
+
+  testWidgets('failed storage purchase shows latest Play Billing reason', (
+    tester,
+  ) async {
+    String? entitlementErrorMessage;
+
+    Widget buildShell() {
+      return MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setHostState) => VaultAppShell(
+            vaultSizeBytes: 42 * 1024 * 1024,
+            recoveryWords: const [
+              'anchor',
+              'apple',
+              'arrow',
+              'atlas',
+              'beacon',
+              'breeze',
+              'canyon',
+              'cedar',
+              'cobalt',
+              'ember',
+              'harbor',
+              'willow',
+            ],
+            initialItems: const [],
+            initialNotes: const [],
+            initialCustomTypeDefinitions: const [],
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            biometricEnabled: false,
+            onBiometricChanged: (_) {},
+            onPersistVaultData:
+                ({
+                  required items,
+                  required notes,
+                  required customTypeDefinitions,
+                }) async {},
+            onRotateMasterPassword:
+                ({required currentPassword, required newPassword}) async {},
+            onRotateRecoveryPhrase:
+                ({
+                  required currentRecoveryPhrase,
+                  required newRecoveryPhrase,
+                }) async {},
+            onExportVault: () async {},
+            onImportVault: () async {},
+            onBackupToCloud: () async {},
+            onRestoreFromCloud: () async {},
+            onReadCloudBackupAccount: () async => null,
+            onChangeCloudBackupAccount: () async => false,
+            onLockNow: () {},
+            canPurchaseExpandedVaultStorage: true,
+            entitlementErrorMessage: entitlementErrorMessage,
+            onRefreshEntitlements: () async {},
+            onPurchaseExpandedVaultStorage: () async {
+              setHostState(() {
+                entitlementErrorMessage = 'Google Play rejected launch.';
+              });
+              return false;
+            },
+          ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(buildShell());
+
+    await tester.tap(find.text(AppStrings.tabSettings).last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-buy-expanded-storage')),
+      300,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('settings-buy-expanded-storage')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Use the right Play account'), findsOneWidget);
+
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Google Play rejected launch.'), findsAtLeastNWidgets(1));
+    expect(find.text('Could not start Google Play purchase.'), findsNothing);
+  });
+
+  testWidgets('obfuscated Play Billing type errors show safe guidance', (
+    tester,
+  ) async {
+    String? entitlementErrorMessage;
+    const rawError = "type 'ipa' is not a subtype of type 'kpa'";
+
+    Widget buildShell() {
+      return MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setHostState) => VaultAppShell(
+            vaultSizeBytes: 42 * 1024 * 1024,
+            recoveryWords: const [
+              'anchor',
+              'apple',
+              'arrow',
+              'atlas',
+              'beacon',
+              'breeze',
+              'canyon',
+              'cedar',
+              'cobalt',
+              'ember',
+              'harbor',
+              'willow',
+            ],
+            initialItems: const [],
+            initialNotes: const [],
+            initialCustomTypeDefinitions: const [],
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            biometricEnabled: false,
+            onBiometricChanged: (_) {},
+            onPersistVaultData:
+                ({
+                  required items,
+                  required notes,
+                  required customTypeDefinitions,
+                }) async {},
+            onRotateMasterPassword:
+                ({required currentPassword, required newPassword}) async {},
+            onRotateRecoveryPhrase:
+                ({
+                  required currentRecoveryPhrase,
+                  required newRecoveryPhrase,
+                }) async {},
+            onExportVault: () async {},
+            onImportVault: () async {},
+            onBackupToCloud: () async {},
+            onRestoreFromCloud: () async {},
+            onReadCloudBackupAccount: () async => null,
+            onChangeCloudBackupAccount: () async => false,
+            onLockNow: () {},
+            canPurchaseExpandedVaultStorage: true,
+            entitlementErrorMessage: entitlementErrorMessage,
+            onRefreshEntitlements: () async {},
+            onPurchaseExpandedVaultStorage: () async {
+              setHostState(() {
+                entitlementErrorMessage = rawError;
+              });
+              return false;
+            },
+          ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(buildShell());
+
+    await tester.tap(find.text(AppStrings.tabSettings).last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-buy-expanded-storage')),
+      300,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('settings-buy-expanded-storage')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(AppStrings.googlePlayUnexpectedResponse),
+      findsAtLeastNWidgets(1),
+    );
+    expect(find.text(rawError), findsNothing);
   });
 
   testWidgets('custom password-only item does not expose value in subtitle', (
@@ -3696,13 +4040,13 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('How vault unlock works'), findsOneWidget);
-    expect(find.text('Vault crypto metadata'), findsOneWidget);
-    expect(find.text('Guardian profile'), findsOneWidget);
-    expect(find.text('owl'), findsOneWidget);
-    expect(find.text('KDF'), findsOneWidget);
-    expect(find.text('Argon2id'), findsOneWidget);
-    expect(find.text('Cipher'), findsOneWidget);
-    expect(find.text('AES-256-GCM'), findsOneWidget);
+    expect(find.text('Vault crypto metadata'), findsNothing);
+    expect(find.text('Guardian profile'), findsNothing);
+    expect(find.text('owl'), findsNothing);
+    expect(find.text('KDF'), findsNothing);
+    expect(find.text('Argon2id'), findsNothing);
+    expect(find.text('Cipher'), findsNothing);
+    expect(find.text('AES-256-GCM'), findsNothing);
     expect(find.text('Recovery key wrapper'), findsOneWidget);
     expect(find.text('Present'), findsOneWidget);
     expect(find.text('Auto-lock'), findsOneWidget);
@@ -4234,7 +4578,7 @@ void main() {
     expect(find.text('Personal vault'), findsOneWidget);
   });
 
-  testWidgets('paid cloud backup shows last backup and backed up version', (
+  testWidgets('cloud backup shows last backup and backed up version', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({
@@ -4295,10 +4639,9 @@ void main() {
           onImportVault: () async {},
           onBackupToCloud: () async {},
           onRestoreFromCloud: () async {},
-          onReadCloudBackupAccount: () async => 'paid@example.com',
+          onReadCloudBackupAccount: () async => 'free@example.com',
           onChangeCloudBackupAccount: () async => false,
           onLockNow: () {},
-          expandedVaultStorageEntitled: true,
         ),
       ),
     );
@@ -4324,6 +4667,190 @@ void main() {
     expect(find.text('Backed up version'), findsOneWidget);
     expect(find.text('r8 - 12345678'), findsOneWidget);
     expect(find.text('Vault updated: 2026-07-22 09:15'), findsOneWidget);
+  });
+
+  testWidgets('cloud backup refreshes display from existing Drive backup', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      'nija_pref_cloud_backup_enabled_v1': true,
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultRevision: 9,
+          activeVaultVersionId: 'fedcba0987654321',
+          activeVaultUpdatedAt: '2026-07-22T10:00:00.000',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => 'free@example.com',
+          onChangeCloudBackupAccount: () async => false,
+          onReadCloudBackupSummary: () async => CloudVaultBackupFile(
+            storageId: 'gdrive_vault.nija',
+            label: 'backup.nija',
+            content: '',
+            modifiedAt: DateTime(2026, 7, 23, 11, 45),
+            revision: 10,
+            versionId: 'abcdef1234567890',
+            updatedAt: '2026-07-23T11:30:00.000',
+          ),
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-cloud-backup-last-at')),
+      200,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Last backup'), findsOneWidget);
+    expect(find.text('2026-07-23 11:45'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-cloud-backup-version')),
+      200,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Backed up version'), findsOneWidget);
+    expect(find.text('r10 - abcdef12'), findsOneWidget);
+    expect(find.text('Vault updated: 2026-07-23 11:30'), findsOneWidget);
+  });
+
+  testWidgets('cloud backup shows checking state while summary loads', (
+    tester,
+  ) async {
+    final summaryCompleter = Completer<CloudVaultBackupFile?>();
+    SharedPreferences.setMockInitialValues({
+      'nija_pref_cloud_backup_enabled_v1': true,
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultRevision: 9,
+          activeVaultVersionId: 'fedcba0987654321',
+          activeVaultUpdatedAt: '2026-07-22T10:00:00.000',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => 'free@example.com',
+          onChangeCloudBackupAccount: () async => false,
+          onReadCloudBackupSummary: () => summaryCompleter.future,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pump();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-cloud-backup-last-at')),
+      200,
+    );
+    await tester.pump();
+
+    expect(find.text('Last backup'), findsOneWidget);
+    expect(find.text('Checking cloud backup...'), findsOneWidget);
+    expect(find.text('Backed up version'), findsOneWidget);
+    expect(find.text('Checking'), findsOneWidget);
+    expect(
+      find.text('Vault updated: Checking cloud backup...'),
+      findsOneWidget,
+    );
+
+    summaryCompleter.complete(
+      CloudVaultBackupFile(
+        storageId: 'gdrive_vault.nija',
+        label: 'backup.nija',
+        content: '',
+        modifiedAt: DateTime(2026, 7, 23, 11, 45),
+        revision: 10,
+        versionId: 'abcdef1234567890',
+        updatedAt: '2026-07-23T11:30:00.000',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('2026-07-23 11:45'), findsOneWidget);
+    expect(find.text('r10 - abcdef12'), findsOneWidget);
   });
 
   testWidgets('back is blocked while cloud backup is running', (tester) async {
@@ -4411,11 +4938,11 @@ void main() {
     expect(find.text('Cloud backup in progress...'), findsNothing);
   });
 
-  testWidgets('free build shows paid cloud backup gate in settings', (
-    tester,
-  ) async {
+  testWidgets('free build allows cloud backup and restore', (tester) async {
     var cloudAccountReads = 0;
     var backupCalls = 0;
+    var restoreCalls = 0;
+    var accountChangeCalls = 0;
     SharedPreferences.setMockInitialValues({
       'nija_pref_cloud_backup_enabled_v1': true,
     });
@@ -4460,19 +4987,22 @@ void main() {
           onExportVault: () async {},
           onImportVault: () async {},
           onBackupToCloud: () async => backupCalls++,
-          onRestoreFromCloud: () async {},
+          onRestoreFromCloud: () async => restoreCalls++,
           onReadCloudBackupAccount: () async {
             cloudAccountReads++;
             return 'paid@example.com';
           },
-          onChangeCloudBackupAccount: () async => true,
+          onChangeCloudBackupAccount: () async {
+            accountChangeCalls++;
+            return true;
+          },
           onLockNow: () {},
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(cloudAccountReads, 0);
+    expect(cloudAccountReads, 1);
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
@@ -4484,19 +5014,145 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Cloud Backup'), findsOneWidget);
-    expect(find.text('Available in paid version'), findsOneWidget);
+    expect(find.text('Automatic cloud backup is enabled'), findsOneWidget);
+    expect(find.text('Backup account'), findsOneWidget);
+    expect(find.text('paid@example.com'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('settings-cloud-backup-now')),
-      findsNothing,
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<AnimatedRotation>(
+            find.byKey(const ValueKey('settings-cloud-backup-expand-arrow')),
+          )
+          .turns,
+      0.25,
     );
     expect(
       find.byKey(const ValueKey('settings-cloud-restore-now')),
-      findsNothing,
+      findsOneWidget,
     );
 
     await tester.tap(cloudBackupRow);
     await tester.pumpAndSettle();
     expect(backupCalls, 0);
+    expect(
+      find.byKey(const ValueKey('settings-cloud-backup-now')),
+      findsNothing,
+    );
+    expect(
+      tester
+          .widget<AnimatedRotation>(
+            find.byKey(const ValueKey('settings-cloud-backup-expand-arrow')),
+          )
+          .turns,
+      0,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('settings-cloud-account-row')));
+    await tester.pumpAndSettle();
+    expect(accountChangeCalls, 1);
+
+    await tester.tap(cloudBackupRow);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('settings-cloud-backup-now')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<AnimatedRotation>(
+            find.byKey(const ValueKey('settings-cloud-backup-expand-arrow')),
+          )
+          .turns,
+      0.25,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('settings-cloud-backup-now')));
+    await tester.pumpAndSettle();
+    expect(backupCalls, 1);
+
+    await tester.tap(find.byKey(const ValueKey('settings-cloud-restore-now')));
+    await tester.pumpAndSettle();
+    expect(restoreCalls, 1);
+    expect(backupCalls, 1);
+  });
+
+  testWidgets('free cloud backup row does not start purchase', (tester) async {
+    var purchaseCalls = 0;
+    SharedPreferences.setMockInitialValues({
+      'nija_pref_cloud_backup_enabled_v1': true,
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          canPurchaseExpandedVaultStorage: true,
+          onPurchaseExpandedVaultStorage: () async {
+            purchaseCalls++;
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+
+    final cloudBackupRow = find.byKey(
+      const ValueKey('settings-cloud-backup-switch'),
+    );
+    await tester.scrollUntilVisible(cloudBackupRow, 200);
+    await tester.pumpAndSettle();
+
+    await tester.tap(cloudBackupRow);
+    await tester.pumpAndSettle();
+
+    expect(purchaseCalls, 0);
+    expect(find.text('Use the right Play account'), findsNothing);
     expect(
       find.byKey(const ValueKey('settings-cloud-backup-now')),
       findsNothing,

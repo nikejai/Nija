@@ -55,6 +55,7 @@ flowchart TD
 
   F4 --> O[Language Picker BottomSheet]
   F4 --> S[Import Encrypted Secret]
+  F4 --> R[Google Play Account Confirmation Dialog]
   F4 --> P[Rotate Master Password Dialog]
   F4 --> Q[Rotate Recovery Phrase Dialog]
   F4 -->|Lock vault now| E
@@ -64,7 +65,7 @@ flowchart TD
 
 ### Onboarding
 - `WelcomeScreen`
-  - Features: Nija header/theme control, local-first hero, grouped vault-entry actions, and cloud restore.
+  - Features: first-install walkthrough for vault creation, recovery, unlock, encrypted storage, secure secret sharing, and backup/recovery; Nija header/theme control, local-first hero, grouped vault-entry actions, and cloud restore.
   - Layout: one mobile-first full-viewport surface across all breakpoints with a centered `460px` entry column; there is no separate wide marketing layout or outer phone-frame crop.
   - Actions: `Select a vault` opens known vaults only; `Open vault file` and `Import data` use direct local import; `Create a vault` starts setup; cloud restore uses the supported existing cloud flow.
   - Next: `SetupScreen`.
@@ -166,8 +167,12 @@ flowchart TD
   - Navigation: note view or item detail based on type.
 
 - `Settings Tab`
-  - Features: language picker, visible active vault name, Storage section with vault usage, Play entitlement status, restore purchase, and Android expanded-storage upgrade, app PIN setup/change row, biometric slider switch (enable/disable confirmations), secure WebAuthn PRF device-unlock enrollment on web with unsupported-browser guidance, rotate master password, import encrypted secret, default sort for keys/notes, single export-vault button, privacy policy/about/terms links, lock now.
+  - Features: language picker, visible active vault name, Storage section with 151 MB free vault usage, one-vault free limit, Play entitlement status including startup refresh/checking state, restore purchase, Android expanded-storage upgrade with Google Play account confirmation for 1 GB and multi-vault support, free cloud backup/restore with animated expand/collapse affordance and cloud-metadata-backed last-backup/version display with checking state, Security & Encryption sheet without vault crypto metadata, app PIN setup/change row, biometric slider switch (enable/disable confirmations), secure WebAuthn PRF device-unlock enrollment on web with unsupported-browser guidance, rotate master password, import encrypted secret, default sort for keys/notes, single export-vault button, privacy policy/about/terms links, lock now.
   - Export flow: prompts for desired output file name before writing vault file.
+
+- `Google Play Account Confirmation Dialog`
+  - Features: explains that Google Play controls the purchase/restore account and asks the user to switch accounts in the Play Store app before continuing.
+  - Opened from: Settings -> Storage -> Upgrade storage and Restore purchase on Android.
 
 - `Web Privacy Policy Page`
   - Route: `/privacy.html`.
@@ -192,7 +197,7 @@ flowchart TD
 - Vault tab detail + add item.
 - Notes add/view/edit with tags.
 - Types create custom type + type items view.
-- Settings language, storage entitlement restore/upgrade, biometric slider switch, master rotation, export action, lock now.
+- Settings language, storage entitlement restore/upgrade with Google Play account confirmation, biometric slider switch, master rotation, export action, lock now.
 - Settings encrypted-secret import action.
 - Vault/Notes long-press quick actions (pin/unpin/delete) and detail-screen delete actions.
 - Vault/Notes multi-select mode (left-icon entry, selected-count top bar, bulk pin/delete).

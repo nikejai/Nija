@@ -30,12 +30,19 @@ Use this document as the release gate before tagging any production build.
 - [ ] IndexedDB/local web storage contains only encrypted vault data and non-secret app preferences.
 - [ ] HTTPS-only deployment is enforced with appropriate security headers, including the checked-in CSP/header policy in `web/_headers` or `firebase.json`.
 - [ ] Browser visibility/background behavior locks or protects sensitive vault surfaces consistently with native app expectations.
+- [ ] Web production artifacts are hardened with `./scripts/harden_web_release.sh` after the wasm build.
+- [ ] `build/web/main.dart.js` is absent from deployable web artifacts.
+- [ ] `build/web/flutter_bootstrap.js` contains only the `dart2wasm` app build and includes the unsupported-browser upgrade message.
+- [ ] Required runtime JavaScript remains present: Flutter bootstrap/runtime, renderer support, service-worker cleanup, and Nija browser bridge files.
+- [ ] cPanel/Apache/LiteSpeed deployments include `build/web/.htaccess` so `.wasm` and `.mjs` assets are not served as `index.html` or blocked by `nosniff`.
 
 ## 4) Final Validation Matrix
 
 Run all checks:
 
 ```bash
+flutter build web --release --wasm -O4 --no-source-maps --csp
+./scripts/harden_web_release.sh
 ./scripts/release_hardening_gate.sh
 ```
 
