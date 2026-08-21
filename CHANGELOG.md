@@ -2,6 +2,148 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-08-21 23:32 IST
+
+- Fixed cloud-backup status sometimes missing after a successful Google Drive backup.
+  - Settings now refreshes the last-backup/version display from the existing cloud backup summary when a Drive account is available.
+  - Empty backup status rows now show `Checking cloud backup...` while the Drive summary is still loading.
+  - Cloud backup summaries now carry `vaultVersionId` so the backed-up version row can match the uploaded vault metadata.
+  - Native Google Drive operations reuse the already signed-in account for non-forced reads instead of starting a fresh sign-in.
+
+## 2026-08-21 23:14:22 IST
+
+- Hid vault crypto metadata from the Security & Encryption sheet.
+  - Kept the metadata model and internals path in place for now.
+  - Updated widget coverage so raw crypto rows stay hidden from the user-facing sheet.
+
+## 2026-08-21 23:08:14 IST
+
+- Improved the mobile cloud-backup Settings affordance.
+  - The Backup to Google Drive/iCloud row now animates its chevron from right to down when expanded.
+  - Added widget coverage for the expanded and collapsed arrow states.
+
+## 2026-08-21 22:58:51 IST
+
+- Moved monetization to a more generous free tier for now.
+  - Free vault storage is now 151 MB.
+  - Cloud backup and restore are enabled for the free app.
+  - Free installs support one vault through configurable vault-count limits.
+  - Existing Android Google Play purchase remains available for 1 GB storage and Android multi-vault support.
+  - Added a TODO to revisit monetization after beta usage data.
+
+## 2026-08-21 18:18:18 IST
+
+- Made startup Play entitlement checks visible before cloud operations.
+  - Settings now shows when Google Play purchase restore is still being checked.
+  - Cloud import, restore, and backup refresh Play entitlement state before starting Drive work.
+  - Documented that cloud restore remains available without the paid entitlement while backup stays paid-gated.
+
+## 2026-08-21 17:55:45 IST
+
+- Added a maintained development log.
+  - Created `docs/devlog.md` for deployment lessons and engineering notes.
+  - Documented the MilesWeb/cPanel hardened wasm hosting issue and `.htaccess` deployment checks.
+
+## 2026-08-21 17:54:19 IST
+
+- Added cPanel/Apache web hosting rules for hardened wasm releases.
+  - Added `web/.htaccess` with wasm/module MIME types, security headers, cache rules, and SPA fallback.
+  - Updated web hardening to copy `.htaccess` into `build/web` for hosts such as MilesWeb.
+
+## 2026-08-21 00:07:30 IST
+
+- Added release notes for version `0.1.1+2`.
+  - Documented Play Console-ready release notes in app info.
+
+## 2026-08-20 23:33:37 IST
+
+- Fixed debug Play Billing purchase launch type error.
+  - Replaced `firstWhere(orElse:)` product selection with explicit iteration so `GooglePlayProductDetails` does not trip a runtime closure subtype cast.
+
+## 2026-08-20 23:27:06 IST
+
+- Added debug-only Play Billing diagnostics.
+  - Debug builds now log Billing availability, product lookup, purchase launch, restore query, purchase updates, and acknowledgement steps.
+
+## 2026-08-20 23:08:29 IST
+
+- Made unexpected Google Play response copy production-safe.
+  - Replaced in-app `Play testing link` wording with generic Google Play install/update guidance.
+
+## 2026-08-20 22:37:45 IST
+
+- Sanitized obfuscated Google Play type errors.
+  - Play Billing subtype/cast failures now show update/reinstall guidance instead of raw release-obfuscated type names like `ipa` and `kpa`.
+  - Cloud restore error hints now map the same Google service response shape to actionable guidance.
+
+## 2026-08-20 22:26:01 IST
+
+- Added Google Play account confirmation before Android purchase and restore.
+  - Upgrade storage, locked cloud-backup upgrade, and Restore purchase now explain that account selection happens in the Play Store app before continuing.
+  - Added widget coverage for the confirmation gate.
+
+## 2026-08-20 22:20:40 IST
+
+- Hardened cloud-restore import failure copy.
+  - Active-vault cloud restore now maps failed vault import results to user-safe guidance instead of showing raw `Failed to import vault...` messages.
+  - Re-entering the same failing cloud backup password now shows the mapped reason before returning.
+
+## 2026-08-20 22:19:20 IST
+
+- Fixed stale Google Play purchase failure feedback.
+  - Failed purchase startup now waits for the entitlement error state before showing the snackbar.
+  - Added regression coverage so detailed Play Billing errors are not replaced by the generic purchase-start message.
+
+## 2026-08-20 20:15:12 IST
+
+- Added secure secret sharing to the first-install walkthrough.
+  - Added a dedicated onboarding page for password-protected `.nijas` sharing over any channel.
+
+## 2026-08-20 20:13:55 IST
+
+- Made the locked cloud-backup settings row actionable.
+  - Tapping locked Google Drive backup now starts the storage upgrade purchase when available.
+  - If purchase is unavailable, the row explains that backup is paid while cloud restore remains available.
+
+## 2026-08-20 20:13:09 IST
+
+- Improved Google Play purchase launch diagnostics.
+  - Purchase startup now reports product lookup, billing availability, launch rejection, and platform exception details separately.
+  - Added Play testing checklist guidance for purchase launch failures.
+
+## 2026-08-20 20:06:14 IST
+
+- Converted the root `nija.png` asset to a Play-compatible square.
+  - Cropped the source image to `1024x1024` PNG for one-time product icon use.
+
+## 2026-08-20 19:15:37 IST
+
+- Split cloud restore access from paid cloud backup.
+  - Free builds now show a cloud restore/import action in Settings.
+  - Cloud backup/export remains gated to the paid build or runtime expanded-storage entitlement.
+  - Added clearer web Google Drive restore configuration guidance and error copy.
+  - Kept indirect cloud backup prompts gated after conflict merges.
+  - Documented the required Google Drive `drive.appdata` scope for app backup/restore.
+
+## 2026-08-20 19:10:57 IST
+
+- Fixed the PDF document preview loading overlay.
+  - Removed the extra app-level `Rendering PDF preview...` modal after document bytes load.
+  - Kept the PDF viewer's own loading/error banners for renderer-specific status.
+
+## 2026-08-20 18:50:41 IST
+
+- Added a web install signboard cue.
+  - Added a high-contrast arrow sign pointing at the existing PWA install action.
+  - Kept the install button styling unchanged while adding localized sign text.
+
+## 2026-08-20 17:44:14 IST
+
+- Added wasm-only web release hardening.
+  - Added `scripts/harden_web_release.sh` to remove Flutter's generated Dart-to-JS app fallback from `build/web`.
+  - Updated the release hardening gate to reject unhardened web artifacts when `build/web` is present.
+  - Documented the web release sequence as wasm build, harden artifact, then run the release gate.
+
 ## 2026-08-20 01:10:16 IST
 
 - Added a Google Play compatible feature graphic.

@@ -93,6 +93,24 @@ password vault, secure notes, encrypted vault, private storage, local-first,
 document vault, recovery phrase, biometric unlock, PIN unlock, encrypted backup,
 Google Drive backup
 
+## Version 0.1.1 Release Notes
+
+Nija 0.1.1 improves Android purchase and cloud restore reliability.
+
+- Added Google Play expanded-storage purchase and restore support
+- Made cloud backup and restore available in the free app
+- Improved Google Drive restore/import failure guidance
+- Fixed Android Play Billing purchase launch issues
+- Added clearer Google Play account guidance before purchase and restore
+- Improved PDF preview loading behavior
+- Added secure secret sharing to onboarding
+
+### Google Play Release Notes
+
+Improved Android purchase and cloud restore reliability. Added clearer Google
+Play account guidance, fixed expanded-storage purchase launch issues, improved
+cloud restore/import messages, and refined PDF preview loading.
+
 ## Version 0.0.1 Release Notes
 
 Initial public release of Nija.

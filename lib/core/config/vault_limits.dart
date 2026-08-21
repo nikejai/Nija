@@ -3,10 +3,12 @@ import 'app_features.dart';
 class VaultLimits {
   VaultLimits._();
 
-  static const int freeVaultBytes = 100 * 1024 * 1024;
+  static const int freeVaultBytes = 151 * 1024 * 1024;
   static const int legacyWebVaultBytes = 1024 * 1024 * 1024;
   static const int paidVaultBytes = legacyWebVaultBytes;
   static const int maxDocumentBytes = 5 * 1024 * 1024;
+  static const int freeVaultCount = 1;
+  static const int paidAndroidVaultCount = 99;
 
   static int get maxVaultBytes => AppFeatures.supportsExpandedVaultStorage
       ? paidVaultBytes
@@ -25,6 +27,16 @@ class VaultLimits {
           : legacyWebVaultBytes;
     }
     return freeVaultBytes;
+  }
+
+  static int maxVaultCountFor({
+    required bool isAndroid,
+    bool expandedStorageEntitled = false,
+  }) {
+    if (isAndroid && expandedStorageEntitled) {
+      return paidAndroidVaultCount;
+    }
+    return freeVaultCount;
   }
 
   static String formatBytes(int bytes) {

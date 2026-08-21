@@ -10,9 +10,8 @@ class AppFeatures {
 
   static const String paidUnavailableLabel = 'Available in paid version';
 
-  // Development override only. Production Android cloud backup should be
-  // enabled through the runtime Google Play entitlement.
-  static bool get supportsCloudBackup => isPaidBuild;
+  // Cloud backup/restore is free while monetization is deferred.
+  static bool get supportsCloudBackup => true;
 
   static bool get supportsDebugInternals => isPaidBuild;
 

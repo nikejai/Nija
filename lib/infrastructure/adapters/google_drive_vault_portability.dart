@@ -60,6 +60,9 @@ class GoogleDriveVaultPortability {
     if (forceAccountChooser) {
       await googleSignIn.signOut();
     }
+    if (googleSignIn.currentUser != null) {
+      return googleSignIn.currentUser;
+    }
     return googleSignIn.signIn();
   }
 
@@ -194,6 +197,7 @@ class GoogleDriveVaultPortability {
       fileName: listing.fileName.isEmpty ? listing.label : listing.fileName,
       modifiedAt: listing.modifiedAt,
       revision: vaultRevisionFromNijaVaultContent(content),
+      versionId: vaultVersionIdFromNijaVaultContent(content),
       updatedAt: vaultUpdatedAtFromNijaVaultContent(content),
       driveFileId: listing.driveFileId,
       listedVaultId: vaultIdFromNijaVaultContent(content),
@@ -401,6 +405,7 @@ class GoogleDriveVaultPortability {
         fileName: file.name ?? '',
         modifiedAt: file.modifiedTime?.toLocal(),
         revision: vaultRevisionFromNijaVaultContent(content),
+        versionId: vaultVersionIdFromNijaVaultContent(content),
         updatedAt: vaultUpdatedAtFromNijaVaultContent(content),
         driveFileId: file.id ?? '',
         listedVaultId: contentVaultId,
@@ -579,6 +584,16 @@ String vaultUpdatedAtFromNijaVaultContent(String content) {
   }
 }
 
+String vaultVersionIdFromNijaVaultContent(String content) {
+  try {
+    final decoded = jsonDecode(content);
+    if (decoded is! Map) return '';
+    return decoded['vaultVersionId']?.toString().trim() ?? '';
+  } catch (_) {
+    return '';
+  }
+}
+
 DateTime? backupTimestampFromFileName(String name) {
   final match = RegExp(r'backup_(\d{8})_(\d{4})').firstMatch(name);
   if (match == null) return null;
@@ -720,7 +735,7 @@ GoogleSignIn _googleSignInClient() {
     const webClientId = GoogleOAuthConfig.webClientId;
     if (webClientId.isEmpty) {
       throw StateError(
-        'NIJA_GOOGLE_WEB_CLIENT_ID is required for web cloud backup.',
+        'NIJA_GOOGLE_WEB_CLIENT_ID is required for web cloud backup and restore.',
       );
     }
     client = GoogleSignIn(clientId: webClientId, scopes: _driveScopes);

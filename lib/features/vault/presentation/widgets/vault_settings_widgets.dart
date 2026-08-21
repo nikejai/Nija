@@ -684,11 +684,7 @@ class _SecurityEncryptionSheet extends StatelessWidget {
                                 'Security metadata is unavailable for this vault session.',
                           )
                         else
-                          _SecurityRowsSection(
-                            title: 'Vault crypto metadata',
-                            rows: model.cryptoRows,
-                          ),
-                        const SizedBox(height: 12),
+                          const SizedBox.shrink(),
                         _SecurityRowsSection(
                           title: 'Vault format',
                           rows: model.formatRows,

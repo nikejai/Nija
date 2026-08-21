@@ -19,6 +19,7 @@ import '../../../core/security/secure_clipboard.dart';
 import '../../../domain/validators/vault_validators.dart';
 import '../application/vault_entry_activity.dart';
 import '../application/vault_home_demo_data.dart';
+import '../../../infrastructure/adapters/vault_portability_model.dart';
 import '../../../infrastructure/adapters/secret_share_portability.dart';
 import '../../../infrastructure/adapters/secret_share_portability_base.dart';
 import 'add_vault_item_screen.dart';
@@ -101,6 +102,7 @@ typedef VaultFileAction = Future<void> Function();
 typedef CloudBackupAction = Future<void> Function();
 typedef CloudBackupAccountRead = Future<String?> Function();
 typedef CloudBackupAccountChange = Future<bool> Function();
+typedef CloudBackupSummaryRead = Future<CloudVaultBackupFile?> Function();
 typedef RenameVault = Future<void> Function(String name);
 typedef ReadVaultInternals = Future<Map<String, dynamic>> Function();
 
@@ -142,6 +144,7 @@ class VaultAppShell extends StatefulWidget {
     required this.onRestoreFromCloud,
     required this.onReadCloudBackupAccount,
     required this.onChangeCloudBackupAccount,
+    this.onReadCloudBackupSummary,
     this.onRenameVault,
     this.onReadVaultInternals,
     this.cloudBackupFeatureAvailableOverride,
@@ -149,6 +152,7 @@ class VaultAppShell extends StatefulWidget {
     this.expandedVaultStorageEntitled = false,
     this.canPurchaseExpandedVaultStorage = false,
     this.purchaseInProgress = false,
+    this.entitlementRefreshInProgress = false,
     this.entitlementSource = 'free',
     this.entitlementLastVerifiedAt,
     this.entitlementErrorMessage,
@@ -194,6 +198,7 @@ class VaultAppShell extends StatefulWidget {
   final CloudBackupAction onRestoreFromCloud;
   final CloudBackupAccountRead onReadCloudBackupAccount;
   final CloudBackupAccountChange onChangeCloudBackupAccount;
+  final CloudBackupSummaryRead? onReadCloudBackupSummary;
   final RenameVault? onRenameVault;
   final ReadVaultInternals? onReadVaultInternals;
   final bool? cloudBackupFeatureAvailableOverride;
@@ -201,6 +206,7 @@ class VaultAppShell extends StatefulWidget {
   final bool expandedVaultStorageEntitled;
   final bool canPurchaseExpandedVaultStorage;
   final bool purchaseInProgress;
+  final bool entitlementRefreshInProgress;
   final String entitlementSource;
   final DateTime? entitlementLastVerifiedAt;
   final String? entitlementErrorMessage;
@@ -257,6 +263,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   String _cloudBackupVersionId = '';
   String _cloudBackupUpdatedAt = '';
   String _cloudBackupAccountLabel = 'Not connected';
+  bool _cloudBackupSummaryRefreshInProgress = false;
   bool _debugInternalsUnlocked = false;
   bool _debugInternalsEnabled = false;
   int _aboutNijaTapCount = 0;
@@ -498,6 +505,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
         }
         _tabIndex = value;
       });
+      if (value == 3) {
+        unawaited(_refreshCloudBackupSummary());
+      }
     }
 
     return PopScope(
@@ -671,6 +681,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
   bool get _cloudBackupFeatureAvailable =>
       widget.cloudBackupFeatureAvailableOverride ??
       (widget.expandedVaultStorageEntitled || AppFeatures.supportsCloudBackup);
+
+  bool get _cloudRestoreFeatureAvailable =>
+      widget.cloudBackupFeatureAvailableOverride ?? true;
 
   bool get _debugTabVisible =>
       _debugInternalsFeatureAvailable &&
@@ -1998,14 +2011,21 @@ class _VaultAppShellState extends State<VaultAppShell> {
         '${VaultLimits.formatBytes(effectiveVaultSizeBytes)} of ${VaultLimits.formatBytes(vaultLimitBytes)}';
     final expandedStorageSubtitle = widget.expandedVaultStorageEntitled
         ? 'Expanded storage unlocked'
+        : widget.entitlementRefreshInProgress
+        ? AppStrings.settingsEntitlementChecking
         : widget.canPurchaseExpandedVaultStorage
         ? 'Unlock ${VaultLimits.formatBytes(VaultLimits.paidVaultBytes)} vault storage with Google Play'
         : 'Free vault limit';
     final entitlementLabel = _entitlementStatusLabel();
+    final entitlementErrorMessage = _entitlementErrorMessageForDisplay(
+      widget.entitlementErrorMessage,
+    );
     final backupSubtitle = _cloudBackupFeatureAvailable
         ? (_cloudBackupEnabled
               ? 'Automatic cloud backup is enabled'
               : 'Backup your data locally')
+        : _cloudRestoreFeatureAvailable
+        ? 'Restore is available. Backup requires paid version'
         : AppFeatures.paidUnavailableLabel;
     final currentVaultVersionLabel = _vaultVersionSummary(
       revision: widget.activeVaultRevision,
@@ -2018,6 +2038,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
       revision: _cloudBackupRevision,
       versionId: _cloudBackupVersionId,
     );
+    final backedUpVaultVersionDisplay =
+        _cloudBackupSummaryRefreshInProgress &&
+            _cloudBackupRevision <= 0 &&
+            _cloudBackupVersionId.trim().isEmpty
+        ? 'Checking'
+        : backedUpVaultVersionLabel;
 
     final theme = Theme.of(context);
 
@@ -2130,18 +2156,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
                         icon: _cloudBackupIcon(),
                         title: _cloudBackupTitle(),
                         subtitle: backupSubtitle,
+                        trailing: _cloudBackupExpansionTrailing(context),
                         onTap: _cloudBackupFeatureAvailable
                             ? () => _setCloudBackupEnabled(!_cloudBackupEnabled)
-                            : null,
+                            : _handleCloudBackupLockedTap,
                       ),
-                      if (_cloudBackupFeatureAvailable &&
-                          _cloudBackupEnabled) ...[
+                      if (_cloudRestoreFeatureAvailable)
                         _SettingsRow(
+                          key: const ValueKey('settings-cloud-account-row'),
                           icon: Icons.account_circle_outlined,
-                          title: 'Backup account',
+                          title:
+                              _cloudBackupFeatureAvailable &&
+                                  _cloudBackupEnabled
+                              ? 'Backup account'
+                              : 'Cloud account',
                           subtitle: _cloudBackupAccountLabel,
                           onTap: _handleChangeCloudBackupAccount,
                         ),
+                      if (_cloudBackupFeatureAvailable &&
+                          _cloudBackupEnabled) ...[
                         _SettingsRow(
                           key: const ValueKey('settings-cloud-backup-last-at'),
                           icon: Icons.schedule_outlined,
@@ -2152,28 +2185,41 @@ class _VaultAppShellState extends State<VaultAppShell> {
                           key: const ValueKey('settings-cloud-backup-version'),
                           icon: Icons.cloud_done_outlined,
                           title: 'Backed up version',
-                          subtitle: _cloudBackupUpdatedAt.trim().isEmpty
+                          subtitle:
+                              _cloudBackupSummaryRefreshInProgress &&
+                                  _cloudBackupUpdatedAt.trim().isEmpty
+                              ? 'Vault updated: Checking cloud backup...'
+                              : _cloudBackupUpdatedAt.trim().isEmpty
                               ? 'Vault updated: Unknown'
                               : 'Vault updated: ${_formatVaultIsoTimestamp(_cloudBackupUpdatedAt)}',
-                          detail: backedUpVaultVersionLabel,
-                        ),
-                        _SettingsActionRow(
-                          children: [
-                            OutlinedButton.icon(
-                              key: const ValueKey('settings-cloud-backup-now'),
-                              onPressed: _handleCloudBackupNow,
-                              icon: Icon(_cloudBackupIcon()),
-                              label: const Text('Backup now'),
-                            ),
-                            OutlinedButton.icon(
-                              key: const ValueKey('settings-cloud-restore-now'),
-                              onPressed: widget.onRestoreFromCloud,
-                              icon: const Icon(Icons.restore_outlined),
-                              label: const Text('Restore'),
-                            ),
-                          ],
+                          detail: backedUpVaultVersionDisplay,
                         ),
                       ],
+                      if (_cloudRestoreFeatureAvailable ||
+                          (_cloudBackupFeatureAvailable && _cloudBackupEnabled))
+                        _SettingsActionRow(
+                          children: [
+                            if (_cloudBackupFeatureAvailable &&
+                                _cloudBackupEnabled)
+                              OutlinedButton.icon(
+                                key: const ValueKey(
+                                  'settings-cloud-backup-now',
+                                ),
+                                onPressed: _handleCloudBackupNow,
+                                icon: Icon(_cloudBackupIcon()),
+                                label: const Text('Backup now'),
+                              ),
+                            if (_cloudRestoreFeatureAvailable)
+                              OutlinedButton.icon(
+                                key: const ValueKey(
+                                  'settings-cloud-restore-now',
+                                ),
+                                onPressed: widget.onRestoreFromCloud,
+                                icon: const Icon(Icons.restore_outlined),
+                                label: const Text('Restore'),
+                              ),
+                          ],
+                        ),
                     ],
                   ),
                   _SettingsSection(
@@ -2195,20 +2241,23 @@ class _VaultAppShellState extends State<VaultAppShell> {
                         subtitle: entitlementLabel,
                         value: widget.expandedVaultStorageEntitled
                             ? '1 GB'
-                            : '100 MB',
+                            : widget.entitlementRefreshInProgress
+                            ? 'Checking'
+                            : VaultLimits.formatBytes(
+                                VaultLimits.freeVaultBytes,
+                              ),
                         onTap: widget.onRefreshEntitlements == null
                             ? null
                             : _refreshStorageEntitlement,
                       ),
-                      if (widget.entitlementErrorMessage != null &&
-                          widget.entitlementErrorMessage!.trim().isNotEmpty)
+                      if (entitlementErrorMessage != null)
                         _SettingsRow(
                           key: const ValueKey(
                             'settings-storage-entitlement-error-row',
                           ),
                           icon: Icons.info_outline,
                           title: 'Play Billing status',
-                          subtitle: widget.entitlementErrorMessage!,
+                          subtitle: entitlementErrorMessage,
                           onTap: widget.onRefreshEntitlements == null
                               ? null
                               : _refreshStorageEntitlement,
@@ -2820,6 +2869,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _refreshStorageEntitlement() async {
     final refresh = widget.onRefreshEntitlements;
     if (refresh == null) return;
+    if (_usesGooglePlayBilling) {
+      final confirmed = await _confirmGooglePlayAccountForBilling(
+        actionLabel: AppStrings.googlePlayAccountRestore,
+      );
+      if (!confirmed) return;
+    }
     await refresh();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2830,15 +2885,67 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _buyExpandedVaultStorage() async {
     final purchase = widget.onPurchaseExpandedVaultStorage;
     if (purchase == null) return;
+    final confirmed = await _confirmGooglePlayAccountForBilling(
+      actionLabel: AppStrings.googlePlayAccountContinue,
+    );
+    if (!confirmed) return;
     final started = await purchase();
     if (!mounted) return;
+    if (!started) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           started
               ? 'Complete the Google Play purchase to unlock expanded storage.'
-              : widget.entitlementErrorMessage ??
+              : _entitlementErrorMessageForDisplay(
+                      widget.entitlementErrorMessage,
+                    ) ??
                     'Could not start Google Play purchase.',
+        ),
+      ),
+    );
+  }
+
+  bool get _usesGooglePlayBilling =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  Future<bool> _confirmGooglePlayAccountForBilling({
+    required String actionLabel,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(AppStrings.googlePlayAccountTitle),
+        content: Text(AppStrings.googlePlayAccountMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(AppStrings.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _handleCloudBackupLockedTap() async {
+    if (widget.canPurchaseExpandedVaultStorage &&
+        widget.onPurchaseExpandedVaultStorage != null) {
+      await _buyExpandedVaultStorage();
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Cloud backup requires the paid version. Cloud restore is still available.',
         ),
       ),
     );
@@ -3689,6 +3796,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
         _cloudBackupVersionId = versionId;
         _cloudBackupUpdatedAt = updatedAt;
       });
+      if (enabled && _cloudBackupFeatureAvailable) {
+        unawaited(_refreshCloudBackupSummary());
+      }
     } catch (_) {
       // Ignore preference read failures.
     }
@@ -3720,6 +3830,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefsKeyCloudBackupEnabled, enabled);
     } catch (_) {}
+    if (enabled) {
+      unawaited(_refreshCloudBackupSummary());
+    }
   }
 
   Future<void> _setDebugInternalsEnabled(bool enabled) async {
@@ -3793,43 +3906,48 @@ class _VaultAppShellState extends State<VaultAppShell> {
     await _runWithBusy('Cloud backup in progress...', () async {
       await widget.onBackupToCloud();
       if (!mounted) return;
+      final cloudBackup = await _readCloudBackupSummary();
+      if (!mounted) return;
+      if (cloudBackup != null) {
+        await _applyCloudBackupSummary(
+          cloudBackup,
+          fallbackLastAt: DateTime.now(),
+        );
+        return;
+      }
       final now = DateTime.now().millisecondsSinceEpoch;
       final revision = widget.activeVaultRevision;
       final versionId = widget.activeVaultVersionId.trim();
       final updatedAt = widget.activeVaultUpdatedAt.trim();
-      setState(() {
-        _cloudBackupLastAtEpochMs = now;
-        _cloudBackupRevision = revision;
-        _cloudBackupVersionId = versionId;
-        _cloudBackupUpdatedAt = updatedAt;
-      });
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setInt(_prefsKeyCloudBackupLastAt, now);
-        await prefs.setInt(_prefsKeyCloudBackupRevision, revision);
-        await prefs.setString(_prefsKeyCloudBackupVersionId, versionId);
-        await prefs.setString(_prefsKeyCloudBackupUpdatedAt, updatedAt);
-      } catch (_) {}
+      await _persistCloudBackupDisplayState(
+        lastAtEpochMs: now,
+        revision: revision,
+        versionId: versionId,
+        updatedAt: updatedAt,
+      );
     });
   }
 
   Future<void> _refreshCloudBackupAccountLabel() async {
-    if (!_cloudBackupFeatureAvailable) return;
+    if (!_cloudRestoreFeatureAvailable) return;
     final label = await widget.onReadCloudBackupAccount();
     if (!mounted) return;
+    final hasAccount = label != null && label.isNotEmpty;
     setState(
-      () => _cloudBackupAccountLabel = (label == null || label.isEmpty)
-          ? 'Not connected'
-          : label,
+      () => _cloudBackupAccountLabel = hasAccount ? label : 'Not connected',
     );
+    if (hasAccount && _cloudBackupEnabled) {
+      unawaited(_refreshCloudBackupSummary());
+    }
   }
 
   Future<void> _handleChangeCloudBackupAccount() async {
-    if (!_cloudBackupFeatureAvailable) return;
+    if (!_cloudRestoreFeatureAvailable) return;
     final ok = await widget.onChangeCloudBackupAccount();
     if (!mounted) return;
     if (ok) {
       await _refreshCloudBackupAccountLabel();
+      await _refreshCloudBackupSummary();
       if (!mounted) return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3840,6 +3958,69 @@ class _VaultAppShellState extends State<VaultAppShell> {
       ),
     );
     if (mounted) setState(() {});
+  }
+
+  Future<CloudVaultBackupFile?> _readCloudBackupSummary() async {
+    final readSummary = widget.onReadCloudBackupSummary;
+    if (readSummary == null) return null;
+    try {
+      return await readSummary();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _refreshCloudBackupSummary() async {
+    if (!_cloudBackupFeatureAvailable || !_cloudBackupEnabled) return;
+    if (_cloudBackupSummaryRefreshInProgress) return;
+    if (mounted) {
+      setState(() => _cloudBackupSummaryRefreshInProgress = true);
+    }
+    final backup = await _readCloudBackupSummary();
+    if (!mounted) return;
+    if (backup != null) {
+      await _applyCloudBackupSummary(backup);
+    }
+    if (!mounted) return;
+    setState(() => _cloudBackupSummaryRefreshInProgress = false);
+  }
+
+  Future<void> _applyCloudBackupSummary(
+    CloudVaultBackupFile backup, {
+    DateTime? fallbackLastAt,
+  }) async {
+    final lastAt =
+        backup.modifiedAt ??
+        DateTime.tryParse(backup.updatedAt.trim())?.toLocal() ??
+        fallbackLastAt;
+    await _persistCloudBackupDisplayState(
+      lastAtEpochMs: lastAt?.millisecondsSinceEpoch ?? 0,
+      revision: backup.revision,
+      versionId: backup.versionId,
+      updatedAt: backup.updatedAt,
+    );
+  }
+
+  Future<void> _persistCloudBackupDisplayState({
+    required int lastAtEpochMs,
+    required int revision,
+    required String versionId,
+    required String updatedAt,
+  }) async {
+    if (!mounted) return;
+    setState(() {
+      _cloudBackupLastAtEpochMs = lastAtEpochMs;
+      _cloudBackupRevision = revision;
+      _cloudBackupVersionId = versionId.trim();
+      _cloudBackupUpdatedAt = updatedAt.trim();
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_prefsKeyCloudBackupLastAt, lastAtEpochMs);
+      await prefs.setInt(_prefsKeyCloudBackupRevision, revision);
+      await prefs.setString(_prefsKeyCloudBackupVersionId, versionId.trim());
+      await prefs.setString(_prefsKeyCloudBackupUpdatedAt, updatedAt.trim());
+    } catch (_) {}
   }
 
   String _cloudBackupTitle() {
@@ -3866,6 +4047,21 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }
   }
 
+  Widget _cloudBackupExpansionTrailing(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return AnimatedRotation(
+      key: const ValueKey('settings-cloud-backup-expand-arrow'),
+      turns: _cloudBackupEnabled ? 0.25 : 0,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      child: Icon(
+        Icons.chevron_right,
+        color: colorScheme.onSurfaceVariant,
+        size: 24,
+      ),
+    );
+  }
+
   String _formatBytes(int bytes) {
     return VaultLimits.formatBytes(bytes);
   }
@@ -3889,6 +4085,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   String _formatCloudBackupLastAt() {
+    if (_cloudBackupSummaryRefreshInProgress &&
+        _cloudBackupLastAtEpochMs <= 0) {
+      return 'Checking cloud backup...';
+    }
     if (_cloudBackupLastAtEpochMs <= 0) return 'Never';
     return _formatLocalDateTime(
       DateTime.fromMillisecondsSinceEpoch(_cloudBackupLastAtEpochMs),
@@ -3911,6 +4111,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   String _entitlementStatusLabel() {
     if (!widget.expandedVaultStorageEntitled) {
+      if (widget.entitlementRefreshInProgress) {
+        return AppStrings.settingsEntitlementChecking;
+      }
       return widget.canPurchaseExpandedVaultStorage
           ? 'Available from Google Play'
           : 'No expanded storage purchase found';
@@ -3922,6 +4125,21 @@ class _VaultAppShellState extends State<VaultAppShell> {
         ? ''
         : ' · Verified ${_formatLocalDateTime(widget.entitlementLastVerifiedAt!.toLocal())}';
     return '$source$verified';
+  }
+
+  String? _entitlementErrorMessageForDisplay(String? rawMessage) {
+    final message = rawMessage?.trim();
+    if (message == null || message.isEmpty) return null;
+    if (_looksLikeObfuscatedTypeCastError(message)) {
+      return AppStrings.googlePlayUnexpectedResponse;
+    }
+    return message;
+  }
+
+  bool _looksLikeObfuscatedTypeCastError(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('is not a subtype of type') ||
+        (lower.contains('type ') && lower.contains('subtype'));
   }
 
   int get _effectiveVaultSizeBytes =>

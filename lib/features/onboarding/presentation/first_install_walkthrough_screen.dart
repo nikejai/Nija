@@ -50,6 +50,12 @@ class _FirstInstallWalkthroughScreenState
           'Store passwords, notes, identities, documents, and attachments in encrypted vault data.',
     ),
     _WalkthroughPageData(
+      icon: Icons.ios_share_outlined,
+      title: 'Share secrets securely',
+      body:
+          'Export password-protected secret files and share them over any channel without exposing the original vault.',
+    ),
+    _WalkthroughPageData(
       icon: Icons.cloud_upload_outlined,
       title: 'Back up and recover',
       body:

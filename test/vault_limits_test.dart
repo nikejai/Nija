@@ -2,8 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/core/config/vault_limits.dart';
 
 void main() {
-  test('free vault limit is 100 MB for new and small vaults', () {
-    expect(VaultLimits.freeVaultBytes, 100 * 1024 * 1024);
+  test('free vault limit is 151 MB for new and small vaults', () {
+    expect(VaultLimits.freeVaultBytes, 151 * 1024 * 1024);
     expect(
       VaultLimits.maxVaultBytesFor(currentVaultSizeBytes: 0),
       VaultLimits.freeVaultBytes,
@@ -16,7 +16,7 @@ void main() {
     );
   });
 
-  test('legacy vaults above 100 MB can continue up to 1 GB', () {
+  test('legacy vaults above 151 MB can continue up to 1 GB', () {
     expect(
       VaultLimits.maxVaultBytesFor(
         currentVaultSizeBytes: VaultLimits.freeVaultBytes + 1,
@@ -41,6 +41,27 @@ void main() {
     expect(
       VaultLimits.maxVaultBytesFor(currentVaultSizeBytes: oversized),
       oversized,
+    );
+  });
+
+  test('free app supports one vault and paid Android supports more', () {
+    expect(
+      VaultLimits.maxVaultCountFor(isAndroid: false),
+      VaultLimits.freeVaultCount,
+    );
+    expect(
+      VaultLimits.maxVaultCountFor(
+        isAndroid: true,
+        expandedStorageEntitled: false,
+      ),
+      VaultLimits.freeVaultCount,
+    );
+    expect(
+      VaultLimits.maxVaultCountFor(
+        isAndroid: true,
+        expandedStorageEntitled: true,
+      ),
+      VaultLimits.paidAndroidVaultCount,
     );
   });
 }

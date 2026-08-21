@@ -9,7 +9,7 @@ Nija is local-first. The encrypted `.nija` vault file is the source of truth. Cl
 - Keep the app usable without a backend.
 - Treat cloud backup as encrypted-file portability, not sync.
 - Use the same vault crypto model on Android, iOS, and Web.
-- Keep paid feature access centralized. Android expanded vault storage and cloud backup are unlocked by the Google Play product `nija_expanded_vault_lifetime` and cached locally for offline starts. `NIJA_PAID_BUILD` is a development override only.
+- Keep paid feature access centralized. Android expanded vault storage and Android multi-vault support are unlocked by the Google Play product `nija_expanded_vault_lifetime` and cached locally for offline starts. `NIJA_PAID_BUILD` is a development override only.
 - Store operational secrets outside git:
   - Android release keystore
   - `android/key.properties`
@@ -44,8 +44,8 @@ Nija is local-first. The encrypted `.nija` vault file is the source of truth. Cl
 
 ### Backup UX Expectations
 
-- Free build: cloud backup controls are disabled with `Available in paid version`.
-- Paid build: `Backup now`, backup account, last backup, auto-backup, frequency, and restore controls can be shown.
+- Free build: cloud backup and restore are enabled. Free installs support one vault and 151 MB storage.
+- Android paid entitlement: 1 GB storage and configurable multi-vault support can be shown.
 - Backup must be explicit, observable, and cancellable where platform APIs permit.
 - If cloud backup fails, show a user-safe message. Do not expose raw stack traces or cloud API responses containing sensitive data.
 
@@ -100,6 +100,7 @@ Create a separate OAuth 2.0 Web client for the WebApp:
 Recommended Web Drive scope:
 
 ```text
+https://www.googleapis.com/auth/drive.appdata
 https://www.googleapis.com/auth/drive.file
 ```
 
@@ -108,8 +109,8 @@ Use the narrowest scope that allows Nija to create and manage encrypted backup f
 Record these values in release notes or deployment configuration:
 
 ```text
-GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
-GOOGLE_DRIVE_SCOPE=https://www.googleapis.com/auth/drive.file
+NIJA_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+GOOGLE_DRIVE_SCOPES=https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file
 ```
 
 Never commit OAuth client ids in secret files. Public web client ids may be present in build configuration, but still keep environment and release documentation clear so the active client id can be audited.
@@ -529,7 +530,7 @@ adb devices
   9. Import, preview, save, and export documents.
   10. Import/export encrypted vault data.
   11. Purchase/restore expanded storage from Settings -> Storage when using a Play test install.
-  12. Backup and restore if the paid/cloud build is enabled.
+  12. Backup and restore from cloud in the free build.
   13. Restart the app and verify encrypted vault persistence.
 
 ### Android Google Play Billing Setup
@@ -544,9 +545,10 @@ nija_expanded_vault_lifetime
 
 Entitlement behavior:
 
-- free/default vault limit: 100 MB,
-- Google Play product owned: 1 GB,
+- free/default vault limit: 151 MB and one vault,
+- Google Play product owned on Android: 1 GB and configurable multi-vault support,
 - entitlement is restored from Play on app start/session refresh,
+- Google Play controls the account used for purchase and restore; Nija prompts users to switch accounts in the Play Store app before continuing because Play Billing does not expose an in-app account picker,
 - last verified purchased entitlement is cached in app-local secure storage for offline starts,
 - pending purchases do not unlock storage,
 - successful purchased/restored transactions are completed/acknowledged through the Billing plugin.
@@ -572,10 +574,33 @@ nija_expanded_vault_lifetime
 10. Add the tester accounts to the internal/closed test track.
 11. Install Nija from the Play testing link with the same tester Google account.
 12. Open Nija -> Settings -> Storage -> Upgrade storage.
-13. Complete the test purchase.
-14. Confirm Settings -> Storage shows the 1 GB limit and Google Play entitlement source.
-15. Restart the app offline and confirm the 1 GB limit remains available from the cached entitlement.
-16. Reinstall from Play with the same Google account and use Restore purchase to confirm the entitlement is restored.
+13. Confirm the Play account guidance. If the wrong account is active, switch accounts in the Play Store app first, then return to Nija.
+14. Complete the test purchase.
+15. Confirm Settings -> Storage shows the 1 GB limit and Google Play entitlement source.
+16. Restart the app offline and confirm the 1 GB limit remains available from the cached entitlement.
+17. Reinstall from Play with the same Google account and use Restore purchase to confirm the entitlement is restored.
+
+If the app shows `Could not start Google Play purchase` or reports that Google
+Play rejected the purchase launch:
+
+- Confirm the installed app came from the Play internal/closed test link, not
+  `adb install` or a locally shared APK.
+- Confirm the tester is signed into the Play Store with an account listed under
+  both License testing and the app's internal/closed test testers.
+- If multiple Google accounts are on the device, switch to the intended tester
+  account in the Play Store app before tapping Continue in Nija's account
+  confirmation dialog.
+- If a release build previously showed an obfuscated error like
+  `type 'ipa' is not a subtype of type 'kpa'`, treat it as an unexpected Google
+  Play services/plugin response. Update Google Play Store and Play services,
+  install or update from Google Play, then retry. For internal/closed testing,
+  that means reinstalling from the Play testing link.
+- Confirm product `nija_expanded_vault_lifetime` is active and has an available
+  `Buy` purchase option for the tester's country.
+- Confirm the app package is `com.nija` and the uploaded AAB version is the same
+  build being tested.
+- Wait for Play Console catalog/test-track changes to propagate, then clear the
+  Play Store app cache or reinstall from the test link.
 
 What is needed before validation:
 
@@ -590,7 +615,7 @@ Notes:
 
 - Local debug/sideload builds can compile the Billing code, but real purchase and restore validation should use a Play-installed test build.
 - Without a backend, Google Play is the online source of truth and the app-local cache is an offline convenience. Do not store entitlement state inside a vault file.
-- Android cloud backup uses the same expanded-storage entitlement. Do not add `NIJA_PAID_BUILD=true` to normal Play release builds.
+- Cloud backup and restore are enabled for the free app while monetization is deferred. Do not add `NIJA_PAID_BUILD=true` to normal Play release builds.
 
 - Production Play Store release:
   1. Complete store listing, privacy policy, data safety, content rating, and app access forms.
@@ -727,7 +752,7 @@ Security assumptions:
 - service worker/cache must never cache decrypted payloads,
 - plaintext secrets must not appear in URLs, logs, history, analytics, or crash payloads.
 - until runtime paid entitlement exists, web storage limits are client-enforced:
-  new/small vaults are capped at 100 MB, while existing encrypted vaults already above 100 MB can continue up to 1 GB.
+  new/small vaults are capped at 151 MB, while existing encrypted vaults already above 151 MB can continue up to 1 GB.
   This is product behavior, not an anti-tamper licensing control; durable paid enforcement requires a server-side entitlement or signed receipt.
 
 ### Run Locally
@@ -751,7 +776,7 @@ Run paid web mode on a fixed OAuth origin:
 flutter run -d chrome \
   --web-port 5173 \
   --dart-define=NIJA_PAID_BUILD=true \
-  --dart-define=GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+  --dart-define=NIJA_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
 ```
 
 Add `http://localhost:5173` to the Web OAuth client's Authorized JavaScript origins before testing Google Drive backup locally.
@@ -768,19 +793,26 @@ flutter run -d <web-device-id>
 ```bash
 flutter pub get
 flutter build web --release --wasm -O4 --no-source-maps --csp
+./scripts/harden_web_release.sh
 ```
 
 This is the strongest deployable web build for the current codebase:
 
 - `--wasm` builds the Flutter app to WebAssembly for supported browsers, with
-  JavaScript fallback output included by Flutter for browsers that cannot run
-  the wasm renderer.
+  Flutter initially generating a Dart-to-JS app fallback.
+- `./scripts/harden_web_release.sh` removes that Dart-to-JS app fallback from
+  `build/web`, keeps only the `dart2wasm` app build config, and adds an
+  upgrade-browser message for browsers that cannot run the required WebAssembly
+  features.
 - `-O4` uses the highest Dart web compiler optimization level.
 - `--no-source-maps` keeps source maps out of the deployable artifact.
 - `--csp` disables dynamic code generation in the generated app output.
 - Flutter web does not support the native `--obfuscate` flag. Web release code
   is minified and tree-shaken, but client-side code must not be treated as a
   secret.
+- Wasm-only app logic does not mean zero JavaScript. Flutter still needs
+  bootstrap/runtime support, Skwasm/CanvasKit renderer JavaScript, the service
+  worker cleanup script, and Nija's browser bridge files.
 - Web platform APIs used by vault storage, import/export, sharing, PWA install,
   page lifecycle, and WebAuthn quick unlock are routed through the wasm-safe
   `web/nija_browser_bridge.js` plus Dart JS interop wrappers.
@@ -789,12 +821,21 @@ This is the strongest deployable web build for the current codebase:
   does not import the upstream `dart:html` implementation during wasm builds.
   Nija web vault secrets are not stored through this shim.
 
-Paid WebApp release build with Google Drive configuration:
+Free WebApp release build with Google Drive restore configuration:
+
+```bash
+flutter build web --release --wasm -O4 --no-source-maps --csp \
+  --dart-define=NIJA_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+./scripts/harden_web_release.sh
+```
+
+Paid WebApp release build with Google Drive backup and restore configuration:
 
 ```bash
 flutter build web --release --wasm -O4 --no-source-maps --csp \
   --dart-define=NIJA_PAID_BUILD=true \
-  --dart-define=GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+  --dart-define=NIJA_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+./scripts/harden_web_release.sh
 ```
 
 Output:
@@ -822,14 +863,26 @@ For mobile device testing on the same network, serve from the host machine and o
 
 - Static hosting:
   1. Build with `flutter build web --release --wasm -O4 --no-source-maps --csp`.
-  2. Upload the full `build/web` directory to the host.
-  3. Serve over HTTPS.
-  4. Configure SPA fallback to `index.html`.
-  5. Set cache headers carefully:
+  2. Run `./scripts/harden_web_release.sh`.
+  3. Upload the hardened `build/web` directory to the host.
+  4. Serve over HTTPS.
+  5. Configure SPA fallback to `index.html`.
+  6. Set cache headers carefully:
      - long cache for hashed Flutter assets,
      - short/no-cache for `index.html`, `flutter_bootstrap.js`, manifest, and service-worker files.
-  6. Apply the production security headers from `web/_headers` or translate the same policy to the host/CDN.
-  7. Validate online load, offline reload, install/add-to-home-screen, and vault persistence.
+  7. Apply the production security headers from `web/_headers` or translate the same policy to the host/CDN.
+  8. Validate online load, offline reload, install/add-to-home-screen, and vault persistence.
+
+- cPanel/Apache/LiteSpeed hosting such as MilesWeb:
+  1. Upload the contents of `build/web` into `public_html`, including hidden
+     file `build/web/.htaccess`.
+  2. Confirm these URLs return real files with HTTP 200, not `index.html`:
+     `/main.dart.wasm`, `/main.dart.mjs`, `/canvaskit/skwasm.js`, and
+     `/canvaskit/skwasm.wasm`.
+  3. Confirm response headers include `Content-Type: application/wasm` for
+     `.wasm` files and a JavaScript MIME type for `.mjs` files.
+  4. If the host file manager hides dotfiles, enable hidden files or upload
+     `web/.htaccess` manually as `.htaccess` in `public_html`.
 
 - Firebase Hosting:
   1. Configure hosting with public directory `build/web`.
@@ -840,6 +893,7 @@ For mobile device testing on the same network, serve from the host machine and o
 
 ```bash
 flutter build web --release --wasm -O4 --no-source-maps --csp
+./scripts/harden_web_release.sh
 firebase deploy --only hosting
 ```
 
@@ -873,7 +927,7 @@ Cross-Origin-Resource-Policy: same-origin
 
 Policy notes:
 
-- Build production web artifacts with `flutter build web --release --wasm -O4 --no-source-maps --csp`.
+- Build production web artifacts with `flutter build web --release --wasm -O4 --no-source-maps --csp`, then run `./scripts/harden_web_release.sh`.
 - Flutter web currently requires inline script/style allowances for its bootstrap/runtime and may require `wasm-unsafe-eval` for CanvasKit WebAssembly assets. General JavaScript `unsafe-eval` is intentionally not allowed.
 - Keep `Cross-Origin-Opener-Policy` at `same-origin-allow-popups` so Google OAuth popup flows continue to work.
 - Do not enable `Cross-Origin-Embedder-Policy` until Google sign-in, fonts, CanvasKit, service-worker behavior, and OAuth popups are validated with that isolation mode.
@@ -894,15 +948,15 @@ Google Cloud setup:
    - developer contact email,
    - privacy policy URL before production.
 4. Keep OAuth app in Testing mode while validating; add tester Google accounts under Audience.
-5. Add Drive scope `https://www.googleapis.com/auth/drive.file`.
+5. Add Drive scopes `https://www.googleapis.com/auth/drive.appdata` and `https://www.googleapis.com/auth/drive.file`.
 6. Create OAuth client type `Web application`.
 7. Add local and production Authorized JavaScript origins.
-8. Copy the Web client id into deployment configuration as `GOOGLE_WEB_CLIENT_ID`.
+8. Copy the Web client id into deployment configuration as `NIJA_GOOGLE_WEB_CLIENT_ID`.
 
 Implementation expectations for Web Google Drive backup:
 
 - Authenticate with Google Identity Services in the browser.
-- Request `drive.file` only when the user starts backup/restore or connects Drive.
+- Request Drive access only when the user starts backup/restore or connects Drive. The app requires `drive.appdata` for its hidden app-data backup folder and `drive.file` for legacy/user-visible backup discovery.
 - Upload only encrypted `.nija` backup bytes.
 - Store only non-secret metadata in Drive, such as vault id, version id, revision, and updated timestamp.
 - Use Drive app/file properties to find backups by `vaultId`, similar to Android's `appProperties.nijaVaultId=<vaultId>` behavior.
@@ -918,7 +972,7 @@ Validation after Web Google Drive backup is implemented:
 flutter run -d chrome \
   --web-port 5173 \
   --dart-define=NIJA_PAID_BUILD=true \
-  --dart-define=GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+  --dart-define=NIJA_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
 ```
 
 2. Create and unlock a vault.
@@ -976,6 +1030,7 @@ Current state:
 - Android cloud backup and expanded storage are controlled by Google Play Billing product `nija_expanded_vault_lifetime`.
 - Free builds show paid backup controls disabled.
 - Play entitlements are cached locally for offline starts.
+- Purchase and restore purchase flows show a Google Play account confirmation before starting Billing; account choice is changed in the Play Store app, not inside Nija.
 
 Release target:
 
@@ -1120,6 +1175,7 @@ Keep obfuscation symbols private. They are required to decode release stack trac
 
 ```bash
 flutter build web --release --wasm -O4 --no-source-maps --csp
+./scripts/harden_web_release.sh
 cd build/web
 python3 -m http.server 8000
 ```
@@ -1143,6 +1199,7 @@ flutter build apk --release --obfuscate --split-debug-info=build/symbols/android
 flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/android
 flutter build ipa --release --obfuscate --split-debug-info=build/symbols/ios
 flutter build web --release --wasm -O4 --no-source-maps --csp
+./scripts/harden_web_release.sh
 ```
 
 Release gate reference: `docs/release_hardening_gates.md`.
@@ -1173,7 +1230,7 @@ Run on real devices where applicable:
 - iOS: iCloud backup/restore.
 - Android: Google Drive backup/restore.
 - Web: current encrypted backup download fallback.
-- Web after provider implementation: Google Drive backup/restore using the Web OAuth client and `drive.file` scope.
+- Web after provider implementation: Google Drive backup/restore using the Web OAuth client with `drive.appdata` and `drive.file` scopes.
 - Web installed on iOS/Android: offline restart -> unlock -> CRUD persistence.
 - Document/PDF preview: focus/scroll/pan/zoom/fullscreen.
 

@@ -20,6 +20,7 @@ class CloudVaultBackupFile {
     this.fileName = '',
     this.modifiedAt,
     this.revision = 0,
+    this.versionId = '',
     this.updatedAt = '',
     this.driveFileId = '',
     this.listedVaultId = '',
@@ -31,6 +32,7 @@ class CloudVaultBackupFile {
   final String fileName;
   final DateTime? modifiedAt;
   final int revision;
+  final String versionId;
   final String updatedAt;
   final String driveFileId;
   final String listedVaultId;

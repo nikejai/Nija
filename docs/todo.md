@@ -180,9 +180,9 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Centralize in config so UI + actions can check the same source of truth.
   - Keep paid features disabled by default unless paid mode is enabled.
 - [x] Add first paid feature: Google backup integration (paid-only).
-  - Show backup entry as disabled in free mode.
-  - Show hint text: `Available in paid version`.
-  - Android cloud backup is gated by the Google Play expanded-storage entitlement; `NIJA_PAID_BUILD` remains a development override.
+  - Historical note: backup was first implemented as paid-only.
+  - Current direction: backup and restore are free while monetization is deferred.
+  - Android expanded storage remains gated by the Google Play entitlement; `NIJA_PAID_BUILD` remains a development override.
   - Implemented paid-build `Backup now` action via native share sheet to save encrypted vault file into Google Drive/iCloud Drive.
   - Centralized cloud-backup and expanded-storage capability checks in `AppFeatures`, and added free-build regression coverage for the Settings gate.
 - [x] Move paid feature unlocks from build-only flags to runtime entitlements.
@@ -191,7 +191,11 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Centralize runtime entitlement state so Settings UI, backup actions, storage limits, and future paid features all read the same source.
   - Default to free features until a trusted runtime entitlement is loaded.
   - Add tests proving paid UI/actions can unlock and relock without rebuilding the app.
-  - Web storage limits are currently client-enforced: new/small vaults cap at 100 MB, and legacy vaults already above 100 MB can continue up to 1 GB until runtime entitlement exists.
+  - Web storage limits are currently client-enforced: new/small vaults cap at 151 MB, and legacy vaults already above 151 MB can continue up to 1 GB until runtime entitlement exists.
+- [ ] Revisit monetization after beta usage data.
+  - Free app currently includes 151 MB storage, one vault, and cloud backup/restore.
+  - Keep Google Play product `nija_expanded_vault_lifetime` for Android 1 GB storage and multi-vault support.
+  - Decide later whether web/iOS need server-backed entitlement, subscription, or remain free.
 - [x] Add Google Play Billing lifetime storage unlock.
   - Create a Play Billing product: `nija_expanded_vault_lifetime`.
   - Product type: non-consumable one-time purchase.
@@ -260,11 +264,12 @@ Work these items strictly one at a time. Each item should be fully implemented, 
     - vault contents are encrypted with authenticated encryption,
     - master password and raw vault key are not stored,
     - recovery phrase cannot be recovered by Nija if lost.
-  - Show current vault crypto metadata in a sanitized form:
+  - Hide current vault crypto metadata from the user-facing sheet for now:
     - guardian profile,
     - KDF name (`Argon2id`),
     - KDF memory / iterations / parallelism,
-    - cipher name (`AES-256-GCM`),
+    - cipher name (`AES-256-GCM`).
+  - Keep sanitized vault format metadata visible:
     - vault format/schema/storage layout versions,
     - vault created/updated timestamps,
     - vault revision/version label.
@@ -285,10 +290,10 @@ Work these items strictly one at a time. Each item should be fully implemented, 
     - open backup/restore controls.
   - Reuse `readVaultInternals()` only through a sanitized presentation model.
   - Keep debug internals separate: do not expose working folder/files, raw encrypted section names, raw errors, payloads, keys, salts, nonces, stack traces, or other non-user-facing internals in production UI.
-  - Add tests for the Settings row opening the new surface and for sanitized metadata/status rendering.
-  - Added bottom sheet with security model explanation, sanitized vault crypto/format metadata, status checks, and security actions.
+  - Add tests for the Settings row opening the new surface and for sanitized format/status rendering.
+  - Added bottom sheet with security model explanation, sanitized format metadata, status checks, and security actions.
   - Added recovery-phrase rotation dialog entry point from the security surface.
-  - Added widget coverage that verifies sanitized metadata rendering and excludes raw working-store/internal fields.
+  - Added widget coverage that verifies sanitized format/status rendering, hides crypto metadata rows, and excludes raw working-store/internal fields.
 - [ ] Configure real Android release signing.
   - Goal: release APK/AAB is signed with a production keystore, not debug keys.
   - Scope: add `android/key.properties` handling, define a release signing config in `android/app/build.gradle.kts`, remove debug signing from `buildTypes.release`, and document release SHA setup for Google Drive OAuth.
@@ -303,7 +308,7 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Scope: recovery phrase handling, rotation flows, unlock failure behavior, migration rejection, sensitive-field clearing, debug config, logging, crash surfaces, and encrypted web storage behavior.
 - [ ] Run real-device production validation matrix.
   - Goal: Android/iOS/Web critical flows are manually verified on release/profile builds.
-  - Scope: create vault, unlock, lock, recovery unlock, password reset, master/recovery rotation, CRUD persistence after restart, import/export, encrypted secret open-with, document open/share, and paid cloud backup/restore.
+  - Scope: create vault, unlock, lock, recovery unlock, password reset, master/recovery rotation, CRUD persistence after restart, import/export, encrypted secret open-with, document open/share, free cloud backup/restore, and Android paid storage upgrade.
 - [x] Fix onboarding create-vault/recovery widget tests.
   - Goal: onboarding tests reliably reach `Recovery phrase` and `I saved my phrase`.
   - Scope: update test helpers or UI flow assumptions around vault-name/password fields and async create flow.

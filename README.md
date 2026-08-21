@@ -13,6 +13,7 @@ Nija is a local-first, privacy-first vault application built with Flutter.
 - Launcher icons: `flutter_launcher_icons`
 - Web production headers: `web/_headers` for static hosts and `firebase.json` for Firebase Hosting
 - Web privacy policy: `web/privacy.html` is served directly at `/privacy.html`
+- Engineering deployment/debug notes: `docs/devlog.md`
 
 ## Architecture
 
@@ -46,7 +47,8 @@ The app follows a layered approach:
     - rotate recovery-phrase wrapper
   - web runtime uses durable browser private app storage through `WebVaultStorageAdapter`; vault bytes and source metadata are not stored in HTTP cookies
   - non-web targets use file-based persistence (`FileVaultStorageAdapter`)
-  - new/small free vaults are capped at 100 MB; existing vaults already above 100 MB are treated as legacy vaults and can continue up to 1 GB
+  - new/small free vaults are capped at 151 MB; existing vaults already above 151 MB are treated as legacy vaults and can continue up to 1 GB
+  - free installs support one vault by default; the limit is centralized in `VaultLimits.freeVaultCount`, and Android expanded-storage entitlement enables configurable multi-vault support
   - cross-platform vault import/export:
     - import encrypted vault from local file/upload,
     - export current encrypted vault to local storage with user-selected file name,
@@ -96,24 +98,27 @@ The app follows a layered approach:
 - Settings includes `Import encrypted secret` to import `.nijas` files into Vault/Notes.
 - Settings includes default sort selectors for both keys and notes (`Last accessed` or `Title`), persisted locally.
 - Settings includes a Storage section showing vault usage, the active vault limit, Google Play entitlement status, purchase restore, and Android expanded-storage upgrade.
-- Settings includes a paid-gated cloud-backup toggle:
+- Android purchase and purchase-restore actions show a Play account confirmation first; Google Play chooses the billing account, so users must switch accounts in the Play Store app before continuing if needed.
+- On app startup, Android refreshes the cached Google Play entitlement and Settings shows a checking state until that restore completes. Cloud import/restore/backup also refresh entitlement state before starting the Drive operation.
+- Settings includes a free cloud-backup toggle:
   - Android label: `Backup to Google Drive`
   - iOS label: `Backup to iCloud`
-  - Android is controlled by the Google Play expanded-storage entitlement; `NIJA_PAID_BUILD` remains a development override
-  - disabled without entitlement with hint text `Available in paid version`
+  - backup and restore are enabled for the free app while monetization is deferred
+  - the row animates its chevron from right to down when expanded
   - when enabled, `Backup now` performs direct cloud upload:
     - Android: OAuth sign-in + Google Drive API upload (no share sheet)
     - iOS: iCloud ubiquity container write (no share sheet)
   - each backup is keyed by `vaultId` (stored in vault metadata) so the same vault from different devices can update the same cloud object lineage
   - includes in-app backup center controls:
-    - last backup timestamp
+    - last backup timestamp refreshed from existing cloud backup metadata when available, with a visible checking state while Drive is loading
     - auto backup toggle (while app is active)
     - frequency selection (`Daily`, `Weekly`, `Monthly`)
     - `Restore backup` action from the same section
 - App PIN can be set or changed from Settings -> Security and provides local quick unlock when biometrics are unavailable.
 - Biometric enable/disable in Settings uses a slider switch control with confirmation dialogs for both enable and disable.
   - On web, biometric/device unlock uses secure WebAuthn PRF quick unlock after a successful master-password login. PIN setup is required first; PRF wraps the PIN, and the PIN unlocks the encrypted local helper. Browsers or devices without secure PRF support keep biometrics disabled and use PIN or master-password unlock.
-- Android expanded vault storage uses Google Play Billing with product id `nija_expanded_vault_lifetime`; verified purchases are cached locally for offline starts and unlock the 1 GB vault limit.
+- Android expanded vault storage uses Google Play Billing with product id `nija_expanded_vault_lifetime`; verified purchases are cached locally for offline starts and unlock the 1 GB vault limit plus configurable Android multi-vault support.
+- Obfuscated Google Play plugin type errors are treated as unexpected Play service responses and shown with update/reinstall guidance instead of raw Dart subtype names.
 - Encrypted secret sharing:
   - app-specific portable secret file extension: `.nijas`
   - content uses JSON envelope with PBKDF2-HMAC-SHA256 key derivation + AES-256-GCM payload encryption
@@ -199,11 +204,23 @@ Web release build:
 
 ```bash
 flutter build web --release --wasm -O4 --no-source-maps --csp
+./scripts/harden_web_release.sh
 ```
 
 The web release uses Flutter WebAssembly output with hardened CSP-compatible
-flags. Detailed deployment headers, OAuth origin setup, and hosting checks are
-documented in `docs/ops_readme.md`.
+flags, then removes Flutter's generated Dart-to-JS app fallback from
+`build/web`. Required bootstrap/runtime JavaScript, renderer support files, and
+Nija browser bridge files remain part of the deployable web app. Detailed
+deployment headers, OAuth origin setup, and hosting checks are documented in
+`docs/ops_readme.md`.
+
+For cPanel/Apache/LiteSpeed static hosts such as MilesWeb, the hardening step
+copies `web/.htaccess` into `build/web` so `.wasm` and `.mjs` files are served
+with the correct MIME types and existing assets are not rewritten to
+`index.html`.
+
+For web builds that should restore from Google Drive, include
+`--dart-define=NIJA_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com`.
 
 Paid build run example:
 
@@ -301,6 +318,8 @@ Common iOS issue:
 Release hardening gate:
 
 ```bash
+flutter build web --release --wasm -O4 --no-source-maps --csp
+./scripts/harden_web_release.sh
 ./scripts/release_hardening_gate.sh
 ```
 

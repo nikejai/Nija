@@ -82,6 +82,7 @@ class AppStrings {
   static String get vaultExportedSuccess => _t('vaultExportedSuccess');
   static String get vaultExportFailed => _t('vaultExportFailed');
   static String get vaultExportCancelled => _t('vaultExportCancelled');
+  static String get vaultLimitReached => _t('vaultLimitReached');
 
   static String get valueLocalFirst => _t('valueLocalFirst');
   static String get valueZeroKnowledge => _t('valueZeroKnowledge');
@@ -180,6 +181,8 @@ class AppStrings {
   static String get pwaInstallAddToComputer => _t('pwaInstallAddToComputer');
   static String get pwaInstallAddToHomeScreen =>
       _t('pwaInstallAddToHomeScreen');
+  static String get pwaInstallDownloadApp => _t('pwaInstallDownloadApp');
+  static String get pwaInstallSignCompact => _t('pwaInstallSignCompact');
   static String get pwaInstallComputerHint => _t('pwaInstallComputerHint');
   static String get pwaInstallHomeScreenHint => _t('pwaInstallHomeScreenHint');
   static String get pwaInstallAccepted => _t('pwaInstallAccepted');
@@ -385,6 +388,15 @@ class AppStrings {
   static String get settingsAutoLock => _t('settingsAutoLock');
   static String get settingsExportVault => _t('settingsExportVault');
   static String get settingsDangerZone => _t('settingsDangerZone');
+  static String get settingsEntitlementChecking =>
+      _t('settingsEntitlementChecking');
+  static String get googlePlayAccountTitle => _t('googlePlayAccountTitle');
+  static String get googlePlayAccountMessage => _t('googlePlayAccountMessage');
+  static String get googlePlayAccountContinue =>
+      _t('googlePlayAccountContinue');
+  static String get googlePlayAccountRestore => _t('googlePlayAccountRestore');
+  static String get googlePlayUnexpectedResponse =>
+      _t('googlePlayUnexpectedResponse');
   static String get settingComingSoon => _t('settingComingSoon');
   static String get copySuccess => _t('copySuccess');
   static String get customTypeExists => _t('customTypeExists');
@@ -500,6 +512,8 @@ class AppStrings {
       'vaultExportedSuccess': 'Vault exported successfully.',
       'vaultExportFailed': 'Failed to export vault.',
       'vaultExportCancelled': 'Vault export cancelled.',
+      'vaultLimitReached':
+          'Free Nija supports one vault. Upgrade storage on Android to use multiple vaults.',
       'valueLocalFirst': 'Local-first',
       'valueZeroKnowledge': 'Zero-knowledge',
       'valuePortableFile': 'Portable vault file',
@@ -605,6 +619,8 @@ class AppStrings {
       'webLocalYours': '100% local. 100% yours.',
       'pwaInstallAddToComputer': 'Add to computer',
       'pwaInstallAddToHomeScreen': 'Add to Home Screen',
+      'pwaInstallDownloadApp': 'Download app',
+      'pwaInstallSignCompact': 'Install',
       'pwaInstallComputerHint': 'Install Nija as a desktop app on this device.',
       'pwaInstallHomeScreenHint':
           'Install Nija on your home screen for quick access.',
@@ -810,6 +826,14 @@ class AppStrings {
       'settingsAutoLock': 'Auto Lock',
       'settingsExportVault': 'Export Vault',
       'settingsDangerZone': 'Danger Zone',
+      'settingsEntitlementChecking': 'Checking Google Play purchase...',
+      'googlePlayAccountTitle': 'Use the right Play account',
+      'googlePlayAccountMessage':
+          'Google Play controls which account is used for purchases and restore. To use a different account, switch accounts in the Play Store app first, then return to Nija.',
+      'googlePlayAccountContinue': 'Continue',
+      'googlePlayAccountRestore': 'Restore purchase',
+      'googlePlayUnexpectedResponse':
+          'Google Play returned an unexpected response. Update Google Play Store and Play services, install or update Nija from Google Play, then retry.',
       'settingComingSoon': 'Settings coming soon.',
       'copySuccess': 'Copied. Clipboard will auto-clear soon.',
       'customTypeExists': 'Custom type with this name already exists.',
@@ -927,6 +951,8 @@ class AppStrings {
       'vaultExportedSuccess': 'Bóveda exportada correctamente.',
       'vaultExportFailed': 'No se pudo exportar la bóveda.',
       'vaultExportCancelled': 'Exportación de bóveda cancelada.',
+      'vaultLimitReached':
+          'Nija gratis admite una bóveda. Actualiza el almacenamiento en Android para usar varias bóvedas.',
       'valueLocalFirst': 'Primero local',
       'valueZeroKnowledge': 'Conocimiento cero',
       'valuePortableFile': 'Archivo de bóveda portátil',
@@ -1045,6 +1071,14 @@ class AppStrings {
       'settingsAutoLock': 'Bloqueo automático',
       'settingsExportVault': 'Exportar bóveda',
       'settingsDangerZone': 'Zona de peligro',
+      'settingsEntitlementChecking': 'Comprobando compra de Google Play...',
+      'googlePlayAccountTitle': 'Usa la cuenta correcta de Play',
+      'googlePlayAccountMessage':
+          'Google Play controla qué cuenta se usa para compras y restauración. Para usar otra cuenta, cambia de cuenta en la app Play Store y vuelve a Nija.',
+      'googlePlayAccountContinue': 'Continuar',
+      'googlePlayAccountRestore': 'Restaurar compra',
+      'googlePlayUnexpectedResponse':
+          'Google Play devolvió una respuesta inesperada. Actualiza Google Play Store y Servicios de Play, instala o actualiza Nija desde Google Play y vuelve a intentarlo.',
       'settingComingSoon': 'Ajustes disponibles próximamente.',
       'copySuccess': 'Copiado. El portapapeles se borrará pronto.',
       'customTypeExists': 'Ya existe un tipo personalizado con este nombre.',

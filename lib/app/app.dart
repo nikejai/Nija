@@ -26,6 +26,7 @@ class _NijaAppState extends State<NijaApp> {
   int _autoLockSeconds = _defaultAutoLockSeconds;
   late final NijaEntitlementService _entitlementService;
   EntitlementState _entitlementState = const EntitlementState.free();
+  bool _entitlementRefreshInProgress = true;
 
   Locale? get _forcedLocale => switch (_languageMode) {
     'en' => const Locale('en'),
@@ -57,9 +58,15 @@ class _NijaAppState extends State<NijaApp> {
   }
 
   Future<void> _restoreEntitlements() async {
-    await _entitlementService.initialize();
-    if (!mounted) return;
-    setState(() => _entitlementState = _entitlementService.state);
+    try {
+      await _entitlementService.initialize();
+      if (!mounted) return;
+      setState(() => _entitlementState = _entitlementService.state);
+    } finally {
+      if (mounted) {
+        setState(() => _entitlementRefreshInProgress = false);
+      }
+    }
   }
 
   Future<void> _restoreThemeMode() async {
@@ -139,6 +146,7 @@ class _NijaAppState extends State<NijaApp> {
         canPurchaseExpandedVaultStorage:
             _entitlementService.canPurchaseExpandedVaultStorage,
         purchaseInProgress: _entitlementService.isPurchaseInProgress,
+        entitlementRefreshInProgress: _entitlementRefreshInProgress,
         entitlementErrorMessage: _entitlementService.lastErrorMessage,
         onRefreshEntitlements: _entitlementService.refresh,
         onPurchaseExpandedVaultStorage:
