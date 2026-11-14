@@ -6,7 +6,10 @@ import 'package:nija/infrastructure/adapters/vault_portability_model.dart';
 void main() {
   test('web client id is configured for Google Sign-In', () {
     expect(GoogleOAuthConfig.webClientId, isNotEmpty);
-    expect(GoogleOAuthConfig.webClientId, endsWith('.apps.googleusercontent.com'));
+    expect(
+      GoogleOAuthConfig.webClientId,
+      endsWith('.apps.googleusercontent.com'),
+    );
   });
 
   test('looksLikeNijaVaultContent accepts encrypted Nija vault snapshots', () {
@@ -59,7 +62,8 @@ void main() {
       storageId: 'gdrive_test.nija',
       label: 'backup_20260809_1501_86a6b061-3acb-423a-9521-4556bfd5fdab.nija',
       content: content,
-      fileName: 'backup_20260809_1501_86a6b061-3acb-423a-9521-4556bfd5fdab.nija',
+      fileName:
+          'backup_20260809_1501_86a6b061-3acb-423a-9521-4556bfd5fdab.nija',
       modifiedAt: DateTime(2026, 8, 9, 9, 31),
     );
     expect(cloudBackupDisplayTitle(backup), 'Vault 86a6b061');
@@ -69,17 +73,20 @@ void main() {
     );
   });
 
-  test('cloudBackupDisplayTitle uses listedVaultId for metadata-only listings', () {
-    final backup = CloudVaultBackupFile(
-      storageId: 'gdrive_test.nija',
-      label: 'backup_20260809_1501_86a6b061.nija',
-      content: '',
-      fileName: 'backup_20260809_1501_86a6b061.nija',
-      listedVaultId: '86a6b061-3acb-423a-9521-4556bfd5fdab',
-    );
-    expect(cloudBackupDisplayTitle(backup), 'Vault 86a6b061');
-    expect(backup.hasContent, isFalse);
-  });
+  test(
+    'cloudBackupDisplayTitle uses listedVaultId for metadata-only listings',
+    () {
+      final backup = CloudVaultBackupFile(
+        storageId: 'gdrive_test.nija',
+        label: 'backup_20260809_1501_86a6b061.nija',
+        content: '',
+        fileName: 'backup_20260809_1501_86a6b061.nija',
+        listedVaultId: '86a6b061-3acb-423a-9521-4556bfd5fdab',
+      );
+      expect(cloudBackupDisplayTitle(backup), 'Vault 86a6b061');
+      expect(backup.hasContent, isFalse);
+    },
+  );
 
   test('cloudBackupEffectiveUpdatedAt prefers Drive modified time', () {
     const content = '''
@@ -115,10 +122,7 @@ void main() {
       content: content,
       fileName: 'backup_20260809_1501_vault.nija',
     );
-    expect(
-      cloudBackupEffectiveUpdatedAt(backup),
-      DateTime(2026, 8, 9, 15, 1),
-    );
+    expect(cloudBackupEffectiveUpdatedAt(backup), DateTime(2026, 8, 9, 15, 1));
   });
 
   test('backupTimestampFromFileName parses backup filename timestamps', () {

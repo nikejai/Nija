@@ -43,7 +43,12 @@ class VaultItemTypes {
     supported: true,
   );
 
-  static const supportedNow = <VaultItemType>[login, card, identity, secureNote];
+  static const supportedNow = <VaultItemType>[
+    login,
+    card,
+    identity,
+    secureNote,
+  ];
 
   static const recommendedNext = <String>[
     'Password',

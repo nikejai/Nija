@@ -511,7 +511,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
       return const SizedBox.shrink();
     }
     if (_documentLoadError != null) {
-      return _DocumentPreviewMessage(
+      return DocumentPreviewMessage(
         icon: Icons.error_outline,
         title: 'Unable to preview document',
         subtitle: _documentLoadError.toString(),
@@ -520,13 +520,13 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     final bytes = _documentBytes ?? const <int>[];
     if (bytes.isEmpty) {
       if (widget.readOnly) {
-        return const _DocumentPreviewMessage(
+        return const DocumentPreviewMessage(
           icon: Icons.description_outlined,
           title: 'Sample document metadata',
           subtitle: 'Create a vault to store and preview real files.',
         );
       }
-      return const _DocumentPreviewMessage(
+      return const DocumentPreviewMessage(
         icon: Icons.insert_drive_file_outlined,
         title: 'Empty document',
         subtitle: 'There is no content to preview.',
@@ -541,7 +541,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
             Uint8List.fromList(bytes),
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) =>
-                const _DocumentPreviewMessage(
+                const DocumentPreviewMessage(
                   icon: Icons.broken_image_outlined,
                   title: 'Image preview failed',
                   subtitle: 'Use Open with... to view this document.',
@@ -567,7 +567,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         ),
       );
     }
-    return _DocumentPreviewMessage(
+    return DocumentPreviewMessage(
       icon: extension == 'PDF'
           ? Icons.picture_as_pdf_outlined
           : Icons.insert_drive_file_outlined,
@@ -926,49 +926,6 @@ class _DocumentHeader extends StatelessWidget {
   }
 }
 
-class _DocumentPreviewMessage extends StatelessWidget {
-  const _DocumentPreviewMessage({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(22),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: colorScheme.onSurfaceVariant, size: 42),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: colorScheme.onSurface,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _DocumentPreviewFullscreenButton extends StatelessWidget {
   const _DocumentPreviewFullscreenButton({super.key, required this.onPressed});
 
@@ -1137,7 +1094,7 @@ class _FullscreenDocumentPreviewScreenState
   Widget _buildFullscreenPreview(BuildContext context) {
     final bytes = widget.bytes;
     if (bytes.isEmpty) {
-      return const _DocumentPreviewMessage(
+      return const DocumentPreviewMessage(
         icon: Icons.insert_drive_file_outlined,
         title: 'Empty document',
         subtitle: 'There is no content to preview.',
@@ -1153,7 +1110,7 @@ class _FullscreenDocumentPreviewScreenState
             Uint8List.fromList(bytes),
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) =>
-                _DocumentPreviewMessage(
+                DocumentPreviewMessage(
                   icon: Icons.broken_image_outlined,
                   title: 'Image preview failed',
                   subtitle:
@@ -1181,7 +1138,7 @@ class _FullscreenDocumentPreviewScreenState
         ),
       );
     }
-    return _DocumentPreviewMessage(
+    return DocumentPreviewMessage(
       icon: Icons.insert_drive_file_outlined,
       title: '$extension preview unavailable',
       subtitle: 'Use ${widget.emptyOpenLabel} to view this document.',
@@ -1499,7 +1456,7 @@ Widget _buildPdfLoadingBanner(
   final progress = totalBytes == null || totalBytes <= 0
       ? null
       : bytesDownloaded / totalBytes;
-  return _PdfStatusBanner(
+  return PdfStatusBanner(
     icon: Icons.picture_as_pdf_outlined,
     title: 'Loading PDF...',
     subtitle: totalBytes == null
@@ -1515,68 +1472,11 @@ Widget _buildPdfErrorBanner(
   StackTrace? stackTrace,
   PdfDocumentRef documentRef,
 ) {
-  return const _PdfStatusBanner(
+  return const PdfStatusBanner(
     icon: Icons.error_outline,
     title: 'PDF preview failed',
     subtitle: 'Use Open with app to view this document.',
   );
-}
-
-class _PdfStatusBanner extends StatelessWidget {
-  const _PdfStatusBanner({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    this.progress,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final double? progress;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 260),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: colorScheme.surface.withValues(alpha: 0.94),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colorScheme.outlineVariant),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: colorScheme.primary, size: 30),
-                const SizedBox(height: 12),
-                LinearProgressIndicator(value: progress),
-                const SizedBox(height: 10),
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: colorScheme.onSurfaceVariant),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 const _primaryDocumentId = '__primary_document__';

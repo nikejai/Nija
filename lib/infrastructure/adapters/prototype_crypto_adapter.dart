@@ -4,7 +4,10 @@ import 'crypto_adapter.dart';
 
 class PrototypeCryptoAdapter implements CryptoAdapter {
   @override
-  Future<List<int>> decrypt({required List<int> cipher, required List<int> key}) async {
+  Future<List<int>> decrypt({
+    required List<int> cipher,
+    required List<int> key,
+  }) async {
     return _xor(cipher, key);
   }
 
@@ -25,11 +28,17 @@ class PrototypeCryptoAdapter implements CryptoAdapter {
   }
 
   @override
-  Future<List<int>> encrypt({required List<int> plain, required List<int> key}) async {
+  Future<List<int>> encrypt({
+    required List<int> plain,
+    required List<int> key,
+  }) async {
     return _xor(plain, key);
   }
 
   List<int> _xor(List<int> input, List<int> key) {
-    return List<int>.generate(input.length, (i) => input[i] ^ key[i % key.length]);
+    return List<int>.generate(
+      input.length,
+      (i) => input[i] ^ key[i % key.length],
+    );
   }
 }

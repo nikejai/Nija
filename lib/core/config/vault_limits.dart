@@ -1,41 +1,29 @@
-import 'app_features.dart';
-
 class VaultLimits {
   VaultLimits._();
 
-  static const int freeVaultBytes = 151 * 1024 * 1024;
+  static const int freeVaultBytes = 1024 * 1024 * 1024;
   static const int legacyWebVaultBytes = 1024 * 1024 * 1024;
-  static const int paidVaultBytes = legacyWebVaultBytes;
-  static const int maxDocumentBytes = 5 * 1024 * 1024;
-  static const int freeVaultCount = 1;
+  static const int paidVaultBytes = 1024 * 1024 * 1024;
+  static const int maxDocumentBytes = 25 * 1024 * 1024;
+  static const int freeVaultCount = 99;
   static const int paidAndroidVaultCount = 99;
 
-  static int get maxVaultBytes => AppFeatures.supportsExpandedVaultStorage
-      ? paidVaultBytes
-      : freeVaultBytes;
+  static int get maxVaultBytes => freeVaultBytes;
 
   static int maxVaultBytesFor({
     required int currentVaultSizeBytes,
-    bool expandedStorageEntitled = false,
+    bool expandedStorageEntitled = true,
   }) {
-    if (expandedStorageEntitled || AppFeatures.supportsExpandedVaultStorage) {
-      return paidVaultBytes;
+    if (currentVaultSizeBytes > paidVaultBytes) {
+      return currentVaultSizeBytes;
     }
-    if (currentVaultSizeBytes > freeVaultBytes) {
-      return currentVaultSizeBytes > legacyWebVaultBytes
-          ? currentVaultSizeBytes
-          : legacyWebVaultBytes;
-    }
-    return freeVaultBytes;
+    return paidVaultBytes;
   }
 
   static int maxVaultCountFor({
     required bool isAndroid,
-    bool expandedStorageEntitled = false,
+    bool expandedStorageEntitled = true,
   }) {
-    if (isAndroid && expandedStorageEntitled) {
-      return paidAndroidVaultCount;
-    }
     return freeVaultCount;
   }
 

@@ -7,5 +7,8 @@ abstract class CryptoAdapter {
     required int parallelism,
   });
   Future<List<int>> encrypt({required List<int> plain, required List<int> key});
-  Future<List<int>> decrypt({required List<int> cipher, required List<int> key});
+  Future<List<int>> decrypt({
+    required List<int> cipher,
+    required List<int> key,
+  });
 }

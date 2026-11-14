@@ -39,11 +39,14 @@ void main() {
   test('migrates legacy payload schema from v0 to current', () {
     final migrated = VaultMigrator.migratePayloadJson({
       'items': [
-        {'id': '1'}
+        {'id': '1'},
       ],
     });
 
-    expect(migrated['schemaVersion'], VaultMigrator.currentPayloadSchemaVersion);
+    expect(
+      migrated['schemaVersion'],
+      VaultMigrator.currentPayloadSchemaVersion,
+    );
     expect(migrated['notes'], isA<List<dynamic>>());
     expect(migrated['settings'], isA<Map<String, dynamic>>());
   });
@@ -57,4 +60,3 @@ void main() {
     );
   });
 }
-

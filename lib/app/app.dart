@@ -3,19 +3,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/entitlements/entitlement_service.dart';
-import '../core/entitlements/entitlement_state.dart';
 import '../core/localization/app_strings.dart';
-import '../core/web_integrity/web_integrity_startup.dart';
 import '../features/onboarding/presentation/onboarding_flow.dart';
-import '../generated/web_integrity_groups.g.dart';
 import 'theme/app_theme.dart';
 
 class NijaApp extends StatefulWidget {
-  const NijaApp({super.key, this.webIntegrityStartupCheck});
-
-  final Future<NijaWebIntegrityStartupResult> Function()?
-  webIntegrityStartupCheck;
+  const NijaApp({super.key});
 
   @override
   State<NijaApp> createState() => _NijaAppState();
@@ -29,10 +22,6 @@ class _NijaAppState extends State<NijaApp> {
   String _languageMode = 'system';
   ThemeMode _themeMode = ThemeMode.system;
   int _autoLockSeconds = _defaultAutoLockSeconds;
-  late final NijaEntitlementService _entitlementService;
-  EntitlementState _entitlementState = const EntitlementState.free();
-  bool _entitlementRefreshInProgress = true;
-  bool _webIntegrityUnavailable = false;
 
   Locale? get _forcedLocale => switch (_languageMode) {
     'en' => const Locale('en'),
@@ -43,54 +32,8 @@ class _NijaAppState extends State<NijaApp> {
   @override
   void initState() {
     super.initState();
-    _entitlementService = NijaEntitlementService()
-      ..addListener(_onEntitlementChanged);
     _restoreThemeMode();
     _restoreAutoLockSeconds();
-    _restoreEntitlements();
-    _verifyWebIntegrityStartup();
-  }
-
-  @override
-  void dispose() {
-    _entitlementService
-      ..removeListener(_onEntitlementChanged)
-      ..dispose();
-    super.dispose();
-  }
-
-  void _onEntitlementChanged() {
-    if (!mounted) return;
-    setState(() => _entitlementState = _entitlementService.state);
-  }
-
-  Future<void> _restoreEntitlements() async {
-    try {
-      await _entitlementService.initialize();
-      if (!mounted) return;
-      setState(() => _entitlementState = _entitlementService.state);
-    } finally {
-      if (mounted) {
-        setState(() => _entitlementRefreshInProgress = false);
-      }
-    }
-  }
-
-  Future<void> _verifyWebIntegrityStartup() async {
-    final injectedCheck = widget.webIntegrityStartupCheck;
-    final NijaWebIntegrityStartupResult result;
-    if (injectedCheck != null) {
-      result = await nijaWebIntegrityStartupGate(probe: injectedCheck);
-    } else {
-      final verifier = NijaWebIntegrityStartupVerifier();
-      try {
-        result = await nijaWebIntegrityStartupGate(probe: verifier.verify);
-      } finally {
-        verifier.close();
-      }
-    }
-    if (!mounted || result == NijaWebIntegrityStartupResult.passed) return;
-    setState(() => _webIntegrityUnavailable = true);
   }
 
   Future<void> _restoreThemeMode() async {
@@ -135,38 +78,6 @@ class _NijaAppState extends State<NijaApp> {
         _forcedLocale?.languageCode ?? (systemCode == 'es' ? 'es' : 'en');
     AppStrings.setLanguageCode(activeCode);
 
-    if (_webIntegrityUnavailable) {
-      return MaterialApp(
-        title: 'Nija',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
-        darkTheme: AppTheme.dark(),
-        themeMode: _themeMode,
-        home: Scaffold(
-          body: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      nijaWebIntegrityGenericUnavailableTitle(),
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(nijaWebIntegrityGenericUnavailableMessage()),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
     return MaterialApp(
       title: 'Nija',
       debugShowCheckedModeBanner: false,
@@ -198,15 +109,6 @@ class _NijaAppState extends State<NijaApp> {
         autoLockDelay: Duration(seconds: _autoLockSeconds),
         autoLockSeconds: _autoLockSeconds,
         onAutoLockSecondsChanged: _setAutoLockSeconds,
-        entitlementState: _entitlementState,
-        canPurchaseExpandedVaultStorage:
-            _entitlementService.canPurchaseExpandedVaultStorage,
-        purchaseInProgress: _entitlementService.isPurchaseInProgress,
-        entitlementRefreshInProgress: _entitlementRefreshInProgress,
-        entitlementErrorMessage: _entitlementService.lastErrorMessage,
-        onRefreshEntitlements: _entitlementService.refresh,
-        onPurchaseExpandedVaultStorage:
-            _entitlementService.buyExpandedVaultStorage,
       ),
     );
   }

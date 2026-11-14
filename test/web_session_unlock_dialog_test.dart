@@ -4,7 +4,9 @@ import 'package:nija/core/localization/app_strings.dart';
 import 'package:nija/features/vault/presentation/widgets/web_biometric_dialog.dart';
 
 void main() {
-  testWidgets('session unlock enable dialog uses themed layout', (tester) async {
+  testWidgets('session unlock enable dialog uses themed layout', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(430, 932);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);

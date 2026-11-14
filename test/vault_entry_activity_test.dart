@@ -23,19 +23,13 @@ void main() {
   });
 
   test('falls back to Unknown for legacy Now-only entries', () {
-    expect(
-      vaultEntryRelativeTimeLabel({'updated': 'Now'}),
-      'Unknown',
-    );
+    expect(vaultEntryRelativeTimeLabel({'updated': 'Now'}), 'Unknown');
   });
 
   test('parses legacy relative updated labels for activity ordering', () {
     final activityAt = vaultEntryActivityAt({'updated': '9d ago'});
     expect(activityAt, isNotNull);
-    expect(
-      vaultEntryRelativeTimeLabel({'updated': '9d ago'}),
-      '9d ago',
-    );
+    expect(vaultEntryRelativeTimeLabel({'updated': '9d ago'}), '9d ago');
   });
 
   test('vaultEntryAgeDays ignores legacy Now placeholder', () {

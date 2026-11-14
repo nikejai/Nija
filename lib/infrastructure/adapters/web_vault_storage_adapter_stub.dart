@@ -9,8 +9,10 @@ class WebVaultStorageAdapter implements VaultStorageAdapter {
   }
 
   @override
-  Future<void> write({required String filePath, required String content}) async {
+  Future<void> write({
+    required String filePath,
+    required String content,
+  }) async {
     throw UnsupportedError('WebVaultStorageAdapter is only available on web.');
   }
 }
-

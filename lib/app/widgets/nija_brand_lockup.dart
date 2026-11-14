@@ -31,12 +31,11 @@ class NijaBrandLockup extends StatelessWidget {
     ColorScheme colorScheme, {
     required bool emphasizePrimaryName,
   }) {
-    final resolvedNameStyle = (nameStyle ??
-            (emphasizePrimaryName
-                ? EntryTypography.heroTitle
-                : EntryTypography.brandName))(
-      colorScheme.onSurface,
-    );
+    final resolvedNameStyle =
+        (nameStyle ??
+        (emphasizePrimaryName
+            ? EntryTypography.heroTitle
+            : EntryTypography.brandName))(colorScheme.onSurface);
     final resolvedNativeStyle =
         (nativeNameStyle ?? EntryTypography.brandNativeName)(
           colorScheme.onSurfaceVariant,

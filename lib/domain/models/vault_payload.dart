@@ -18,13 +18,13 @@ class VaultPayload {
   final List<Map<String, dynamic>> audit;
 
   Map<String, dynamic> toJson() => {
-        'schemaVersion': schemaVersion,
-        'items': items,
-        'notes': notes,
-        'tags': tags,
-        'settings': settings,
-        'audit': audit,
-      };
+    'schemaVersion': schemaVersion,
+    'items': items,
+    'notes': notes,
+    'tags': tags,
+    'settings': settings,
+    'audit': audit,
+  };
 
   factory VaultPayload.fromJson(Map<String, dynamic> json) {
     return VaultPayload(

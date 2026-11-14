@@ -36,7 +36,9 @@ Future<List<int>> decryptVaultCipherInBackground({
   return compute(_decryptVaultCipherWorker, request.toJson());
 }
 
-Future<List<int>> _decryptVaultCipherWorker(Map<String, Object?> requestJson) async {
+Future<List<int>> _decryptVaultCipherWorker(
+  Map<String, Object?> requestJson,
+) async {
   const nonceLength = 12;
   const macLength = 16;
   final request = VaultDecryptRequest.fromJson(requestJson);
@@ -51,13 +53,6 @@ Future<List<int>> _decryptVaultCipherWorker(Map<String, Object?> requestJson) as
   final macStart = cipher.length - macLength;
   final ciphertext = cipher.sublist(nonceLength, macStart);
   final macBytes = cipher.sublist(macStart);
-  final secretBox = SecretBox(
-    ciphertext,
-    nonce: nonce,
-    mac: Mac(macBytes),
-  );
-  return algorithm.decrypt(
-    secretBox,
-    secretKey: SecretKey(key),
-  );
+  final secretBox = SecretBox(ciphertext, nonce: nonce, mac: Mac(macBytes));
+  return algorithm.decrypt(secretBox, secretKey: SecretKey(key));
 }

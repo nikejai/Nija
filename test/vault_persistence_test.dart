@@ -73,10 +73,7 @@ Future<VaultPayload> _reloadPayload({
     cryptoAdapter: SecureCryptoAdapter(),
     privateVaultStore: privateVaultStore,
   );
-  await reloaded.unlockVault(
-    filePath: filePath,
-    password: 'CorrectPass123',
-  );
+  await reloaded.unlockVault(filePath: filePath, password: 'CorrectPass123');
   return reloaded.readVaultPayload(
     filePath: filePath,
     password: 'CorrectPass123',
@@ -162,47 +159,50 @@ void main() {
         filePath: 'web-sequential.nija',
       );
 
-      expect(
-        payload.items.map((item) => item['title']).toList(),
-        ['First Login', 'Second Login'],
-      );
+      expect(payload.items.map((item) => item['title']).toList(), [
+        'First Login',
+        'Second Login',
+      ]);
     });
 
-    test('snapshot write uses vault file handle when vault id differs', () async {
-      final storage = InMemoryVaultStorageAdapter();
-      final service = await _createWebLikeService(storage: storage);
-      await _createSampleVault(
-        service,
-        filePath: 'web-handle.nija',
-        vaultId: 'different-vault-id',
-      );
-      await service.persistVaultPayload(
-        filePath: 'web-handle.nija',
-        password: 'CorrectPass123',
-        payload: const VaultPayload(
-          schemaVersion: 1,
-          items: [
-            {'id': 'item-1', 'type': 'Login', 'title': 'Handle Mapped Login'},
-          ],
-          notes: [],
-          tags: [],
-          settings: {},
-          audit: [],
-        ),
-      );
+    test(
+      'snapshot write uses vault file handle when vault id differs',
+      () async {
+        final storage = InMemoryVaultStorageAdapter();
+        final service = await _createWebLikeService(storage: storage);
+        await _createSampleVault(
+          service,
+          filePath: 'web-handle.nija',
+          vaultId: 'different-vault-id',
+        );
+        await service.persistVaultPayload(
+          filePath: 'web-handle.nija',
+          password: 'CorrectPass123',
+          payload: const VaultPayload(
+            schemaVersion: 1,
+            items: [
+              {'id': 'item-1', 'type': 'Login', 'title': 'Handle Mapped Login'},
+            ],
+            notes: [],
+            tags: [],
+            settings: {},
+            audit: [],
+          ),
+        );
 
-      final raw = await storage.read(filePath: 'web-handle.nija');
-      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      expect(decoded['vaultId'], 'different-vault-id');
-      expect(decoded['revision'], greaterThan(1));
+        final raw = await storage.read(filePath: 'web-handle.nija');
+        final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+        expect(decoded['vaultId'], 'different-vault-id');
+        expect(decoded['revision'], greaterThan(1));
 
-      final payload = await _reloadPayload(
-        storage: storage,
-        privateVaultStore: InMemoryPrivateVaultStore(),
-        filePath: 'web-handle.nija',
-      );
-      expect(payload.items.single['title'], 'Handle Mapped Login');
-    });
+        final payload = await _reloadPayload(
+          storage: storage,
+          privateVaultStore: InMemoryPrivateVaultStore(),
+          filePath: 'web-handle.nija',
+        );
+        expect(payload.items.single['title'], 'Handle Mapped Login');
+      },
+    );
 
     test('persistVaultPayload surfaces snapshot write failures', () async {
       final storage = _FailAfterFirstSnapshotWriteAdapter(
@@ -226,7 +226,11 @@ void main() {
           payload: const VaultPayload(
             schemaVersion: 1,
             items: [
-              {'id': 'item-1', 'type': 'Login', 'title': 'Should Fail Snapshot'},
+              {
+                'id': 'item-1',
+                'type': 'Login',
+                'title': 'Should Fail Snapshot',
+              },
             ],
             notes: [],
             tags: [],
@@ -298,115 +302,122 @@ void main() {
       },
     );
 
-    test('private store commit happens before snapshot write on persist', () async {
-      final tempDir = await Directory.systemTemp.createTemp(
-        'nija-mobile-order-',
-      );
-      addTearDown(() async {
-        if (await tempDir.exists()) {
-          await tempDir.delete(recursive: true);
-        }
-      });
+    test(
+      'private store commit happens before snapshot write on persist',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'nija-mobile-order-',
+        );
+        addTearDown(() async {
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
 
-      final nijaPath = '${tempDir.path}/ordered.nija';
-      final privateStore = FilePrivateVaultStore(baseDirectory: tempDir);
-      final service = DefaultVaultService(
-        storageAdapter: FileVaultStorageAdapter(),
-        cryptoAdapter: SecureCryptoAdapter(),
-        privateVaultStore: privateStore,
-      );
+        final nijaPath = '${tempDir.path}/ordered.nija';
+        final privateStore = FilePrivateVaultStore(baseDirectory: tempDir);
+        final service = DefaultVaultService(
+          storageAdapter: FileVaultStorageAdapter(),
+          cryptoAdapter: SecureCryptoAdapter(),
+          privateVaultStore: privateStore,
+        );
 
-      await service.createVault(
-        filePath: nijaPath,
-        vaultId: 'ordered-vault-id',
-        vaultName: 'Ordered Vault',
-        guardianProfileId: GuardianProfiles.owl.id,
-        password: 'CorrectPass123',
-        recoveryPhrase: _basePhrase,
-      );
-      await service.persistVaultPayload(
-        filePath: nijaPath,
-        password: 'CorrectPass123',
-        payload: const VaultPayload(
-          schemaVersion: 1,
-          items: [
-            {'id': 'item-1', 'type': 'Login', 'title': 'Ordered Login'},
-          ],
-          notes: [],
-          tags: [],
-          settings: {},
-          audit: [],
-        ),
-      );
+        await service.createVault(
+          filePath: nijaPath,
+          vaultId: 'ordered-vault-id',
+          vaultName: 'Ordered Vault',
+          guardianProfileId: GuardianProfiles.owl.id,
+          password: 'CorrectPass123',
+          recoveryPhrase: _basePhrase,
+        );
+        await service.persistVaultPayload(
+          filePath: nijaPath,
+          password: 'CorrectPass123',
+          payload: const VaultPayload(
+            schemaVersion: 1,
+            items: [
+              {'id': 'item-1', 'type': 'Login', 'title': 'Ordered Login'},
+            ],
+            notes: [],
+            tags: [],
+            settings: {},
+            audit: [],
+          ),
+        );
 
-      final privateFiles = Map<String, dynamic>.from(
-        (await privateStore.describeVault('ordered-vault-id'))['files'] as Map,
-      );
-      expect(privateFiles.containsKey('items.enc'), isTrue);
+        final privateFiles = Map<String, dynamic>.from(
+          (await privateStore.describeVault('ordered-vault-id'))['files']
+              as Map,
+        );
+        expect(privateFiles.containsKey('items.enc'), isTrue);
 
-      final raw = await File(nijaPath).readAsString();
-      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      expect(decoded['revision'], 2);
-      expect(decoded['encryptedSections'], isNotEmpty);
-    });
+        final raw = await File(nijaPath).readAsString();
+        final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+        expect(decoded['revision'], 2);
+        expect(decoded['encryptedSections'], isNotEmpty);
+      },
+    );
 
-    test('reload prefers hydrated private store over stale snapshot header', () async {
-      final tempDir = await Directory.systemTemp.createTemp(
-        'nija-mobile-hydrated-',
-      );
-      addTearDown(() async {
-        if (await tempDir.exists()) {
-          await tempDir.delete(recursive: true);
-        }
-      });
+    test(
+      'reload prefers hydrated private store over stale snapshot header',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'nija-mobile-hydrated-',
+        );
+        addTearDown(() async {
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
 
-      final nijaPath = '${tempDir.path}/hydrated.nija';
-      final privateStore = FilePrivateVaultStore(baseDirectory: tempDir);
-      final service = DefaultVaultService(
-        storageAdapter: FileVaultStorageAdapter(),
-        cryptoAdapter: SecureCryptoAdapter(),
-        privateVaultStore: privateStore,
-      );
+        final nijaPath = '${tempDir.path}/hydrated.nija';
+        final privateStore = FilePrivateVaultStore(baseDirectory: tempDir);
+        final service = DefaultVaultService(
+          storageAdapter: FileVaultStorageAdapter(),
+          cryptoAdapter: SecureCryptoAdapter(),
+          privateVaultStore: privateStore,
+        );
 
-      await service.createVault(
-        filePath: nijaPath,
-        vaultId: 'hydrated-vault-id',
-        vaultName: 'Hydrated Vault',
-        guardianProfileId: GuardianProfiles.owl.id,
-        password: 'CorrectPass123',
-        recoveryPhrase: _basePhrase,
-      );
-      await service.persistVaultPayload(
-        filePath: nijaPath,
-        password: 'CorrectPass123',
-        payload: const VaultPayload(
-          schemaVersion: 1,
-          items: [
-            {'id': 'item-1', 'type': 'Login', 'title': 'Hydrated Login'},
-          ],
-          notes: [],
-          tags: [],
-          settings: {},
-          audit: [],
-        ),
-      );
+        await service.createVault(
+          filePath: nijaPath,
+          vaultId: 'hydrated-vault-id',
+          vaultName: 'Hydrated Vault',
+          guardianProfileId: GuardianProfiles.owl.id,
+          password: 'CorrectPass123',
+          recoveryPhrase: _basePhrase,
+        );
+        await service.persistVaultPayload(
+          filePath: nijaPath,
+          password: 'CorrectPass123',
+          payload: const VaultPayload(
+            schemaVersion: 1,
+            items: [
+              {'id': 'item-1', 'type': 'Login', 'title': 'Hydrated Login'},
+            ],
+            notes: [],
+            tags: [],
+            settings: {},
+            audit: [],
+          ),
+        );
 
-      final reloaded = DefaultVaultService(
-        storageAdapter: FileVaultStorageAdapter(),
-        cryptoAdapter: SecureCryptoAdapter(),
-        privateVaultStore: FilePrivateVaultStore(baseDirectory: tempDir),
-      );
-      await reloaded.unlockVault(
-        filePath: nijaPath,
-        password: 'CorrectPass123',
-      );
-      final payload = await reloaded.readVaultPayload(
-        filePath: nijaPath,
-        password: 'CorrectPass123',
-      );
+        final reloaded = DefaultVaultService(
+          storageAdapter: FileVaultStorageAdapter(),
+          cryptoAdapter: SecureCryptoAdapter(),
+          privateVaultStore: FilePrivateVaultStore(baseDirectory: tempDir),
+        );
+        await reloaded.unlockVault(
+          filePath: nijaPath,
+          password: 'CorrectPass123',
+        );
+        final payload = await reloaded.readVaultPayload(
+          filePath: nijaPath,
+          password: 'CorrectPass123',
+        );
 
-      expect(payload.items.single['title'], 'Hydrated Login');
-      expect(await privateStore.vaultExists('hydrated-vault-id'), isTrue);
-    });
+        expect(payload.items.single['title'], 'Hydrated Login');
+        expect(await privateStore.vaultExists('hydrated-vault-id'), isTrue);
+      },
+    );
   });
 }

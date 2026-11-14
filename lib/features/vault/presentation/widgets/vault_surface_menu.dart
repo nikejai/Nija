@@ -97,7 +97,10 @@ Future<T?> showVaultSurfaceSheet<T>({
       builder: (dialogContext) {
         final maxHeight = MediaQuery.sizeOf(dialogContext).height * 0.85;
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: 560, maxHeight: maxHeight),
             child: builder(dialogContext),
@@ -189,9 +192,7 @@ Future<bool?> showVaultConfirmSheet({
               width: double.infinity,
               child: FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: destructive
-                      ? const Color(0xFFEF4444)
-                      : null,
+                  backgroundColor: destructive ? const Color(0xFFEF4444) : null,
                 ),
                 onPressed: () => Navigator.of(sheetContext).pop(true),
                 child: Text(confirmLabel),

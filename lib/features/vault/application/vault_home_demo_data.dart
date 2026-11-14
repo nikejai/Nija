@@ -16,12 +16,7 @@ class VaultHomeDemoData {
     'maple',
   ];
 
-  static const folders = <String>[
-    'Personal',
-    'Work',
-    'Finance',
-    'Travel',
-  ];
+  static const folders = <String>['Personal', 'Work', 'Finance', 'Travel'];
 
   static const items = <Map<String, dynamic>>[
     {
@@ -130,10 +125,7 @@ class VaultHomeDemoData {
       'pinned': true,
       'tags': ['recovery', 'security'],
       'delta': [
-        {
-          'insert':
-              'summit aster breeze forge lantern onyx circle maple\n',
-        },
+        {'insert': 'summit aster breeze forge lantern onyx circle maple\n'},
       ],
     },
   ];

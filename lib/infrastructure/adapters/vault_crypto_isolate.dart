@@ -56,7 +56,9 @@ Future<List<int>> deriveVaultKeyInBackground({
   return compute(_deriveVaultKeyWorker, request.toJson());
 }
 
-Future<List<int>> _deriveVaultKeyWorker(Map<String, Object?> requestJson) async {
+Future<List<int>> _deriveVaultKeyWorker(
+  Map<String, Object?> requestJson,
+) async {
   final request = VaultDeriveKeyRequest.fromJson(requestJson);
   final algorithm = Argon2id(
     memory: request.memoryKb,
