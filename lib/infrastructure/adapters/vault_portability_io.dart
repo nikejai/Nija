@@ -154,7 +154,9 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       );
     }
     return Future<CloudVaultBackupFile>.error(
-      UnsupportedError('Cloud vault restore is not supported on this platform.'),
+      UnsupportedError(
+        'Cloud vault restore is not supported on this platform.',
+      ),
     );
   }
 

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/app/theme/app_theme.dart';
 import 'package:nija/core/localization/app_strings.dart';
+import 'package:nija/core/web_integrity/web_integrity_startup.dart';
 import 'package:nija/features/vault/application/vault_home_demo_data.dart';
 import 'package:nija/features/vault/presentation/add_vault_item_screen.dart';
 import 'package:nija/features/vault/presentation/vault_app_shell.dart';
@@ -1246,6 +1247,7 @@ void main() {
     expect(find.text('Quick Actions'), findsOneWidget);
     expect(find.text('Import'), findsOneWidget);
     expect(find.text('Switch Vault'), findsWidgets);
+    expect(find.text('Lock vault'), findsOneWidget);
     expect(find.text('NIJA VAULT'), findsOneWidget);
 
     await tester.tap(find.text('View demo preview'));
@@ -1269,6 +1271,7 @@ void main() {
     expect(find.text('Quick Actions'), findsOneWidget);
     expect(find.text('Import'), findsOneWidget);
     expect(find.text('Switch Vault'), findsWidgets);
+    expect(find.text('Lock vault'), findsOneWidget);
     expect(find.text('NIJA VAULT'), findsOneWidget);
 
     await tester.tap(find.text('Import'));
@@ -1279,6 +1282,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(switchCalls, 1);
     expect(lockCalls, 0);
+
+    await tester.tap(find.text('Lock vault').last);
+    await tester.pumpAndSettle();
+    expect(lockCalls, 1);
   });
 
   testWidgets('demo preview does not replace real all-items data', (
@@ -3931,6 +3938,8 @@ void main() {
       200,
       scrollable: find.byType(Scrollable).first,
     );
+    await Scrollable.ensureVisible(tester.element(importRow), alignment: 0.35);
+    await tester.pumpAndSettle();
     await tester.tap(importRow);
     await tester.pumpAndSettle();
 
@@ -4030,9 +4039,13 @@ void main() {
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('settings-security-encryption-row')),
+    final securityRow = find.byKey(
+      const ValueKey('settings-security-encryption-row'),
     );
+    await tester.scrollUntilVisible(securityRow, 200);
+    await Scrollable.ensureVisible(tester.element(securityRow), alignment: 0.2);
+    await tester.pumpAndSettle();
+    await tester.tap(securityRow);
     await tester.pumpAndSettle();
 
     expect(
@@ -4232,6 +4245,92 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('debug-internals-refresh')));
     await tester.pumpAndSettle();
     expect(readCount, 2);
+  });
+
+  testWidgets('settings web runtime check failure hides security details', (
+    tester,
+  ) async {
+    debugNijaWebIntegrityGroupProbe = (groupName) async {
+      return groupName == 'settings'
+          ? NijaWebIntegrityStartupResult.unavailable
+          : NijaWebIntegrityStartupResult.passed;
+    };
+    addTearDown(() => debugNijaWebIntegrityGroupProbe = null);
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(900, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('settings-security-encryption-row')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('security-encryption-sheet')),
+      findsNothing,
+    );
+    expect(find.text('Security details unavailable.'), findsOneWidget);
+    final visibleText = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((widget) => widget.data ?? '')
+        .join(' ');
+    expect(
+      nijaWebIntegrityContainsForbiddenFailureLanguage(visibleText),
+      isFalse,
+    );
   });
 
   testWidgets('biometric setting uses slider switch and triggers callback', (

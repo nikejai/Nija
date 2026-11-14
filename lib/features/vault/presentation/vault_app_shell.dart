@@ -16,7 +16,9 @@ import '../../../core/localization/app_strings.dart';
 import '../../../core/platform/pwa_install_service.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/secure_clipboard.dart';
+import '../../../core/web_integrity/web_integrity_startup.dart';
 import '../../../domain/validators/vault_validators.dart';
+import '../../../generated/web_integrity_groups.g.dart';
 import '../application/vault_entry_activity.dart';
 import '../application/vault_home_demo_data.dart';
 import '../../../infrastructure/adapters/vault_portability_model.dart';
@@ -286,6 +288,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Map<String, bool> _lastPinnedStateItemById = <String, bool>{};
   Map<String, bool> _lastPinnedStateNoteById = <String, bool>{};
   DateTime? _lastBackOnDashboardAt;
+  bool _webCapacityUsesFreeLimit = false;
 
   @override
   void initState() {
@@ -345,7 +348,23 @@ class _VaultAppShellState extends State<VaultAppShell> {
       unawaited(_refreshCloudBackupAccountLabel());
     }
     if (kIsWeb && !widget.isExploreDemoSession) {
+      unawaited(_refreshWebCapacityGate());
       unawaited(_refreshPwaInstallStatus());
+    }
+  }
+
+  Future<bool> _verifyWebTransferReady() async {
+    final result = await nijaWebIntegrityTransferGate();
+    return result == NijaWebIntegrityStartupResult.passed;
+  }
+
+  Future<void> _refreshWebCapacityGate() async {
+    if (!kIsWeb || widget.isExploreDemoSession) return;
+    final result = await nijaWebIntegrityCapacityGate();
+    if (!mounted) return;
+    final next = result != NijaWebIntegrityStartupResult.passed;
+    if (_webCapacityUsesFreeLimit != next) {
+      setState(() => _webCapacityUsesFreeLimit = next);
     }
   }
 
@@ -2044,7 +2063,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
             _cloudBackupVersionId.trim().isEmpty
         ? 'Checking'
         : backedUpVaultVersionLabel;
-
     final theme = Theme.of(context);
 
     return LayoutBuilder(
@@ -2304,6 +2322,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   _SettingsSection(
                     title: 'Data',
                     children: [
+                      if (kIsWeb)
+                        const _SettingsRow(
+                          key: ValueKey('settings-web-storage-note'),
+                          icon: Icons.info_outline,
+                          title: 'Web storage',
+                          subtitle:
+                              'Exported vault files are not updated automatically',
+                          detail:
+                              'Nija keeps web vault data in private browser storage. Export a fresh vault file after important changes.',
+                        ),
                       _SettingsRow(
                         key: const ValueKey('settings-import-encrypted-secret'),
                         icon: Icons.file_download_outlined,
@@ -2848,7 +2876,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _showSecurityEncryptionSheet(BuildContext context) async {
+    final settingsReady = await nijaWebIntegritySettingsGate();
+    if (settingsReady != NijaWebIntegrityStartupResult.passed) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Security details unavailable.')),
+      );
+      return;
+    }
     final metadataFuture = widget.onReadVaultInternals?.call();
+    if (!context.mounted) return;
     await showVaultSurfaceSheet<void>(
       context: context,
       scrollControlled: true,
@@ -3903,6 +3940,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _handleCloudBackupNow() async {
     if (!_cloudBackupFeatureAvailable) return;
     if (_isBusyOverlayVisible) return;
+    if (!await _verifyWebTransferReady()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cloud backup unavailable.')),
+      );
+      return;
+    }
     await _runWithBusy('Cloud backup in progress...', () async {
       await widget.onBackupToCloud();
       if (!mounted) return;
@@ -4145,10 +4189,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
   int get _effectiveVaultSizeBytes =>
       widget.vaultSizeBytes + _storedDocumentBytesThisSession;
 
-  int get _effectiveMaxVaultBytes => VaultLimits.maxVaultBytesFor(
-    currentVaultSizeBytes: widget.vaultSizeBytes,
-    expandedStorageEntitled: widget.expandedVaultStorageEntitled,
-  );
+  int get _effectiveMaxVaultBytes {
+    if (kIsWeb && _webCapacityUsesFreeLimit) {
+      return VaultLimits.freeVaultBytes;
+    }
+    return VaultLimits.maxVaultBytesFor(
+      currentVaultSizeBytes: widget.vaultSizeBytes,
+      expandedStorageEntitled: widget.expandedVaultStorageEntitled,
+    );
+  }
 
   bool _canStoreDocumentBytes(int bytes) {
     if (bytes > VaultLimits.maxDocumentBytes) {
@@ -4961,6 +5010,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
     required String suggestedBaseName,
     required String contentType,
   }) async {
+    if (!await _verifyWebTransferReady()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(AppStrings.encryptedExportFailed)));
+      return;
+    }
+    if (!mounted) return;
     final choice = await _promptEncryptedShareInputs(
       context,
       suggestedBaseName: suggestedBaseName,
@@ -7766,22 +7823,28 @@ class _VaultSideNavigation extends StatelessWidget {
                     ),
                     const Spacer(),
                     Divider(color: colorScheme.outlineVariant),
+                    if (onSwitchVault != null)
+                      _VaultSidebarButton(
+                        destination: const _VaultNavDestination(
+                          code: 'SV',
+                          label: 'Switch vault',
+                          icon: Icons.switch_access_shortcut_outlined,
+                          selectedIcon: Icons.switch_access_shortcut,
+                          index: -1,
+                        ),
+                        selected: false,
+                        onTap: onSwitchVault!,
+                      ),
                     _VaultSidebarButton(
-                      destination: _VaultNavDestination(
-                        code: onSwitchVault != null ? 'SV' : 'LK',
-                        label: onSwitchVault != null
-                            ? 'Switch vault'
-                            : 'Lock vault',
-                        icon: onSwitchVault != null
-                            ? Icons.switch_access_shortcut_outlined
-                            : Icons.lock_outline,
-                        selectedIcon: onSwitchVault != null
-                            ? Icons.switch_access_shortcut
-                            : Icons.lock,
+                      destination: const _VaultNavDestination(
+                        code: 'LK',
+                        label: 'Lock vault',
+                        icon: Icons.lock_outline,
+                        selectedIcon: Icons.lock,
                         index: -1,
                       ),
                       selected: false,
-                      onTap: onSwitchVault ?? onLockNow,
+                      onTap: onLockNow,
                     ),
                   ],
                 ),

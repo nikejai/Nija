@@ -2,6 +2,110 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-08-22 18:00:43 IST
+
+- Hardened the browser-agent integration test wrapper diagnostics.
+  - The wrapper now checks Chrome and ChromeDriver major versions before launching Flutter Drive.
+  - Mismatches now fail with a clear message instead of surfacing as a Flutter WebDriver crash.
+
+## 2026-08-22 17:52:20 IST
+
+- Added a browser-agent integration test wrapper.
+  - `scripts/browser_agent_integration_test.sh` starts ChromeDriver when needed and runs Flutter web integration targets through Chrome.
+  - Default coverage runs app smoke, onboarding regression, and full E2E flow targets; `--all` runs every `integration_test/*_test.dart`.
+  - Documented the one-command browser validation flow in README and Ops.
+
+## 2026-08-22 17:48:00 IST
+
+- Removed the experimental vault file auto-update setting.
+  - Kept web user messaging focused on the current behavior: web vault data is stored in private browser storage, and exported vault files are manual snapshots that are not updated automatically.
+  - Removed the writable-file bridge/API wiring and stale Settings/tests/docs references for the experimental setting.
+  - Fixed wide web/tablet navigation so `Lock vault` remains visible even when `Switch vault` is available.
+  - Changed `Switch vault` to clear the open session first; backing out of the selector now returns to the locked unlock screen instead of the open vault.
+
+## 2026-08-22 17:25:06 IST
+
+- Added a WebApp browser-storage disclosure to the front page.
+  - Web users now see that encrypted vault data is stored in private browser storage by default and should be exported for independent backup.
+  - Clarified that exported vault files are manual copies.
+  - Added coverage for the web-only storage notice wiring.
+
+## 2026-08-22 16:58:54 IST
+
+- Fixed Safari web vault opening after Phase 3 integrity checks.
+  - Moved the web vault-reference integrity check to after file selection so Safari keeps the file picker inside the user gesture.
+  - Changed the web bridge file input from `display:none` to visually hidden positioning for better Safari compatibility.
+  - Added regression coverage for the Safari-compatible bridge file input.
+
+## 2026-08-22 16:34:03 IST
+
+- Added upload archive creation to the compat-js web release helper.
+  - `scripts/build_web_compat_release.sh` now writes `.release/web/<timestamp>/web.zip` after the release gate passes.
+  - Added `--zip-path` and `--no-zip` options for custom archive workflows.
+  - Documented the generated `web.zip` upload artifact in README and ops docs.
+
+## 2026-08-22 16:30:04 IST
+
+- Fixed production web runtime verifier failures caused by immutable cached entry bundles.
+  - `.htaccess` now serves `main.dart.js`, `main.dart.mjs`, `main.dart.wasm`, and web integrity metadata with no-cache headers.
+  - Runtime artifact hash fetches now include the manifest build id as a query string to bypass stale cached artifact responses.
+  - Added regression coverage so hardening copies no-cache rules for stable web entry files.
+  - Documented the MilesWeb/cPanel cache-header check for the `Nija is unavailable` startup path.
+
+## 2026-08-22 15:11:35 IST
+
+- Fixed compat-js web artifacts for cPanel/MilesWeb static hosting.
+  - Limited private `umask 077` to generated web integrity key files instead of the whole Flutter build.
+  - Web hardening now normalizes `build/web` directories to `755` and files to `644`.
+  - Release gate now rejects unreadable static-host files/directories before upload.
+  - Documented file-permission checks for blank-page troubleshooting on shared hosting.
+
+## 2026-08-22 15:01:12 IST
+
+- Added integration coverage for Phase 3 web integrity feature gates.
+  - Covered generic unlock failure behavior when the web unlock group check fails.
+  - Covered generic security-settings unavailability when the web settings group check fails.
+
+## 2026-08-22 14:39:05 IST
+
+- Added Phase 3 web integrity distribution for compat-js web releases.
+  - Runtime verification now caches signed manifest verification and checks named manifest groups for startup, unlock, vault reference, capacity, transfer, and settings paths.
+  - Wired web-only feature gates into unlock, additional-vault selection, capacity limit calculation, export/backup, and security settings with generic failure behavior.
+  - Hardened the compat-js release gate to reject artifacts missing the runtime public-key or build-id markers.
+  - Updated web release docs with the build-id define and detect-after-load/refetch-hash limitations.
+
+## 2026-08-22 00:45:43 IST
+
+- Expanded ops guidance for the compat-js release helper.
+  - Documented expected console checkpoints, post-build artifact checks, and private key handling.
+
+## 2026-08-22 00:40:13 IST
+
+- Added safer console progress logs to the compat-js web release helper.
+  - The helper now logs key folder/file paths, build completion, hardening completion, and release-gate success.
+  - Key generation logs paths only and does not print private/public key values.
+
+## 2026-08-22 00:36:47 IST
+
+- Added a one-command compat-js web release helper.
+  - `scripts/build_web_compat_release.sh` creates a timestamped local web integrity keypair, builds with the generated public key, signs/hardens with the private seed, and runs the compat-js release gate.
+  - Added `.release/` to `.gitignore` so generated local release keys stay out of git.
+  - Added key-generation coverage for the web integrity tool and documented the helper in release docs.
+
+## 2026-08-22 00:27:33 IST
+
+- Added web-only JS-compatible integrity hardening.
+  - Added `--compat-js` to web hardening so iOS PWA can use Flutter's JavaScript fallback while release artifacts are signed and hash-checked.
+  - Added signed web integrity manifest generation, release-gate flavor validation, and a web-only app-start runtime verifier.
+  - Added generated wrapper/noise code for the app-start check while keeping the feature isolated for removal.
+  - Documented wasm-only vs compat-js release profiles, key handling, and Flutter web minification/obfuscation limits.
+
+## 2026-08-22 00:03:59 IST
+
+- Added a TODO for web-only release/runtime integrity hardening.
+  - Captured phased work for signed release manifests, hardening-gate verification before upload, and distributed runtime checks.
+  - Documented JS-capable web delivery as the compatibility path for iOS PWA while treating client integrity checks as work-factor hardening, not a vault security boundary.
+
 ## 2026-08-21 23:32 IST
 
 - Fixed cloud-backup status sometimes missing after a successful Google Drive backup.

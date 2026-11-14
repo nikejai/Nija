@@ -122,6 +122,44 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - Added a five-page first-run walkthrough with skip/continue/get-started actions and progress indicators.
   - Persisted completion in `SharedPreferences` under app-local storage.
   - Added widget coverage for first-run display, page navigation, skip/finish persistence, and hidden-after-completion behavior.
+- [ ] Add web-only release/runtime integrity hardening for JS-capable web delivery.
+  - Goal: allow a JS web build path for platforms where Flutter wasm is not viable, such as iOS PWA, while adding release-time integrity hygiene and distributed runtime checks.
+  - Scope note: this is web client hardening, not unbreakable DRM. Browser-delivered code can still be patched by a determined attacker, so checks should raise work factor and catch accidental/untrusted artifact drift without becoming a core security boundary for vault encryption.
+  - Progress: compat-js hardening, signed manifest generation, release-gate verification, app-start runtime verification, feature-level web wrappers, and compat-js runtime marker gate are implemented.
+  - Phase 1: release-time integrity manifest.
+    - Generate `manifest.json` containing hashes for important web build artifacts, selected assets, build id, app version, and verifier grouping metadata.
+    - Sign the manifest digest with the Esya Kalpa release private key on the release machine/CI.
+    - Bundle only the signed manifest, signature, and public verification key with the web artifact.
+    - Keep private signing keys out of the repo and out of shipped app assets.
+  - Phase 2: hardening gate verifies before upload.
+    - Extend the web release hardening gate to verify manifest signature, manifest freshness, expected artifact hashes, and absence/presence rules for the selected web flavor before deploy.
+    - Support both hardened wasm-only output and the future JS-capable web output needed for iOS PWA compatibility.
+    - Fail release validation on unsigned manifests, stale manifest build ids, source maps in release output, unexpected artifact drift, or missing required runtime files.
+  - Phase 3: runtime verification, added carefully.
+    - Added generated differently-shaped wrapper functions for startup, unlock, vault-reference, capacity, transfer, and settings groups.
+    - App start verifies the signed manifest plus the startup group.
+    - Vault unlock hash-checks the `unlock` group against the manifest.
+    - Create/open additional vault checks the `vault_reference` group.
+    - Expanded capacity above 151 MB checks the build id marker plus `capacity` group and falls back to the free tier on failure.
+    - Export/backup checks the `transfer` group and uses existing generic unavailable/error paths on failure.
+    - Settings checks the `settings` group and keeps security detail unavailable through normal settings behavior on failure.
+    - Fail closed silently into each feature's natural error path instead of emitting a distinctive integrity failure.
+    - Avoid user-visible strings, logs, telemetry names, or symbols that contain obvious `tampered` / `integrity failed` wording.
+  - Add a small release codegen script in Python or Dart.
+    - Run per release after the web build and before signing/upload.
+    - Initial Dart codegen writes the removable app-start wrapper/noise file.
+    - Randomly assign hashed files to verifier groups.
+    - Randomly choose from pre-written verifier template variants for each generated check.
+    - Write a generated Dart file imported by the relevant feature files.
+    - Regenerate `manifest.json` and `manifest.sig` to match the grouping and build id.
+    - Keep generated code deterministic for a given release seed stored only in release metadata, not in shipped app-readable config.
+  - Validation plan:
+    - Add unit tests for manifest parsing, signature verification, and hash mismatch behavior.
+    - Add release-gate tests with good manifest, bad signature, stale build id, missing artifact, and changed artifact cases.
+    - Add web smoke tests proving normal app start/unlock/export/settings paths still work for supported builds.
+    - Add negative tests proving failures map to generic feature errors without distinctive integrity strings.
+  - [ ] Before production use, move from local/test ephemeral keys to one stable web integrity signing key stored in release secrets/CI beside Android release material.
+  - [ ] Investigate browser load-time protections such as Subresource Integrity if Flutter's web loader can support it cleanly.
 
 ## 10) Reported Bug Backlog (2026-05-21)
 

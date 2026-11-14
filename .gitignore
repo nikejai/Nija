@@ -63,6 +63,7 @@ client_secret_*.json
 # Local env/secrets files
 .env
 .env.*
+.release/
 *.keystore
 *.jks
 key.properties

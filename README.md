@@ -207,20 +207,61 @@ flutter build web --release --wasm -O4 --no-source-maps --csp
 ./scripts/harden_web_release.sh
 ```
 
-The web release uses Flutter WebAssembly output with hardened CSP-compatible
-flags, then removes Flutter's generated Dart-to-JS app fallback from
-`build/web`. Required bootstrap/runtime JavaScript, renderer support files, and
-Nija browser bridge files remain part of the deployable web app. Detailed
-deployment headers, OAuth origin setup, and hosting checks are documented in
-`docs/ops_readme.md`.
+The default hardened web release uses Flutter WebAssembly output with
+hardened CSP-compatible flags, then removes Flutter's generated Dart-to-JS app
+fallback from `build/web`. Required bootstrap/runtime JavaScript, renderer
+support files, and Nija browser bridge files remain part of the deployable web
+app. Detailed deployment headers, OAuth origin setup, and hosting checks are
+documented in `docs/ops_readme.md`.
+
+For a single deployment that must support iOS PWA via Flutter's JavaScript
+fallback, use the compat-js hardening profile. Local/manual release validation
+can use the one-command helper:
+
+```bash
+./scripts/build_web_compat_release.sh
+```
+
+The helper creates a timestamped `.release/web_integrity/<date-time>/` key
+folder, builds with the generated public key, signs with the generated private
+seed, hardens the artifact, runs the compat-js release gate, and writes
+`.release/web/<date-time>/web.zip` for upload. `.release/` is ignored by git.
+
+For CI or a stable production key, run the explicit commands:
+
+```bash
+flutter build web --release --wasm -O4 --no-source-maps --csp \
+  --dart-define=NIJA_WEB_INTEGRITY_ENABLED=true \
+  --dart-define=NIJA_WEB_INTEGRITY_PUBLIC_KEY_B64=<public-key> \
+  --dart-define=NIJA_WEB_INTEGRITY_BUILD_ID=<build-id>
+NIJA_WEB_INTEGRITY_PRIVATE_KEY_B64=<private-seed> \
+NIJA_WEB_INTEGRITY_BUILD_ID=<build-id> \
+  ./scripts/harden_web_release.sh --compat-js
+./scripts/release_hardening_gate.sh --web-flavor=compat-js
+```
+
+Flutter web release output is optimized, minified, and tree-shaken with `-O4`
+and source maps are removed. Flutter web does not support the native mobile
+`--obfuscate` flag, so client-side code is still treated as inspectable.
+Compat-js releases add web-only runtime checks at app startup, vault unlock,
+additional-vault selection, expanded-capacity calculation, export/backup, and
+settings/security entry points. These checks are detect-after-load hardening:
+browser code has already loaded before Dart runtime checks execute, and
+re-fetch hashing verifies what the server returns during verification rather
+than proving the exact bytes that initially executed.
 
 For cPanel/Apache/LiteSpeed static hosts such as MilesWeb, the hardening step
 copies `web/.htaccess` into `build/web` so `.wasm` and `.mjs` files are served
 with the correct MIME types and existing assets are not rewritten to
-`index.html`.
+`index.html`. The hardening step also normalizes static-host permissions so
+directories are readable/executable and files are readable by the web server.
 
 For web builds that should restore from Google Drive, include
 `--dart-define=NIJA_GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com`.
+
+On the WebApp, encrypted vault data is stored in private browser storage by
+default. Exported vault files are manual snapshots and are not updated
+automatically; users should export a fresh copy after important changes.
 
 Paid build run example:
 
@@ -320,7 +361,7 @@ Release hardening gate:
 ```bash
 flutter build web --release --wasm -O4 --no-source-maps --csp
 ./scripts/harden_web_release.sh
-./scripts/release_hardening_gate.sh
+./scripts/release_hardening_gate.sh --web-flavor=wasm-only
 ```
 
 Checklist reference:
@@ -333,7 +374,29 @@ Security-focused automated test coverage includes:
 - corrupted encrypted payload failure handling
 - recovery + reset + key-rotation continuity flow
 
-Web integration test (requires `chromedriver` running on `http://localhost:4444`):
+Browser-agent integration test:
+
+```bash
+./scripts/browser_agent_integration_test.sh
+```
+
+Run every browser integration target:
+
+```bash
+./scripts/browser_agent_integration_test.sh --all
+```
+
+Run one browser integration target:
+
+```bash
+./scripts/browser_agent_integration_test.sh --target=integration_test/app_smoke_test.dart
+```
+
+The script starts ChromeDriver on `http://localhost:4444` when needed and runs
+Flutter web integration tests through Chrome. Manual ChromeDriver setup remains
+available as a fallback. ChromeDriver must match the installed Chrome major
+version; otherwise the wrapper stops before Flutter Drive starts and prints the
+detected versions.
 
 Install ChromeDriver (macOS/Homebrew):
 
