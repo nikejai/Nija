@@ -28,21 +28,24 @@ void main() {
     expect(references.first.sourceDescription, contains('personal.nija'));
   });
 
-  test('vault reference cache reads older entries without source metadata', () async {
-    SharedPreferences.setMockInitialValues({
-      'nija_vault_references_v1': jsonEncode([
-        {
-          'id': 'legacy.nija',
-          'label': 'Legacy',
-          'addedAtEpochMs': 1,
-          'lastOpenedAtEpochMs': 2,
-        },
-      ]),
-    });
+  test(
+    'vault reference cache reads older entries without source metadata',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'nija_vault_references_v1': jsonEncode([
+          {
+            'id': 'legacy.nija',
+            'label': 'Legacy',
+            'addedAtEpochMs': 1,
+            'lastOpenedAtEpochMs': 2,
+          },
+        ]),
+      });
 
-    final references = await VaultReferenceCache().readAll();
+      final references = await VaultReferenceCache().readAll();
 
-    expect(references, hasLength(1));
-    expect(references.first.sourceDescription, isEmpty);
-  });
+      expect(references, hasLength(1));
+      expect(references.first.sourceDescription, isEmpty);
+    },
+  );
 }

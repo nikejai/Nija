@@ -9,7 +9,6 @@ import 'package:nija/domain/models/vault_reference.dart';
 import 'package:nija/core/localization/app_strings.dart';
 import 'package:nija/features/onboarding/presentation/onboarding_flow.dart';
 import 'package:nija/features/onboarding/presentation/welcome_screen.dart';
-import 'package:nija/core/web_integrity/web_integrity_startup.dart';
 import 'package:nija/infrastructure/adapters/crypto_adapter.dart';
 import 'package:nija/infrastructure/adapters/in_memory_vault_storage_adapter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -284,7 +283,7 @@ void main() {
     expect(find.text('Create vault'), findsOneWidget);
   });
 
-  testWidgets('free app blocks creating a second vault', (tester) async {
+  testWidgets('app allows creating additional vaults freely', (tester) async {
     tester.view.physicalSize = const Size(430, 932);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -316,8 +315,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
     await tester.pumpAndSettle();
 
-    expect(find.text(AppStrings.vaultLimitReached), findsOneWidget);
-    expect(find.text('Choose Guardian'), findsNothing);
+    expect(find.text('Choose Guardian'), findsOneWidget);
   });
 
   testWidgets('entry page uses the same grouped vault flow on wide screens', (
@@ -1185,50 +1183,6 @@ void main() {
     await tester.tap(find.text('Unlock'));
     await tester.pumpAndSettle();
     expect(find.text('Wrong vault password.'), findsOneWidget);
-  });
-
-  testWidgets('unlock web runtime check failure follows generic unlock path', (
-    tester,
-  ) async {
-    debugNijaWebIntegrityGroupProbe = (groupName) async {
-      return groupName == 'unlock'
-          ? NijaWebIntegrityStartupResult.unavailable
-          : NijaWebIntegrityStartupResult.passed;
-    };
-    addTearDown(() => debugNijaWebIntegrityGroupProbe = null);
-    tester.view.physicalSize = const Size(430, 932);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: OnboardingFlow(
-          languageMode: 'en',
-          onLanguageModeChanged: (_) {},
-          vaultService: DefaultVaultService(
-            storageAdapter: InMemoryVaultStorageAdapter(),
-            cryptoAdapter: _FastTestCryptoAdapter(),
-          ),
-          vaultFilePath: 'test.nija',
-        ),
-      ),
-    );
-
-    await goToUnlockScreen(tester);
-    await tester.enterText(find.byType(TextField).first, 'CorrectPass123');
-    await tester.tap(find.text('Unlock'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Wrong vault password.'), findsOneWidget);
-    final visibleText = tester
-        .widgetList<Text>(find.byType(Text))
-        .map((widget) => widget.data ?? '')
-        .join(' ');
-    expect(
-      nijaWebIntegrityContainsForbiddenFailureLanguage(visibleText),
-      isFalse,
-    );
   });
 
   testWidgets('unlock screen create vault action opens setup screen', (

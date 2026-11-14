@@ -95,25 +95,28 @@ void main() {
       expect(await vault.readUnlockedPassword(vaultId: 'vault-a'), isNull);
     });
 
-    test('re-enroll updates stored password without requiring new auth', () async {
-      final vault = _FakeWebQuickUnlockVault();
-      await vault.enroll(
-        vaultId: 'vault-a',
-        password: 'old-password',
-        displayName: 'Vault A',
-      );
-      await vault.enroll(
-        vaultId: 'vault-a',
-        password: 'new-password',
-        displayName: 'Vault A',
-      );
+    test(
+      're-enroll updates stored password without requiring new auth',
+      () async {
+        final vault = _FakeWebQuickUnlockVault();
+        await vault.enroll(
+          vaultId: 'vault-a',
+          password: 'old-password',
+          displayName: 'Vault A',
+        );
+        await vault.enroll(
+          vaultId: 'vault-a',
+          password: 'new-password',
+          displayName: 'Vault A',
+        );
 
-      expect(await vault.authenticate(vaultId: 'vault-a'), isTrue);
-      expect(
-        await vault.readUnlockedPassword(vaultId: 'vault-a'),
-        'new-password',
-      );
-    });
+        expect(await vault.authenticate(vaultId: 'vault-a'), isTrue);
+        expect(
+          await vault.readUnlockedPassword(vaultId: 'vault-a'),
+          'new-password',
+        );
+      },
+    );
 
     test('remove clears enrollment', () async {
       final vault = _FakeWebQuickUnlockVault();

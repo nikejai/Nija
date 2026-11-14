@@ -2,6 +2,60 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-11-15 00:14:15 IST
+
+- Completed Section 17.5: Audited and Streamlined Heavy Third-Party Dependencies.
+  - Audited `flutter_quill: ^11.5.1` (WYSIWYG note editor): verified note schema backward compatibility with existing Delta JSON vaults, recommended phased migration path to lightweight Markdown for v2.0.
+  - Audited `pdfrx: ^2.4.1` (native PDFium rendering engine): determined that in-memory `PdfViewer.data()` is required for cryptographic privacy to prevent writing decrypted plaintext PDF bytes to unencrypted device temp storage.
+  - Audited Google Drive direct sync (`googleapis`, `google_sign_in`, `http`): verified client-side AES-256-GCM encryption guarantee and confirmed offline-first isolation.
+  - Built and verified Android debug APK with Gradle (`flutter build apk --debug`).
+  - Successfully concluded Section 17: Codebase Slimming, De-bloating & Architecture Modernization.
+
+
+## 2026-11-15 00:12:00 IST
+
+- Completed Section 17.4: Removed In-App Purchases and Entitlement Paywalls.
+  - Removed `lib/core/entitlements/` (Google Play billing service, cache, state machine).
+  - Removed `in_app_purchase` and `in_app_purchase_android` dependencies from `pubspec.yaml`.
+  - Removed artificial storage limits and paywalls: expanded storage is unlocked by default for all users up to 1 GB per vault, with 99 vaults allowed.
+  - Replaced Google Play buy/restore buttons in `VaultSettingsView` with a clean local vault capacity indicator.
+  - Removed obsolete Google Play billing handlers from `VaultAppShell`.
+  - Verified 0 analyzer warnings (`flutter analyze`) and 100% test pass rate across all 182 tests.
+
+
+## 2026-11-15 00:01:55 IST
+
+- Completed Section 17.3: Removed Web Runtime Anti-Tamper subsystem (`web_integrity`).
+  - Removed `lib/core/web_integrity/` (manifest, signature, startup verifier) and `lib/generated/web_integrity_groups.g.dart`.
+  - Removed `tool/web_integrity.dart` release codegen/signing script.
+  - Removed artificial runtime integrity gate checks from app startup, vault unlock, settings, and transfer flows.
+  - Cleaned up obsolete web integrity unit and integration tests (`test/web_integrity_*`, `integration_test/web_integrity_*`).
+  - Verified 0 analyzer warnings (`flutter analyze`) and 100% test pass rate across all 190 tests.
+
+
+## 2026-11-14 23:57:05 IST
+
+- Completed Section 17.2: Deconstructed remaining monolithic tabs from `vault_app_shell.dart`.
+  - Extracted Types & All Items category view into [`lib/features/vault/presentation/widgets/vault_types_view.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/vault_types_view.dart).
+  - Extracted Favorites & Starred items view into [`lib/features/vault/presentation/widgets/vault_favorites_view.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/vault_favorites_view.dart).
+  - Extracted Settings root tab view into [`lib/features/vault/presentation/widgets/vault_settings_view.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/vault_settings_view.dart).
+  - Reduced `vault_app_shell.dart` from **6,154 lines down to 5,275 lines** (-879 lines).
+  - Verified with 0 analyzer warnings (`flutter analyze`) and all 60 tests in `test/vault_shell_test.dart` passing.
+
+
+## 2026-11-14 23:52:50 IST
+
+- Completed Section 17.1: Decomposed and modularized `onboarding_flow.dart`.
+  - Extracted `VaultMergeScreen` and conflict preview cards (~1,200 lines) into [`lib/features/vault/presentation/widgets/vault_merge_screen.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/vault_merge_screen.dart).
+  - Extracted `NijaPinSetupDialog` and `NijaPinEntryDialog` into [`lib/features/vault/presentation/widgets/nija_pin_dialogs.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/nija_pin_dialogs.dart).
+  - Extracted `EncryptedSecretViewerScreen`, `EncryptedImportBundleScreen`, and secret previewers into [`lib/features/vault/presentation/widgets/encrypted_secret_viewer.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/encrypted_secret_viewer.dart).
+  - Extracted `KnownVaultSelectionScreen` into [`lib/features/onboarding/presentation/known_vault_selection_screen.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/onboarding/presentation/known_vault_selection_screen.dart).
+  - Extracted `UnlockScreen` into [`lib/features/onboarding/presentation/unlock_screen.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/onboarding/presentation/unlock_screen.dart).
+  - Deduplicated `DocumentPreviewMessage` and `PdfStatusBanner` into [`lib/features/vault/presentation/widgets/vault_document_preview_widgets.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/vault_document_preview_widgets.dart).
+  - Reduced `onboarding_flow.dart` from **9,150 lines down to 5,790 lines** (-3,360 lines, -36.7%).
+  - Verified with 0 analyzer issues (`flutter analyze`) and 100% test pass rate across 232 tests.
+
+
 ## 2026-11-14 23:28:45 IST
 
 - Added Section 17 to `docs/todo.md`: Codebase Slimming, De-bloating & Architecture Modernization.

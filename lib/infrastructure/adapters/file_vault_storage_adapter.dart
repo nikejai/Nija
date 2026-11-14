@@ -15,7 +15,10 @@ class FileVaultStorageAdapter implements VaultStorageAdapter {
   }
 
   @override
-  Future<void> write({required String filePath, required String content}) async {
+  Future<void> write({
+    required String filePath,
+    required String content,
+  }) async {
     final file = File(filePath);
     await file.parent.create(recursive: true);
     await file.writeAsString(content, flush: true);

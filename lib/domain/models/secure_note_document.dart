@@ -11,11 +11,7 @@ class SecureNoteDocument {
 }
 
 class NoteBlock {
-  const NoteBlock({
-    required this.type,
-    required this.text,
-    this.checked,
-  });
+  const NoteBlock({required this.type, required this.text, this.checked});
 
   final String type;
   final String text;

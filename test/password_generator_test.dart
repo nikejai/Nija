@@ -81,12 +81,17 @@ void main() {
       expect(RegExp(r'\d{2}$').hasMatch(parts.last), isTrue);
     });
 
-    test('entropy calculation reflects password length and character variety', () {
-      expect(PasswordGenerator.calculateEntropyBits(''), 0.0);
-      final simpleEntropy = PasswordGenerator.calculateEntropyBits('aaaa');
-      final complexEntropy = PasswordGenerator.calculateEntropyBits('aA1!bB2@');
-      expect(complexEntropy, greaterThan(simpleEntropy));
-    });
+    test(
+      'entropy calculation reflects password length and character variety',
+      () {
+        expect(PasswordGenerator.calculateEntropyBits(''), 0.0);
+        final simpleEntropy = PasswordGenerator.calculateEntropyBits('aaaa');
+        final complexEntropy = PasswordGenerator.calculateEntropyBits(
+          'aA1!bB2@',
+        );
+        expect(complexEntropy, greaterThan(simpleEntropy));
+      },
+    );
 
     test('evaluates strength levels correctly', () {
       expect(

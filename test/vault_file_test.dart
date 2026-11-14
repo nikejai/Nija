@@ -36,7 +36,9 @@ void main() {
     );
 
     final jsonMap = file.toJson();
-    final decoded = VaultFile.fromJson(Map<String, dynamic>.from(json.decode(json.encode(jsonMap)) as Map));
+    final decoded = VaultFile.fromJson(
+      Map<String, dynamic>.from(json.decode(json.encode(jsonMap)) as Map),
+    );
 
     expect(decoded.vaultId, 'vault_1');
     expect(decoded.vaultName, 'Personal Vault');

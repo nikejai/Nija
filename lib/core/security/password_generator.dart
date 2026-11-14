@@ -39,8 +39,10 @@ class PasswordGenerator {
 
   final Random _random;
 
-  static const String uppercaseChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // Exclude ambiguous I, O
-  static const String lowercaseChars = 'abcdefghijkmnopqrstuvwxyz'; // Exclude ambiguous l
+  static const String uppercaseChars =
+      'ABCDEFGHJKLMNPQRSTUVWXYZ'; // Exclude ambiguous I, O
+  static const String lowercaseChars =
+      'abcdefghijkmnopqrstuvwxyz'; // Exclude ambiguous l
   static const String digitChars = '23456789'; // Exclude ambiguous 0, 1
   static const String symbolChars = '!@#\$%^&*()-_=+[]{}|;:,.<>?';
 

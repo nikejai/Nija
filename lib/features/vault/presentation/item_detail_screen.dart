@@ -500,7 +500,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (snapshot.hasError || attachment == null) {
-      return _DocumentPreviewMessage(
+      return DocumentPreviewMessage(
         icon: Icons.error_outline,
         title: 'Unable to preview document',
         subtitle: snapshot.error?.toString() ?? 'Document unavailable.',
@@ -508,7 +508,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
     }
     final bytes = snapshot.data ?? const <int>[];
     if (bytes.isEmpty) {
-      return const _DocumentPreviewMessage(
+      return const DocumentPreviewMessage(
         icon: Icons.insert_drive_file_outlined,
         title: 'Empty document',
         subtitle: 'There is no content to preview.',
@@ -523,7 +523,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
             Uint8List.fromList(bytes),
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) =>
-                const _DocumentPreviewMessage(
+                const DocumentPreviewMessage(
                   icon: Icons.broken_image_outlined,
                   title: 'Image preview failed',
                   subtitle: 'Use Open document to view this file.',
@@ -551,7 +551,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
         ),
       );
     }
-    return _DocumentPreviewMessage(
+    return DocumentPreviewMessage(
       icon: extension == 'PDF'
           ? Icons.picture_as_pdf_outlined
           : Icons.insert_drive_file_outlined,

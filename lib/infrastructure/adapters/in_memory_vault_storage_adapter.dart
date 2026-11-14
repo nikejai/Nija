@@ -13,7 +13,10 @@ class InMemoryVaultStorageAdapter implements VaultStorageAdapter {
   }
 
   @override
-  Future<void> write({required String filePath, required String content}) async {
+  Future<void> write({
+    required String filePath,
+    required String content,
+  }) async {
     _store[filePath] = content;
   }
 }

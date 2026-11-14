@@ -7,10 +7,15 @@ class RecoveryPhraseGenerator {
 
   static const defaultWordCount = 12;
 
-  static List<String> generate({int wordCount = defaultWordCount, Random? random}) {
+  static List<String> generate({
+    int wordCount = defaultWordCount,
+    Random? random,
+  }) {
     final source = List<String>.from(RecoveryPhraseDictionary.words);
     if (source.length < wordCount) {
-      throw StateError('Recovery phrase dictionary must have at least $wordCount words.');
+      throw StateError(
+        'Recovery phrase dictionary must have at least $wordCount words.',
+      );
     }
     source.shuffle(random ?? Random.secure());
     return source.take(wordCount).toList();

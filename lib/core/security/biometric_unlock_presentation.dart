@@ -2,10 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 
 class BiometricUnlockPresentation {
-  const BiometricUnlockPresentation({
-    required this.label,
-    required this.icon,
-  });
+  const BiometricUnlockPresentation({required this.label, required this.icon});
 
   final String label;
   final IconData icon;
