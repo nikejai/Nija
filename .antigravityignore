@@ -1,0 +1,75 @@
+# Antigravity Ignore File
+# Patterns in this file prevent Antigravity from indexing or reading these paths for AI context.
+
+# Version Control & OS
+.git/
+.DS_Store
+Thumbs.db
+
+# Flutter / Dart Build Outputs & Cache
+build/
+.dart_tool/
+.pub-cache/
+.pub/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android Build & Local Configuration
+android/.gradle/
+android/app/build/
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/local.properties
+
+# iOS / macOS Ephemeral & Pods
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.podspec
+ios/Flutter/.last_build_id
+macos/Pods/
+macos/Flutter/ephemeral/
+
+# Linux / Windows Ephemeral
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# Releases, Test Runners & Binaries
+.release/
+chromedriver/
+
+# Logs & Temporary Files
+*.log
+flutter_*.log
+*.tmp
+*.swp
+*.class
+*.pyc
+
+# Test Artifacts & Screenshots
+coverage/
+test_driver/screenshots/
+integration_test/screenshots/
+
+# Secrets, Keystores & Credentials
+.env
+.env.*
+*.keystore
+*.jks
+key.properties
+**/google-services.json
+**/GoogleService-Info.plist
+client_secret_*.json
+lib/app/client_secret_*.json
+
+# Large Assets & Flow Visualizations
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.mp4
+*.mov
+*.pdf
+nija-e2e-product-flow.html

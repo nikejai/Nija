@@ -532,9 +532,69 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [x] Move item detail and identity photo UI into dedicated files.
   - Goal: separate item viewing/editing and identity photo viewing from shell state.
   - Scope: move `_ItemDetailScreen`, `_IdentityPhotosSection`, `_IdentityFullPhoto`, `_IdentityPhotoPreview`, and identity photo size helpers into `lib/features/vault/presentation/item_detail_screen.dart` plus optional identity photo widget file.
-- [ ] Move shared small vault widgets into a common widget file.
+- [x] Move shared small vault widgets into a common widget file.
   - Goal: reduce noise in shell and reuse visual primitives consistently.
   - Scope: move `_EntryMetadataPanel`, `_EntryMetadataLine`, `_EmptyState`, `_TinyChip`, `_SectionHeader`, `_DebugInfoCard`, `_HomeTypeCard`, `_AllItemsSelectionActionBar`, `_SelectionActionNavItem`, `_AllItemsFiltersOverlay`, `_ActiveFilterChip`, icon/color helpers, and metadata timestamp helpers into focused widget/helper files.
-- [ ] Re-run format, analyzer, and targeted widget tests after each split.
+  - Extracted shared visual primitives and filter overlays into `lib/features/vault/presentation/widgets/vault_common_widgets.dart`.
+- [x] Re-run format, analyzer, and targeted widget tests after each split.
   - Goal: keep every extraction behavior-preserving.
   - Scope: run `dart format`, `flutter analyze`, and the most relevant `flutter test` target after each moved group.
+  - Formatted files, verified clean static analyzer, and verified all 60 tests in `test/vault_shell_test.dart` pass without regressions.
+
+## 17) Codebase Slimming, De-bloating & Architecture Modernization
+
+### Architectural Audit & Findings
+- **Purpose vs. Footprint**: Nija is defined as *"A local-first, privacy-first encrypted vault for passwords, notes, documents, and identities"*, but has grown to **41,686 lines of Dart** in `lib/` (plus 12,649 lines in tests).
+- **Presentation Layer Overweight**:
+  - `lib/domain/` (core models and crypto logic): **661 lines** (1.6% of app).
+  - `lib/features/` (UI and screen state): **30,690 lines** (73.6% of app).
+  - Business logic, platform hooks, Google OAuth flows, and file I/O are heavily coupled directly inside Flutter `StatefulWidget` classes rather than services.
+- **Monolithic "God Files"**:
+  - `lib/features/onboarding/presentation/onboarding_flow.dart`: **9,150 lines** (48 classes). Despite being called "onboarding", it houses `UnlockScreen`, `_NijaPinDialog`, `KnownVaultSelectionScreen`, `_VaultMergeScreen` (1,200 lines), encrypted secret previewers, and inline PDF/document viewers. `_OnboardingFlowState` alone is **5,232 lines**.
+  - `lib/features/vault/presentation/vault_app_shell.dart`: **6,154 lines** (was 8,310). Acts as an all-in-one controller for tabs, filters, multi-select, auto-locks, drawer modals, and clipboard listeners.
+  - `document_detail_screen.dart` (1,714 lines), `add_vault_item_screen.dart` (1,664 lines), `item_detail_screen.dart` (1,604 lines).
+- **Out-of-Scope Feature Creep**:
+  - **Web Runtime Anti-Tamper Engine (`lib/core/web_integrity/`)**: Manifest hashing, Ed25519 signature checks, codegen, verifier groups, and startup checksum validation. Futile client-side DRM for a web app that adds build-step friction and code weight.
+  - **In-App Purchases & Entitlements Engine (`lib/core/entitlements/`, `in_app_purchase`)**: Google Play Billing state machine and an artificial 151 MB free vs. 1 GB paid storage limit paywall in what should be a local-first privacy vault.
+  - **Direct Cloud Sync & Google Drive APIs (`googleapis`, `google_sign_in`, `http`)**: Web OAuth popups, token refresh mechanisms, and complex 3-way cloud merge conflict screens instead of delegating file sync to the OS/file-system.
+  - **Heavy Third-Party Dependencies**: `flutter_quill` (WYSIWYG delta rich-text engine) and `pdfrx` (native C++ PDF rendering engine).
+- **Component Duplication**:
+  - Identical copies of `_DocumentPreviewMessage` and `_PdfStatusBanner` duplicated across `onboarding_flow.dart` and `document_detail_screen.dart`.
+  - Redundant PIN and biometric confirmation dialogs.
+
+---
+
+### Step-by-Step Modernization & Slimming Tasks (To Do One-by-One)
+
+- [ ] **17.1 Decompose and modularize `onboarding_flow.dart` (9,150 lines)**:
+  - [ ] 17.1.1 Extract `_VaultMergeScreen` and merge version preview cards (~1,200 lines) into `lib/features/vault/presentation/widgets/vault_merge_screen.dart`.
+  - [ ] 17.1.2 Extract `_NijaPinSetupDialog`, `_NijaPinEntryDialog`, and PIN actions (~250 lines) into `lib/features/vault/presentation/widgets/nija_pin_dialogs.dart`.
+  - [ ] 17.1.3 Extract `_EncryptedSecretViewerScreen`, `_EncryptedImportBundleScreen`, and secret previewers (~800 lines) into `lib/features/vault/presentation/widgets/encrypted_secret_viewer.dart`.
+  - [ ] 17.1.4 Extract `KnownVaultSelectionScreen`, `_KnownVaultCard`, and vault picker (~500 lines) into `lib/features/onboarding/presentation/known_vault_selection_screen.dart`.
+  - [ ] 17.1.5 Extract `UnlockScreen` (~450 lines) into a standalone `lib/features/onboarding/presentation/unlock_screen.dart`.
+  - [ ] 17.1.6 Deduplicate `_DocumentPreviewMessage` and `_PdfStatusBanner` into a single shared component in `vault_common_widgets.dart`.
+  - [ ] 17.1.7 Run `flutter analyze` and `flutter test test/onboarding_flow_test.dart` to ensure 100% test pass rate after each extraction.
+
+- [ ] **17.2 Deconstruct remaining monolithic tabs from `vault_app_shell.dart` (6,154 lines)**:
+  - [ ] 17.2.1 Extract `_buildTypesTab` (item categories/types view) into `lib/features/vault/presentation/widgets/vault_types_view.dart`.
+  - [ ] 17.2.2 Extract `_buildFavoritesTab` (starred items/notes view) into `lib/features/vault/presentation/widgets/vault_favorites_view.dart`.
+  - [ ] 17.2.3 Extract `_buildSettingsTab` (settings root view) into `lib/features/vault/presentation/widgets/vault_settings_view.dart`.
+  - [ ] 17.2.4 Verify shell size falls under 1,500 lines; validate with `flutter analyze` and `test/vault_shell_test.dart`.
+
+- [ ] **17.3 Remove Web Runtime Anti-Tamper Subsystem (`web_integrity`)**:
+  - [ ] 17.3.1 Remove `lib/core/web_integrity/` directory and `lib/generated/web_integrity_groups.g.dart`.
+  - [ ] 17.3.2 Remove runtime integrity verifier calls and startup checks from app initialization and feature gates.
+  - [ ] 17.3.3 Remove obsolete web integrity test files (`test/web_integrity_*`, `integration_test/web_integrity_*`).
+  - [ ] 17.3.4 Verify clean build with `flutter analyze` and `flutter test`.
+
+- [ ] **17.4 Remove In-App Purchases and Entitlement Paywalls**:
+  - [ ] 17.4.1 Remove `lib/core/entitlements/` directory.
+  - [ ] 17.4.2 Remove `in_app_purchase` and `in_app_purchase_android` dependencies from `pubspec.yaml`.
+  - [ ] 17.4.3 Remove artificial 151 MB storage cap and lifetime purchase checks; allow unlimited local storage bounded only by device disk space.
+  - [ ] 17.4.4 Verify clean build and test suite.
+
+- [ ] **17.5 Audit and Streamline Heavy Third-Party Dependencies**:
+  - [ ] 17.5.1 Review `flutter_quill: ^11.5.1`: evaluate transitioning to a lightweight Markdown / structured text editor for notes to eliminate massive transitive packages.
+  - [ ] 17.5.2 Review `pdfrx: ^2.4.1`: evaluate opening PDF documents using the platform system viewer (`open_filex` / intent) rather than bundling a heavy native C++ rendering engine.
+  - [ ] 17.5.3 Review Google Drive direct sync: evaluate decoupling direct OAuth cloud sync in favor of local export/import or external folder sync.
+

@@ -13,7 +13,7 @@ void main() {
         {'id': 'current-only', 'title': 'Bank', 'type': 'Login'},
       ],
       notes: [
-        {'id': 'same-note', 'title': 'Note', 'delta': []},
+        {'id': 'same-note', 'title': 'Note', 'delta': <dynamic>[]},
       ],
       tags: [],
       settings: {},
@@ -26,7 +26,7 @@ void main() {
         {'id': 'imported-only', 'title': 'Wi-Fi', 'type': 'Password'},
       ],
       notes: [
-        {'id': 'same-note', 'title': 'Note', 'delta': []},
+        {'id': 'same-note', 'title': 'Note', 'delta': <dynamic>[]},
       ],
       tags: [],
       settings: {},
@@ -98,7 +98,7 @@ void main() {
       ],
       notes: [],
       tags: ['local'],
-      settings: {'customTypeDefinitions': []},
+      settings: {'customTypeDefinitions': <dynamic>[]},
       audit: [],
     );
     const imported = VaultPayload(
