@@ -615,9 +615,9 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [x] **Fix rich-text toolbar overflow (New Note)**: Reduce horizontal button padding or wrap the formatting toolbar (Undo, Redo, Font size, B, I, U) in an `overflow-x: auto` container so `U` doesn't clip off the right edge on narrow viewports.
 
 ### Phase 3: Forms, Copy & Settings Consistency
-- [ ] **Add password visibility toggles on vault creation**: Add show/hide eye icons to both Master password and Confirm password inputs in Step 1 (Choose Guardian).
-- [ ] **Clarify New Item templates**: Merge Password into Login (or differentiate their schemas) and replace the repeated *Secure item details* subtitles on Card, SSH Key, API Key, Wi-Fi Credential, and Server/Database Credential with distinct descriptions.
-- [ ] **Unify storage quota figures and labels**: Reconcile the conflicting limits shown across Settings (1.00 GB vs. 151 MB) and Document Upload (1024 MB), and clarify that any cap applies to optional cloud/backup storage rather than local vault capacity.
+- [x] **Add password visibility toggles on vault creation**: Add show/hide eye icons to both Master password and Confirm password inputs in Step 1 (Choose Guardian).
+- [x] **Clarify New Item templates**: Differentiated schemas and roles between Login and Password templates; replaced repeated generic *Secure item details* subtitles with distinct descriptions and icons for Card, SSH Key, API Key, Wi-Fi Credential, Server/Database Credential, Bank Account, Passport, and License Key.
+- [x] **Unify storage quota figures and labels**: Reconciled limits across Settings and Document Upload using unified `VaultLimits.formatBytes` (displaying `1.00 GB` consistently instead of `1024 MB` or stale `151 MB`), raised document attachment ceiling to 25 MB, and clarified that local device storage is unlimited while the 1.00 GB allocation applies to optional cloud sync.
 
 ### Phase 4: Visual Design & Brand Cohesion
 - [ ] **Introduce warm surface depth**: Shift the page canvas to warm stone (`#F8F7F4` light / `#111214` dark) against elevated `#FFFFFF` (`#1A1C20` dark) cards with 1px solid `rgba(0, 0, 0, 0.06)` borders and subtle shadows (`0 1px 3px rgba(0,0,0,0.04)`).

@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-11-15 01:37:00 IST
+
+- Completed Section 18 Phase 3: Forms, Copy & Settings Consistency.
+  - Added password visibility toggles on vault creation: Added show/hide eye icon buttons with interactive state and tooltips to both Master password and Confirm password fields in Step 1 (SetupScreen).
+  - Clarified New Item templates: Differentiated roles between Login ("Websites, apps, and accounts") and Password ("Standalone secret, PIN, or passphrase"); replaced repeated generic "Secure item details" subtitles with dedicated descriptions and unique icons for Card, SSH Key, API Key, Wi-Fi Credential, Server/Database Credential, Bank Account, Passport, and License Key.
+  - Unified storage quota figures and labels: Reconciled quota displays across Settings and Document Upload using centralized `VaultLimits.formatBytes`, rendering a consistent `1.00 GB` limit instead of conflicting `1024 MB` or legacy `151 MB`; raised document upload ceiling indicator to 25 MB and explicitly clarified that local vault storage is unlimited while the 1.00 GB cap applies to optional cloud backup sync.
+  - Verified 0 analyzer warnings (`flutter analyze`) and 100% test pass rate across all 182 tests (`flutter test`).
+
+
 ## 2026-11-15 01:09:00 IST
 
 - Completed Section 18 Phase 2: Mobile Layout & Navigation.
