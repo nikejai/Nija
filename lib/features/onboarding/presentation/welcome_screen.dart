@@ -100,7 +100,7 @@ class _VaultEntrySurface extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const Expanded(child: NijaBrandLockup()),
+              const Spacer(),
               const PwaInstallOfferButton(),
               IconButton(
                 key: const ValueKey('entry-theme-toggle'),

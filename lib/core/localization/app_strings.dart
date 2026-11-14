@@ -485,7 +485,7 @@ class AppStrings {
       'exploreDemoHint': 'Browse a sample vault without creating one.',
       'exploreDemoWriteBlocked': 'Create or unlock a vault to save changes.',
       'exploreDemoActiveNotice': 'Exploring sample vault. Nothing is saved.',
-      'exitExploreDemo': 'Exit explore demo',
+      'exitExploreDemo': 'Exit demo',
       'restoreFromStorage': 'Restore from cloud storage',
       'knownVaults': 'Known vaults',
       'chooseWhatToOpen': 'Choose what to open',

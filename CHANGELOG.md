@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-11-15 01:09:00 IST
+
+- Completed Section 18 Phase 2: Mobile Layout & Navigation.
+  - Removed duplicate `+` creation button: Removed redundant header `+` buttons on mobile in `VaultHomeView` and `VaultTypesView`, keeping bottom `FloatingActionButtonLocation.endFloat` and primary action button on wide displays.
+  - Compacted Home category summary cards: Converted the 5-card 2-column mobile grid into a horizontal scroll strip with compact `_HomeTypeCard` (84px height), bringing Recent items above the fold on mobile viewports.
+  - Removed duplicate branding on landing screen: Cleaned up `WelcomeScreen` header row to hide the redundant top-left brand lockup, keeping theme toggle and PWA install offer in the top right.
+  - Refined Demo Mode banner: Shortened button label from `Exit explore demo` to `Exit demo` on one line and made the banner sticky above the scrollable items list on mobile.
+  - Fixed rich-text toolbar overflow: Reduced horizontal button padding and icon sizing (`iconButtonFactor: 1.15`, `toolbarSectionSpacing: 1`, `showDividers: false`) in note editor `QuillSimpleToolbarConfig` so formatting actions do not clip on narrow viewports.
+  - Added bottom padding to `VaultEntryList` and mobile dashboard list to prevent the floating action button from overlapping scrolling cards.
+  - Verified 0 analyzer warnings (`flutter analyze`) and 100% test pass rate across all 182 tests (`flutter test`).
+
+
 ## 2026-11-15 00:58:00 IST
 
 - Completed Section 18 Phase 1: Critical Bugs & Security.

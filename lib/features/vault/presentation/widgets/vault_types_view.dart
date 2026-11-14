@@ -107,11 +107,6 @@ extension _VaultTypesTab on _VaultAppShellState {
                     onPressed: () => _openAddItemScreen(context),
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('Add item'),
-                  )
-                else
-                  IconButton(
-                    onPressed: () => _openAddItemScreen(context),
-                    icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
                   ),
               ],
             ),
@@ -255,6 +250,7 @@ extension _VaultTypesTab on _VaultAppShellState {
                           _showVaultListRowQuickActions(context, row),
                     )
                   : VaultEntryList(
+                      padding: const EdgeInsets.only(bottom: 80),
                       rows: filtered,
                       adapters: _vaultListEntryAdapters,
                       selectionMode: _allItemsSelectionMode,
