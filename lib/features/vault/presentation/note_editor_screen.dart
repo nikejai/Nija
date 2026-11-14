@@ -455,7 +455,7 @@ class _NoteEditorPanel extends StatelessWidget {
   }
 }
 
-class NoteViewScreen extends StatelessWidget {
+class NoteViewScreen extends StatefulWidget {
   const NoteViewScreen({
     super.key,
     required this.note,
@@ -472,22 +472,55 @@ class NoteViewScreen extends StatelessWidget {
   final VoidCallback? onShareMenu;
 
   @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final delta = note['delta'] as List<dynamic>?;
+  State<NoteViewScreen> createState() => _NoteViewScreenState();
+}
+
+class _NoteViewScreenState extends State<NoteViewScreen> {
+  late final quill.QuillController _controller;
+  late final bool _isRecoveryNote;
+  bool _revealed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _isRecoveryNote = _checkIsRecoveryNote(widget.note);
+    final delta = widget.note['delta'] as List<dynamic>?;
     final document = delta == null
         ? (quill.Document()
-            ..insert(0, '${note['preview']?.toString() ?? ''}\n'))
+            ..insert(0, '${widget.note['preview']?.toString() ?? ''}\n'))
         : quill.Document.fromJson(
             delta
                 .map((entry) => Map<String, dynamic>.from(entry as Map))
                 .toList(),
           );
 
-    final controller = quill.QuillController(
+    _controller = quill.QuillController(
       document: document,
       selection: const TextSelection.collapsed(offset: 0),
     );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool _checkIsRecoveryNote(Map<String, dynamic> note) {
+    if (note['id']?.toString() == 'note-recovery-phrase') return true;
+    final tags = (note['tags'] as List<dynamic>?)
+            ?.map((t) => t.toString().toLowerCase().trim())
+            .toSet() ??
+        <String>{};
+    if (tags.contains('recovery') || tags.contains('seed')) return true;
+    final title = note['title']?.toString().toLowerCase().trim() ?? '';
+    return title.contains('recovery phrase') || title.contains('seed phrase');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -496,24 +529,30 @@ class NoteViewScreen extends StatelessWidget {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
-        title: Text(note['title']?.toString() ?? 'Note'),
+        title: Text(widget.note['title']?.toString() ?? 'Note'),
         actions: [
-          if (onShareMenu != null)
+          if (_isRecoveryNote && _revealed)
+            IconButton(
+              icon: const Icon(Icons.visibility_off_outlined),
+              tooltip: 'Hide phrase',
+              onPressed: () => setState(() => _revealed = false),
+            ),
+          if (widget.onShareMenu != null)
             IconButton(
               key: const ValueKey('note-view-share-menu'),
-              onPressed: onShareMenu,
+              onPressed: widget.onShareMenu,
               icon: const Icon(Icons.share_outlined),
               tooltip: AppStrings.shareEncryptedFile,
             ),
-          if (!readOnly)
+          if (!widget.readOnly)
             TextButton(
               onPressed: () async {
                 final updated = await Navigator.of(context)
                     .push<Map<String, dynamic>>(
                       MaterialPageRoute(
                         builder: (_) => NoteEditorScreen(
-                          initialNote: note,
-                          onAutoSave: onAutoSave,
+                          initialNote: widget.note,
+                          onAutoSave: widget.onAutoSave,
                         ),
                       ),
                     );
@@ -530,7 +569,7 @@ class NoteViewScreen extends StatelessWidget {
               ),
               child: Text(AppStrings.edit),
             ),
-          if (showDeleteAction)
+          if (widget.showDeleteAction)
             IconButton(
               onPressed: () => Navigator.of(
                 context,
@@ -541,29 +580,107 @@ class NoteViewScreen extends StatelessWidget {
         ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: IgnorePointer(
-            child: quill.QuillEditor.basic(
-              controller: controller,
-              config: quill.QuillEditorConfig(
-                customStyles: quill.DefaultStyles(
-                  paragraph: quill.DefaultTextBlockStyle(
-                    TextStyle(
-                      color: colorScheme.onSurface,
-                      fontSize: 15,
-                      height: 1.5,
+        child: _isRecoveryNote && !_revealed
+            ? Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(color: colorScheme.outlineVariant),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 56,
+                              height: 56,
+                              decoration: BoxDecoration(
+                                color: colorScheme.primary.withValues(
+                                  alpha: 0.12,
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Icon(
+                                Icons.shield_outlined,
+                                size: 28,
+                                color: colorScheme.primary,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Sensitive Recovery Phrase',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              '•••• •••• •••• ••••\n•••• •••• •••• ••••\n•••• •••• •••• ••••',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 16,
+                                letterSpacing: 2,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Keep this phrase offline and private. Only reveal when you are in a secure location.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            FilledButton.icon(
+                              key: const ValueKey(
+                                'note-reveal-recovery-phrase-button',
+                              ),
+                              onPressed: () => setState(() => _revealed = true),
+                              icon: const Icon(
+                                Icons.visibility_outlined,
+                                size: 18,
+                              ),
+                              label: const Text('Reveal Recovery Phrase'),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    const quill.HorizontalSpacing(0, 0),
-                    const quill.VerticalSpacing(0, 0),
-                    const quill.VerticalSpacing(0, 0),
-                    null,
+                  ),
+                ),
+              )
+            : Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                child: IgnorePointer(
+                  child: quill.QuillEditor.basic(
+                    controller: _controller,
+                    config: quill.QuillEditorConfig(
+                      customStyles: quill.DefaultStyles(
+                        paragraph: quill.DefaultTextBlockStyle(
+                          TextStyle(
+                            color: colorScheme.onSurface,
+                            fontSize: 15,
+                            height: 1.5,
+                          ),
+                          const quill.HorizontalSpacing(0, 0),
+                          const quill.VerticalSpacing(0, 0),
+                          const quill.VerticalSpacing(0, 0),
+                          null,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-        ),
       ),
     );
   }

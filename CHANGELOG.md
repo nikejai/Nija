@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-11-15 00:58:00 IST
+
+- Completed Section 18 Phase 1: Critical Bugs & Security.
+  - Persisted custom vault name: Display user-entered name (or fallback "Personal Vault") instead of raw UUID across Unlock screen, Home header, and Known Vaults list; moved truncated ID (`6bd4...f219`) to secondary monospace metadata.
+  - Deduplicated "Known vaults" entries: Merged cached file references and discovered private vault IDs cleanly by vault ID to prevent duplicate items after vault creation.
+  - Fixed overlapping text in Unlock progress modal: Replaced stacked `AnimatedSwitcher` and misaligned arc spinner with a clean row spinner and message, preventing simultaneous "Decrypting..." and "Starting..." rendering and eliminating the stray `)` artifact.
+  - Masked Recovery Phrase preview on feeds: Masked plaintext seed words behind `••••••••••••` on Home, All Items, and Favorites for recovery and security items; added an explicit "Reveal Recovery Phrase" interactive shield toggle on `NoteViewScreen`.
+  - Verified 0 analyzer warnings (`flutter analyze`) and 100% test pass rate across all 182 tests (`flutter test`).
+
+
 ## 2026-11-15 00:14:15 IST
 
 - Completed Section 17.5: Audited and Streamlined Heavy Third-Party Dependencies.

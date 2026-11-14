@@ -45,6 +45,34 @@ class _VaultHomeView extends StatelessWidget {
   final ValueChanged<Map<String, dynamic>> onOpenRow;
   final ValueChanged<Map<String, dynamic>> onRowActions;
 
+  static String _displayVaultName(String name) {
+    final raw = name.trim();
+    if (raw.isEmpty ||
+        raw == 'vault.nija' ||
+        raw == 'nija_vault.nija' ||
+        raw == 'web_vault.nija' ||
+        _isUuid(raw)) {
+      return 'Personal Vault';
+    }
+    return raw;
+  }
+
+  static String _truncatedId(String name) {
+    final clean =
+        name.endsWith('.nija') ? name.substring(0, name.length - 5) : name;
+    if (clean.length > 8 && _isUuid(clean)) {
+      return '${clean.substring(0, 4)}...${clean.substring(clean.length - 4)}';
+    }
+    return '';
+  }
+
+  static bool _isUuid(String value) {
+    final clean =
+        value.endsWith('.nija') ? value.substring(0, value.length - 5) : value;
+    final parts = clean.split('-');
+    return parts.length == 5 && clean.length == 36;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -92,7 +120,9 @@ class _VaultHomeView extends StatelessWidget {
                       Text(
                         isWide
                             ? "Here's what's happening with your vault."
-                            : activeVaultName,
+                            : (_truncatedId(activeVaultName).isNotEmpty
+                                ? '${_displayVaultName(activeVaultName)} (${_truncatedId(activeVaultName)})'
+                                : _displayVaultName(activeVaultName)),
                         maxLines: isWide ? 2 : 1,
                         overflow: TextOverflow.ellipsis,
                         style: isWide

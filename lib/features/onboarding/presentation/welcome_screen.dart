@@ -751,19 +751,43 @@ class _EntryRecentVaultRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      entry.label,
+                      _displayTitle(entry),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: EntryTypography.actionTitle(colorScheme.onSurface),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      source,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: EntryTypography.actionSubtitle(
-                        colorScheme.onSurfaceVariant,
-                      ),
+                    Row(
+                      children: [
+                        if (_truncatedId(entry).isNotEmpty) ...[
+                          Text(
+                            _truncatedId(entry),
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              color: colorScheme.onSurfaceVariant,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          Text(
+                            ' · ',
+                            style: TextStyle(
+                              color: colorScheme.onSurfaceVariant,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                        Expanded(
+                          child: Text(
+                            source,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: EntryTypography.actionSubtitle(
+                              colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -783,6 +807,40 @@ class _EntryRecentVaultRow extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static String _displayTitle(VaultReference entry) {
+    final raw = entry.label.trim();
+    if (raw.isEmpty ||
+        raw == 'vault.nija' ||
+        raw == 'nija_vault.nija' ||
+        raw == 'web_vault.nija' ||
+        _isUuid(raw)) {
+      return 'Personal Vault';
+    }
+    return raw;
+  }
+
+  static String _truncatedId(VaultReference entry) {
+    final rawId = (_isUuid(entry.id)
+            ? entry.id
+            : (_isUuid(entry.label) ? entry.label : ''))
+        .trim();
+    final clean = rawId.endsWith('.nija')
+        ? rawId.substring(0, rawId.length - 5)
+        : rawId;
+    if (clean.length > 8 && _isUuid(clean)) {
+      return '${clean.substring(0, 4)}...${clean.substring(clean.length - 4)}';
+    }
+    return '';
+  }
+
+  static bool _isUuid(String value) {
+    final clean = value.endsWith('.nija')
+        ? value.substring(0, value.length - 5)
+        : value;
+    final parts = clean.split('-');
+    return parts.length == 5 && clean.length == 36;
   }
 }
 
