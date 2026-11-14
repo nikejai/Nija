@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 
 - Completed Section 18 Phase 2: Mobile Layout & Navigation.
   - Removed duplicate `+` creation button: Removed redundant header `+` buttons on mobile in `VaultHomeView` and `VaultTypesView`, keeping bottom `FloatingActionButtonLocation.endFloat` and primary action button on wide displays.
-  - Compacted Home category summary cards: Converted the 5-card 2-column mobile grid into a horizontal scroll strip with compact `_HomeTypeCard` (84px height), bringing Recent items above the fold on mobile viewports.
+  - Compacted Home category summary cards: Replaced horizontal strip with a responsive grid (2-4 columns) of compact 64px row-based tiles (icon on left, label and count on right) that fit the screen width and expand vertically so all categories remain visible without horizontal clipping.
   - Removed duplicate branding on landing screen: Cleaned up `WelcomeScreen` header row to hide the redundant top-left brand lockup, keeping theme toggle and PWA install offer in the top right.
   - Refined Demo Mode banner: Shortened button label from `Exit explore demo` to `Exit demo` on one line and made the banner sticky above the scrollable items list on mobile.
   - Fixed rich-text toolbar overflow: Reduced horizontal button padding and icon sizing (`iconButtonFactor: 1.15`, `toolbarSectionSpacing: 1`, `showDividers: false`) in note editor `QuillSimpleToolbarConfig` so formatting actions do not clip on narrow viewports.

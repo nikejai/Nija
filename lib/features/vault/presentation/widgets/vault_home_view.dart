@@ -318,26 +318,36 @@ class _MobileDashboardList extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 80),
             children: [
               if (categories.isNotEmpty) ...[
-                SizedBox(
-                  height: 84,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: categories.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 8),
-                    itemBuilder: (context, index) {
-                      final entry = categories[index];
-                      return SizedBox(
-                        width: 124,
-                        child: _HomeTypeCard(
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    final crossAxisCount = width >= 800
+                        ? 4
+                        : width >= 540
+                            ? 3
+                            : 2;
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        mainAxisExtent: 64,
+                      ),
+                      itemCount: categories.length,
+                      itemBuilder: (context, index) {
+                        final entry = categories[index];
+                        return _HomeTypeCard(
                           label: entry.label,
                           count: entry.count,
                           icon: iconForType(entry.filterType),
                           accent: colorForType(entry.filterType),
                           onTap: () => onTypeTap(entry.filterType),
-                        ),
-                      );
-                    },
-                  ),
+                        );
+                      },
+                    );
+                  },
                 ),
                 const SizedBox(height: 14),
               ],
