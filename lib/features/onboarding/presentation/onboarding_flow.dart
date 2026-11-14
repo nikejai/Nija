@@ -27,9 +27,11 @@ import '../../../core/security/biometric_credential_store.dart';
 import '../../../core/security/biometric_enrollment_store.dart';
 import '../../../core/security/pin_credential_store.dart';
 import '../../../core/security/web_page_lifecycle.dart';
+import '../../../core/web_integrity/web_integrity_startup.dart';
 import '../../../domain/models/vault_reference.dart';
 import '../../../domain/models/vault_payload.dart';
 import '../../../domain/models/vault_transfer_result.dart';
+import '../../../generated/web_integrity_groups.g.dart';
 import '../../../infrastructure/adapters/file_vault_storage_adapter.dart';
 import '../../../infrastructure/adapters/private_vault_store.dart';
 import '../../../infrastructure/adapters/secret_share_portability.dart';
@@ -1013,10 +1015,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<VaultReference?> _pickVaultFileForUnlock() async {
-    if (!(await _ensureCanAddVaultReference())) return null;
+    if (!(await _ensureCanAddVaultReference(runWebIntegrity: false))) {
+      return null;
+    }
     try {
       final imported = await _vaultPortability.importVaultFromLocal();
       if (imported == null) return null;
+      if (!(await _ensureCanAddVaultReference())) return null;
       final importedPath = await _localPathForImportedVault(imported);
       await _vaultService.writeRawVaultFile(
         filePath: importedPath,
@@ -1140,6 +1145,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
     _startBusy('Starting vault unlock...');
     try {
+      final unlockReady = await nijaWebIntegrityUnlockGate();
+      if (unlockReady != NijaWebIntegrityStartupResult.passed) {
+        throw const _UserSafeOperationException(
+          'Unable to unlock vault. Please retry.',
+        );
+      }
       final vaultPath = await _resolveVaultStoragePath(_vaultFilePath);
       if (vaultPath != _vaultFilePath && mounted) {
         setState(() => _vaultFilePath = vaultPath);
@@ -2544,7 +2555,18 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       }
     });
 
-    await _presentSelectVaultStep(returnOnCancel: OnboardingStep.app);
+    _backgroundLockTimer?.cancel();
+    _inactivityLockTimer?.cancel();
+    if (mounted) {
+      Navigator.of(
+        context,
+        rootNavigator: true,
+      ).popUntil((route) => route.isFirst);
+    }
+    _clearSensitiveSessionState();
+    await _syncUnlockPresentation();
+    if (!mounted) return;
+    await _presentSelectVaultStep(returnOnCancel: OnboardingStep.unlock);
   }
 
   Future<void> _renameActiveVault(String name) async {
@@ -3351,10 +3373,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<void> _importVaultFromLocal({required bool continueToUnlock}) async {
-    if (continueToUnlock && !(await _ensureCanAddVaultReference())) return;
+    if (continueToUnlock &&
+        !(await _ensureCanAddVaultReference(runWebIntegrity: false))) {
+      return;
+    }
     try {
       final imported = await _vaultPortability.importVaultFromLocal();
       if (imported == null) return;
+      if (continueToUnlock && !(await _ensureCanAddVaultReference())) return;
       final importedPath = await _localPathForImportedVault(imported);
       await _importVaultFile(
         imported: ImportedVaultFile(
@@ -3948,6 +3974,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     );
     if (!approved) return;
     try {
+      final transferReady = await nijaWebIntegrityTransferGate();
+      if (transferReady != NijaWebIntegrityStartupResult.passed) {
+        throw _UserSafeOperationException(AppStrings.vaultExportFailed);
+      }
       final exportName = await _promptExportFileName(
         initialName: _defaultVaultExportName(),
       );
@@ -4017,6 +4047,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     try {
+      final transferReady = await nijaWebIntegrityTransferGate();
+      if (transferReady != NijaWebIntegrityStartupResult.passed) {
+        throw const _UserSafeOperationException('Cloud backup unavailable.');
+      }
       await _refreshEntitlementsBeforeCloudOperation(
         'backupCurrentVaultToCloud',
       );
@@ -4327,7 +4361,16 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     expandedStorageEntitled: widget.entitlementState.expandedVaultStorage,
   );
 
-  Future<bool> _ensureCanAddVaultReference() async {
+  Future<bool> _ensureCanAddVaultReference({
+    bool runWebIntegrity = true,
+  }) async {
+    if (runWebIntegrity) {
+      final vaultReferenceReady = await nijaWebIntegrityVaultReferenceGate();
+      if (vaultReferenceReady != NijaWebIntegrityStartupResult.passed) {
+        _showOperationSnackBar(AppStrings.vaultLimitReached);
+        return false;
+      }
+    }
     final known = _enableVaultReferenceCache && !_isExploreDemoSession
         ? await _mergedKnownAndPrivateVaultReferences()
         : _knownVaults;

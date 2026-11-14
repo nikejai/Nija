@@ -19,12 +19,14 @@ Options -MultiViews
   Header set Cross-Origin-Opener-Policy "same-origin-allow-popups"
   Header set Cross-Origin-Resource-Policy "same-origin"
 
-  <FilesMatch "^(index\.html|flutter_bootstrap\.js|flutter_service_worker\.js|manifest\.json|privacy\.html|version\.json)$">
-    Header set Cache-Control "no-cache"
-  </FilesMatch>
-
   <FilesMatch "\.(wasm|mjs|js|png|jpg|jpeg|webp|woff2?)$">
     Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+
+  <FilesMatch "^(index\.html|flutter\.js|flutter_bootstrap\.js|flutter_service_worker\.js|main\.dart\.js|main\.dart\.mjs|main\.dart\.wasm|manifest\.json|nija_integrity_manifest\.json|nija_integrity_manifest\.sig|nija_integrity_public_key\.txt|privacy\.html|version\.json)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
   </FilesMatch>
 </IfModule>
 

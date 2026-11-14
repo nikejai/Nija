@@ -31,10 +31,16 @@ Use this document as the release gate before tagging any production build.
 - [ ] HTTPS-only deployment is enforced with appropriate security headers, including the checked-in CSP/header policy in `web/_headers` or `firebase.json`.
 - [ ] Browser visibility/background behavior locks or protects sensitive vault surfaces consistently with native app expectations.
 - [ ] Web production artifacts are hardened with `./scripts/harden_web_release.sh` after the wasm build.
-- [ ] `build/web/main.dart.js` is absent from deployable web artifacts.
-- [ ] `build/web/flutter_bootstrap.js` contains only the `dart2wasm` app build and includes the unsupported-browser upgrade message.
+- [ ] Wasm-only web releases run `./scripts/harden_web_release.sh` and `./scripts/release_hardening_gate.sh --web-flavor=wasm-only`.
+- [ ] Wasm-only deployable artifacts do not include `build/web/main.dart.js`.
+- [ ] Wasm-only `build/web/flutter_bootstrap.js` contains only the `dart2wasm` app build and includes the unsupported-browser upgrade message.
+- [ ] JS-compatible web releases for iOS PWA run `./scripts/harden_web_release.sh --compat-js` and `./scripts/release_hardening_gate.sh --web-flavor=compat-js`.
+- [ ] JS-compatible deployable artifacts include `main.dart.js`, `main.dart.wasm`, `nija_integrity_manifest.json`, and `nija_integrity_manifest.sig`.
+- [ ] JS-compatible release gates verify the manifest signature and every listed artifact hash before upload.
 - [ ] Required runtime JavaScript remains present: Flutter bootstrap/runtime, renderer support, service-worker cleanup, and Nija browser bridge files.
 - [ ] cPanel/Apache/LiteSpeed deployments include `build/web/.htaccess` so `.wasm` and `.mjs` assets are not served as `index.html` or blocked by `nosniff`.
+- [ ] Static-host artifacts are readable by the web server: directories `755`, files `644`; release gate rejects unreadable files/directories.
+- [ ] Stable web entry files and integrity metadata are no-cache: `main.dart.js`, `main.dart.mjs`, `main.dart.wasm`, and `nija_integrity_*`.
 
 ## 4) Final Validation Matrix
 
@@ -43,8 +49,35 @@ Run all checks:
 ```bash
 flutter build web --release --wasm -O4 --no-source-maps --csp
 ./scripts/harden_web_release.sh
-./scripts/release_hardening_gate.sh
+./scripts/release_hardening_gate.sh --web-flavor=wasm-only
 ```
+
+For a JS-compatible iOS PWA deployment:
+
+```bash
+./scripts/build_web_compat_release.sh
+```
+
+The helper produces `build/web` and, after the compat-js gate passes,
+`.release/web/<timestamp>/web.zip` for cPanel/static-host upload. The archive
+is created from the validated `build/web` contents and includes `.htaccess`.
+
+For CI or stable production keys:
+
+```bash
+flutter build web --release --wasm -O4 --no-source-maps --csp \
+  --dart-define=NIJA_WEB_INTEGRITY_ENABLED=true \
+  --dart-define=NIJA_WEB_INTEGRITY_PUBLIC_KEY_B64=<public-key> \
+  --dart-define=NIJA_WEB_INTEGRITY_BUILD_ID=<build-id>
+NIJA_WEB_INTEGRITY_PRIVATE_KEY_B64=<private-seed> \
+NIJA_WEB_INTEGRITY_BUILD_ID=<build-id> \
+  ./scripts/harden_web_release.sh --compat-js
+./scripts/release_hardening_gate.sh --web-flavor=compat-js
+```
+
+The compat-js gate verifies manifest signature and hashes, then checks the
+compiled web artifact contains the expected public-key and build-id markers so
+manual builds cannot accidentally ship with runtime web checks disabled.
 
 Platform run validation:
 

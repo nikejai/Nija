@@ -790,10 +790,13 @@ flutter run -d <web-device-id>
 
 ### Web Release Build
 
+Wasm-only hardened release:
+
 ```bash
 flutter pub get
 flutter build web --release --wasm -O4 --no-source-maps --csp
 ./scripts/harden_web_release.sh
+./scripts/release_hardening_gate.sh --web-flavor=wasm-only
 ```
 
 This is the strongest deployable web build for the current codebase:
@@ -820,6 +823,89 @@ This is the strongest deployable web build for the current codebase:
   `packages/flutter_secure_storage_web_wasm` so Flutter's web plugin registrant
   does not import the upstream `dart:html` implementation during wasm builds.
   Nija web vault secrets are not stored through this shim.
+
+JS-compatible hardened release for one deployment that includes iOS PWA:
+
+```bash
+./scripts/build_web_compat_release.sh
+```
+
+This local/manual helper creates a new timestamped key folder under
+`.release/web_integrity/`, builds with the generated public key, signs and
+hardens the artifact with the generated private seed, and runs the compat-js
+release gate. After validation it writes `.release/web/<timestamp>/web.zip`,
+including hidden deploy files such as `.htaccess`, for upload. `.release/` is
+ignored by git so private seeds and local archives are not committed.
+
+Expected helper console checkpoints:
+
+```text
+[web-compat-release] create web integrity keypair: .release/web_integrity/<timestamp>
+[web-integrity] private seed file: .release/web_integrity/<timestamp>/private_seed.b64
+[web-integrity] public key file: .release/web_integrity/<timestamp>/public_key.b64
+[web-compat-release] build id: nija-web-compat-<timestamp>
+[web-compat-release] flutter build completed: build/web
+[web-compat-release] hardening completed
+[web-compat-release] release gate passed
+[web-compat-release] archive completed: .release/web/<timestamp>/web.zip
+```
+
+After the helper completes, inspect:
+
+```bash
+test -f build/web/main.dart.js
+test -f build/web/main.dart.wasm
+test -f build/web/nija_integrity_manifest.json
+test -f build/web/nija_integrity_manifest.sig
+test -f build/web/nija_integrity_public_key.txt
+test -f .release/web/<timestamp>/web.zip
+```
+
+Do not paste or upload `.release/web_integrity/<timestamp>/private_seed.b64`.
+The deployed web artifact only needs the generated manifest, signature, public
+key file, and normal Flutter web files.
+
+Use the explicit form below for CI or stable production key material:
+
+```bash
+flutter pub get
+flutter build web --release --wasm -O4 --no-source-maps --csp \
+  --dart-define=NIJA_WEB_INTEGRITY_ENABLED=true \
+  --dart-define=NIJA_WEB_INTEGRITY_PUBLIC_KEY_B64=<public-key> \
+  --dart-define=NIJA_WEB_INTEGRITY_BUILD_ID=<build-id>
+NIJA_WEB_INTEGRITY_PRIVATE_KEY_B64=<private-seed> \
+NIJA_WEB_INTEGRITY_BUILD_ID=<build-id> \
+  ./scripts/harden_web_release.sh --compat-js
+./scripts/release_hardening_gate.sh --web-flavor=compat-js
+```
+
+The compat-js profile keeps `main.dart.js` so browsers that cannot run the
+wasm build, including current iOS PWA scenarios, can use Flutter's JavaScript
+fallback from the same deployment. The hardening step signs
+`nija_integrity_manifest.json`, writes `nija_integrity_manifest.sig`, and hashes
+the web runtime artifacts before upload. Runtime checks are web-only and run at
+app startup plus vault unlock, additional-vault reference, expanded-capacity,
+export/backup, and settings/security entry points. Native Android/iOS apps do
+not initialize or depend on this verifier.
+
+The compat-js release gate also verifies the compiled web artifact contains the
+expected public key and build id marker. This catches manual compat-js builds
+that were signed after the fact but forgot the runtime `--dart-define` values.
+
+Production signing uses `NIJA_WEB_INTEGRITY_PRIVATE_KEY_B64`, a base64 Ed25519
+seed stored in release secrets/CI beside other release material. Do not reuse
+the Android signing keystore for web integrity signatures. Local fixture builds
+may use `NIJA_WEB_INTEGRITY_ALLOW_EPHEMERAL=true`, but ephemeral keys are not
+for production because they cannot provide stable release continuity.
+
+Known web integrity limits:
+
+- Runtime checks are detect-after-load hardening, not prevention. Browser code
+  has already loaded before Dart can verify anything.
+- Re-fetch hashing checks what the server returns during verification; it
+  cannot prove the exact bytes that initially executed.
+- Future investigation: browser load-time protections such as Subresource
+  Integrity if Flutter's web loader can support them cleanly.
 
 Free WebApp release build with Google Drive restore configuration:
 
@@ -872,16 +958,26 @@ For mobile device testing on the same network, serve from the host machine and o
      - short/no-cache for `index.html`, `flutter_bootstrap.js`, manifest, and service-worker files.
   7. Apply the production security headers from `web/_headers` or translate the same policy to the host/CDN.
   8. Validate online load, offline reload, install/add-to-home-screen, and vault persistence.
+  9. Validate Safari specifically: tap `Open vault` / `Select different vault
+     file` and confirm the file picker opens from the user gesture.
 
 - cPanel/Apache/LiteSpeed hosting such as MilesWeb:
   1. Upload the contents of `build/web` into `public_html`, including hidden
      file `build/web/.htaccess`.
-  2. Confirm these URLs return real files with HTTP 200, not `index.html`:
+  2. Confirm uploaded directories are `755` and uploaded files are `644`.
+     Blank pages on shared hosts often mean `.js`, `.mjs`, `.wasm`, or
+     manifest files were uploaded with private `600` permissions and the web
+     server cannot read them.
+  3. Confirm these URLs return real files with HTTP 200, not `index.html`:
      `/main.dart.wasm`, `/main.dart.mjs`, `/canvaskit/skwasm.js`, and
      `/canvaskit/skwasm.wasm`.
-  3. Confirm response headers include `Content-Type: application/wasm` for
+  4. Confirm response headers include `Content-Type: application/wasm` for
      `.wasm` files and a JavaScript MIME type for `.mjs` files.
-  4. If the host file manager hides dotfiles, enable hidden files or upload
+  5. Confirm response headers for `main.dart.js`, `main.dart.mjs`,
+     `main.dart.wasm`, and `nija_integrity_manifest.json` are no-cache. These
+     stable filenames must not be served as year-long immutable assets because
+     a cached old app bundle can reject a newly signed integrity manifest.
+  6. If the host file manager hides dotfiles, enable hidden files or upload
      `web/.htaccess` manually as `.htaccess` in `public_html`.
 
 - Firebase Hosting:
@@ -1057,13 +1153,24 @@ Run targeted integration checks as needed:
 flutter test integration_test
 ```
 
-For web integration tests that require ChromeDriver:
+For browser-agent web integration tests:
 
 ```bash
-chromedriver --port=4444
-flutter drive -d chrome --driver=test_driver/integration_test.dart --target=integration_test/app_smoke_test.dart
-flutter drive -d chrome --driver=test_driver/integration_test.dart --target=integration_test/e2e_full_flow_test.dart
+./scripts/browser_agent_integration_test.sh
+./scripts/browser_agent_integration_test.sh --all
+./scripts/browser_agent_integration_test.sh --target=integration_test/app_smoke_test.dart
 ```
+
+The wrapper starts ChromeDriver on `http://localhost:4444` when needed and then
+runs each target with `flutter drive -d chrome`.
+
+ChromeDriver must match the installed Chrome major version. If they differ, the
+wrapper stops before Flutter Drive starts and prints both versions. Update
+Chrome, or pass `--chromedriver=/path/to/a/matching/chromedriver`.
+
+If ChromeDriver exits immediately with `Killed: 9` or exit `137` on macOS,
+reinstall or re-allow the binary and confirm `chromedriver --version` works
+before rerunning the wrapper.
 
 ## 9) Important Flutter Commands
 

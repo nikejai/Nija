@@ -1,7 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-build_dir="${1:-build/web}"
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/harden_web_release.sh [--compat-js] [build/web]
+
+Modes:
+  default      Wasm-only hardening. Removes main.dart.js.
+  --compat-js  Keeps Flutter's JS fallback and signs the dual web artifact.
+
+Compat-js signing:
+  NIJA_WEB_INTEGRITY_PRIVATE_KEY_B64 must be set for production signing.
+  NIJA_WEB_INTEGRITY_ALLOW_EPHEMERAL=true may be used for local/test fixtures.
+EOF
+}
+
+compat_js=false
+build_dir="build/web"
+for arg in "$@"; do
+  case "$arg" in
+    --compat-js)
+      compat_js=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      build_dir="$arg"
+      ;;
+  esac
+done
+
 bootstrap="$build_dir/flutter_bootstrap.js"
 
 echo "[web-harden] validate web release artifact inputs"
@@ -33,7 +64,12 @@ if find "$build_dir" -type f -name '*.map' | rg . >/dev/null; then
 fi
 
 echo "[web-harden] remove Dart-to-JS fallback bundle"
-rm -f "$build_dir/main.dart.js"
+if [ "$compat_js" = true ]; then
+  test -f "$build_dir/main.dart.js"
+  echo "[web-harden] compat-js mode keeps Dart-to-JS fallback bundle"
+else
+  rm -f "$build_dir/main.dart.js"
+fi
 
 if [ -f "web/.htaccess" ]; then
   echo "[web-harden] copy Apache/cPanel hosting rules"
@@ -41,6 +77,7 @@ if [ -f "web/.htaccess" ]; then
 fi
 
 echo "[web-harden] keep only dart2wasm build config and add unsupported-browser message"
+if [ "$compat_js" = false ]; then
 python3 - "$bootstrap" <<'PY'
 import json
 import re
@@ -105,20 +142,53 @@ text = text.replace("dart2js", "removed-dart-js")
 
 path.write_text(text, encoding="utf-8")
 PY
+fi
+
+if [ "$compat_js" = true ]; then
+  echo "[web-harden] generate signed compat-js integrity manifest"
+  if [ -n "${NIJA_WEB_INTEGRITY_BUILD_ID:-}" ]; then
+    dart tool/web_integrity.dart generate \
+      --build-dir "$build_dir" \
+      --flavor compat-js \
+      --build-id "$NIJA_WEB_INTEGRITY_BUILD_ID"
+  else
+    dart tool/web_integrity.dart generate \
+      --build-dir "$build_dir" \
+      --flavor compat-js
+  fi
+fi
 
 echo "[web-harden] validate hardened web release artifact"
-test ! -f "$build_dir/main.dart.js"
+if [ "$compat_js" = true ]; then
+  test -f "$build_dir/main.dart.js"
+  test -f "$build_dir/nija_integrity_manifest.json"
+  test -f "$build_dir/nija_integrity_manifest.sig"
+  test -f "$build_dir/nija_integrity_public_key.txt"
+  dart tool/web_integrity.dart verify \
+    --build-dir "$build_dir" \
+    --flavor compat-js
+else
+  test ! -f "$build_dir/main.dart.js"
+fi
 test -f "$build_dir/main.dart.wasm"
 test -f "$build_dir/main.dart.mjs"
 
-if rg -n "dart2js|main\\.dart\\.js" "$bootstrap" >/dev/null; then
+echo "[web-harden] normalize static-host read permissions"
+find "$build_dir" -type d -exec chmod 755 {} +
+find "$build_dir" -type f -exec chmod 644 {} +
+
+if [ "$compat_js" = false ] && rg -n "dart2js|main\\.dart\\.js" "$bootstrap" >/dev/null; then
   echo "ERROR: Dart-to-JS fallback still referenced by $bootstrap."
   exit 1
 fi
 
-if ! rg -n "Upgrade your browser to use Nija" "$bootstrap" >/dev/null; then
+if [ "$compat_js" = false ] && ! rg -n "Upgrade your browser to use Nija" "$bootstrap" >/dev/null; then
   echo "ERROR: Unsupported-browser message was not added to $bootstrap."
   exit 1
 fi
 
-echo "Wasm-only web release hardening passed."
+if [ "$compat_js" = true ]; then
+  echo "Compat-js web release hardening passed."
+else
+  echo "Wasm-only web release hardening passed."
+fi

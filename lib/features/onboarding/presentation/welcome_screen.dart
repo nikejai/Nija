@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/widgets/nija_brand_lockup.dart';
@@ -156,8 +157,7 @@ class _VaultEntrySurface extends StatelessWidget {
                                       onImportVaultFromCloud,
                                   onExploreDemo: onExploreDemo,
                                   recentVaults: recentVaults,
-                                  onRecentVaultSelected:
-                                      onRecentVaultSelected,
+                                  onRecentVaultSelected: onRecentVaultSelected,
                                 ),
                               ),
                             ],
@@ -168,12 +168,10 @@ class _VaultEntrySurface extends StatelessWidget {
                               onSelectKnownVault: onSelectKnownVault,
                               onOpenVaultFile: onOpenVaultFile,
                               onImportVault: onImportVault,
-                              onImportVaultFromCloud:
-                                  onImportVaultFromCloud,
+                              onImportVaultFromCloud: onImportVaultFromCloud,
                               onExploreDemo: onExploreDemo,
                               recentVaults: recentVaults,
-                              onRecentVaultSelected:
-                                  onRecentVaultSelected,
+                              onRecentVaultSelected: onRecentVaultSelected,
                             ),
                           ),
                   ),
@@ -449,6 +447,56 @@ class _ProductFlowStep extends StatelessWidget {
   }
 }
 
+class _WebStorageNotice extends StatelessWidget {
+  const _WebStorageNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('entry-web-storage-notice'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.64),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppStrings.webStorageNoticeTitle,
+                  style: EntryTypography.productFlowTitle(
+                    colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  AppStrings.webStorageNoticeBody,
+                  style: EntryTypography.productFlowHint(
+                    colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _EntryActionsPanel extends StatelessWidget {
   const _EntryActionsPanel({
     required this.onCreateVault,
@@ -481,10 +529,7 @@ class _EntryActionsPanel extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const NijaBrandLockup(
-            layout: NijaBrandLayout.vertical,
-            markSize: 56,
-          ),
+          const NijaBrandLockup(layout: NijaBrandLayout.vertical, markSize: 56),
           const SizedBox(height: 16),
           Text(
             AppStrings.entryTitle,
@@ -502,6 +547,10 @@ class _EntryActionsPanel extends StatelessWidget {
               ),
             ),
           ),
+          if (kIsWeb) ...[
+            const SizedBox(height: 14),
+            const _WebStorageNotice(),
+          ],
           const SizedBox(height: 26),
           _EntryActionGroup(
             children: [
@@ -705,9 +754,7 @@ class _EntryRecentVaultRow extends StatelessWidget {
                       entry.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: EntryTypography.actionTitle(
-                        colorScheme.onSurface,
-                      ),
+                      style: EntryTypography.actionTitle(colorScheme.onSurface),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -835,9 +882,7 @@ class _EntryAction extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: EntryTypography.actionTitle(
-                        colorScheme.onSurface,
-                      ),
+                      style: EntryTypography.actionTitle(colorScheme.onSurface),
                     ),
                     const SizedBox(height: 4),
                     Text(

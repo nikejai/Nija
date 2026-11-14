@@ -42,6 +42,8 @@ class AppStrings {
   static String get openExistingVault => _t('openExistingVault');
   static String get entryTitle => _t('entryTitle');
   static String get entryDescription => _t('entryDescription');
+  static String get webStorageNoticeTitle => _t('webStorageNoticeTitle');
+  static String get webStorageNoticeBody => _t('webStorageNoticeBody');
   static String get selectKnownVault => _t('selectKnownVault');
   static String get selectKnownVaultHint => _t('selectKnownVaultHint');
   static String get openVaultFile => _t('openVaultFile');
@@ -468,6 +470,9 @@ class AppStrings {
       'entryTitle': 'Your private vault',
       'entryDescription':
           'Your data stays local by default. Open a vault you already own or create a new encrypted vault.',
+      'webStorageNoticeTitle': 'Web vault storage',
+      'webStorageNoticeBody':
+          'On the web, vault data is kept in private browser storage. Exported vault files are not updated automatically; export a fresh copy after important changes.',
       'selectKnownVault': 'Select a vault',
       'selectKnownVaultHint':
           'Choose from vaults already known on this device.',
@@ -904,6 +909,9 @@ class AppStrings {
       'entryTitle': 'Tu bóveda privada',
       'entryDescription':
           'Tus datos permanecen locales de forma predeterminada. Abre una bóveda que ya tengas o crea una nueva bóveda cifrada.',
+      'webStorageNoticeTitle': 'Almacenamiento web de bóveda',
+      'webStorageNoticeBody':
+          'En la web, los datos de la bóveda se guardan en almacenamiento privado del navegador. Los archivos exportados no se actualizan automáticamente; exporta una copia nueva después de cambios importantes.',
       'selectKnownVault': 'Seleccionar una bóveda',
       'selectKnownVaultHint':
           'Elige entre las bóvedas conocidas en este dispositivo.',

@@ -81,7 +81,13 @@
       var input = document.createElement('input');
       input.type = 'file';
       input.accept = accept || '';
-      input.style.display = 'none';
+      input.style.position = 'fixed';
+      input.style.left = '-1000px';
+      input.style.top = '0';
+      input.style.width = '1px';
+      input.style.height = '1px';
+      input.style.opacity = '0';
+      input.style.pointerEvents = 'none';
 
       var done = false;
       function finish(value) {
