@@ -9,10 +9,12 @@ import 'dart:io';
 import 'dart:math';
 
 import '../../../application/services/default_vault_service.dart';
+import '../../../app/theme/entry_typography.dart';
 import '../../../application/services/vault_service.dart';
 import '../../vault/presentation/widgets/encrypted_secret_viewer.dart';
 import '../../vault/presentation/widgets/nija_pin_dialogs.dart';
 import '../../vault/presentation/widgets/vault_merge_screen.dart';
+import 'widgets/origami_guardian_icon.dart';
 import '../../../application/services/vault_merge_helper.dart';
 import '../../../core/config/app_features.dart';
 import '../../../core/config/guardian_profiles.dart';
@@ -5550,7 +5552,11 @@ class _SetupScreenState extends State<SetupScreen> {
                     ),
                     child: Text(
                       'Argon2id + XChaCha20-Poly1305\nProfile: ${widget.selectedGuardian.id}',
-                      style: theme.textTheme.bodyMedium?.copyWith(fontSize: 12),
+                      style: EntryTypography.technicalMonospace(
+                        fontSize: 11,
+                        color: colorScheme.onSurfaceVariant,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ],
@@ -5617,16 +5623,42 @@ class _SetupScreenState extends State<SetupScreen> {
             const SizedBox(height: 10),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: colorScheme.tertiaryContainer,
+                color: theme.brightness == Brightness.dark
+                    ? const Color(0xFF262117)
+                    : const Color(0xFFFAF6EE),
                 borderRadius: BorderRadius.circular(14),
-              ),
-              child: Text(
-                AppStrings.masterPasswordGuidance,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onTertiaryContainer,
+                border: Border.all(
+                  color: theme.brightness == Brightness.dark
+                      ? const Color(0xFF423722)
+                      : const Color(0xFFE8DCC0),
                 ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.shield_outlined,
+                    size: 18,
+                    color: theme.brightness == Brightness.dark
+                        ? const Color(0xFFD4B36A)
+                        : const Color(0xFF8A6D3B),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      AppStrings.masterPasswordGuidance,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.brightness == Brightness.dark
+                            ? const Color(0xFFD4B36A)
+                            : const Color(0xFF8A6D3B),
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 24),
@@ -5861,7 +5893,7 @@ class _GuardianCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Text(guardian.icon, style: const TextStyle(fontSize: 24)),
+            OrigamiGuardianIcon(guardianId: guardian.id, size: 28),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

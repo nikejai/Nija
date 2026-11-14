@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-11-15 02:02:00 IST
+
+- Completed Section 18 Phase 4: Visual Design & Brand Cohesion.
+  - Introduced warm surface depth: Shifted canvas to warm stone (`#F8F7F4` light / `#111214` dark) against elevated `#FFFFFF` (`#1A1C20` dark) cards configured with 1px border (`rgba(0, 0, 0, 0.06)` light / `rgba(255, 255, 255, 0.08)` dark) and subtle shadow elevation.
+  - Restyled Step 1 security callout: Replaced tertiaryContainer pink box with a warm champagne/gold card (`#FAF6EE` light / `#262117` dark, `#8A6D3B` / `#D4B36A` text, 1px gold border) paired with a shield icon matching the origami brand accent.
+  - Replaced Guardian emojis with origami vector art: Implemented `OrigamiGuardianIcon` using pure Flutter `CustomPainter` to render geometric origami line-art in charcoal and warm gold facets for Owl, Lion, and Falcon across setup cards and the unlock screen without external SVG dependencies.
+  - Assigned unique icons and colors per item template: Added distinct icons and colors for Card (`credit_card_outlined`), SSH Key (`terminal_outlined`), API Key (`key_outlined`), Wi-Fi Credential (`wifi_outlined`), Server/Database (`dns_outlined`), Passport (`flight_takeoff_outlined`), License (`badge_outlined`), and Crypto/Recovery (`currency_bitcoin_outlined`) across `VaultCommonWidgets` and `VaultEntryList`.
+  - Applied 8% tinted category icon badges: Lowered default list badge `iconAlpha` to `0.08` and added subtle 8% background tints of category accent colors to filter pills and category chips (`_AllItemsTypeChip` and `_TinyChip`).
+  - Refined landing page typographic scale: Scaled Nija hero wordmark to 30px with -0.02em tracking, styled निज at 15px muted charcoal, and positioned *Your private vault* at 22px subordinate.
+  - Applied monospace typography to technical metadata: Implemented `EntryTypography.technicalMonospace` using `GoogleFonts.jetBrainsMono` with tabular figures across truncated vault IDs, cryptographic algorithm specs, masked card digits (`•••• 4821`), and storage quota metrics.
+  - Verified 0 analyzer warnings (`flutter analyze`) and 100% test pass rate across all 182 tests (`flutter test`).
+
+
 ## 2026-11-15 01:37:00 IST
 
 - Completed Section 18 Phase 3: Forms, Copy & Settings Consistency.

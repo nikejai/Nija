@@ -157,10 +157,23 @@ class _AllItemsTypeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isAll = label == 'All';
+    final categoryColor = isAll ? colorScheme.primary : _colorForHomeType(label);
+    final bgTint = isAll
+        ? (selected
+            ? colorScheme.primaryContainer
+            : colorScheme.surfaceContainerHighest)
+        : (selected
+            ? categoryColor.withValues(alpha: 0.18)
+            : categoryColor.withValues(alpha: 0.08));
+    final textColor = isAll
+        ? (selected
+            ? colorScheme.onPrimaryContainer
+            : colorScheme.onSurfaceVariant)
+        : (selected ? categoryColor : colorScheme.onSurface);
+
     return Material(
-      color: selected
-          ? colorScheme.primaryContainer
-          : colorScheme.surfaceContainerHighest,
+      color: bgTint,
       borderRadius: BorderRadius.circular(999),
       child: InkWell(
         onTap: onTap,
@@ -170,9 +183,7 @@ class _AllItemsTypeChip extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              color: selected
-                  ? colorScheme.onPrimaryContainer
-                  : colorScheme.onSurfaceVariant,
+              color: textColor,
               fontSize: 13,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             ),
@@ -190,18 +201,23 @@ class _TinyChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final categoryColor = _colorForHomeType(label);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: categoryColor.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: categoryColor.withValues(alpha: 0.20),
+          width: 0.8,
+        ),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
           fontSize: 11,
-          color: colorScheme.onSurfaceVariant,
+          color: categoryColor,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -233,10 +249,30 @@ IconData _iconForHomeType(String type) {
   if (normalized.contains('password') || normalized.contains('login')) {
     return Icons.lock_outline;
   }
-  if (normalized.contains('ident')) return Icons.badge_outlined;
-  if (normalized.contains('finan') || normalized.contains('bank')) {
+  if (normalized.contains('card')) return Icons.credit_card_outlined;
+  if (normalized.contains('ssh')) return Icons.terminal_outlined;
+  if (normalized.contains('api')) return Icons.key_outlined;
+  if (normalized.contains('wi-fi') || normalized.contains('wifi')) {
+    return Icons.wifi_outlined;
+  }
+  if (normalized.contains('server') || normalized.contains('database')) {
+    return Icons.dns_outlined;
+  }
+  if (normalized.contains('passport')) return Icons.flight_takeoff_outlined;
+  if (normalized.contains('license key')) return Icons.verified_outlined;
+  if (normalized.contains('license') || normalized.contains('driver')) {
+    return Icons.badge_outlined;
+  }
+  if (normalized.contains('crypto') ||
+      normalized.contains('recovery') ||
+      normalized.contains('seed')) {
+    return Icons.currency_bitcoin_outlined;
+  }
+  if (normalized.contains('bank')) return Icons.account_balance_outlined;
+  if (normalized.contains('finan')) {
     return Icons.account_balance_wallet_outlined;
   }
+  if (normalized.contains('ident')) return Icons.perm_identity_outlined;
   if (normalized.contains('document')) return Icons.folder_outlined;
   if (normalized.contains('health')) return Icons.favorite_outline;
   return Icons.shield_outlined;
@@ -248,10 +284,25 @@ Color _colorForHomeType(String type) {
   if (normalized.contains('password') || normalized.contains('login')) {
     return const Color(0xFF60A5FA);
   }
-  if (normalized.contains('ident')) return const Color(0xFF34D399);
-  if (normalized.contains('finan') || normalized.contains('bank')) {
-    return const Color(0xFFFBBF24);
+  if (normalized.contains('card')) return const Color(0xFF38BDF8);
+  if (normalized.contains('ssh')) return const Color(0xFF34D399);
+  if (normalized.contains('api')) return const Color(0xFFF59E0B);
+  if (normalized.contains('wi-fi') || normalized.contains('wifi')) {
+    return const Color(0xFF06B6D4);
   }
+  if (normalized.contains('server') || normalized.contains('database')) {
+    return const Color(0xFF8B5CF6);
+  }
+  if (normalized.contains('passport')) return const Color(0xFF14B8A6);
+  if (normalized.contains('license key')) return const Color(0xFF10B981);
+  if (normalized.contains('crypto') ||
+      normalized.contains('recovery') ||
+      normalized.contains('seed')) {
+    return const Color(0xFFF97316);
+  }
+  if (normalized.contains('bank')) return const Color(0xFFEAB308);
+  if (normalized.contains('finan')) return const Color(0xFFFBBF24);
+  if (normalized.contains('ident')) return const Color(0xFF34D399);
   if (normalized.contains('document')) return const Color(0xFFFB923C);
   if (normalized.contains('health')) return const Color(0xFFF472B6);
   return const Color(0xFF93C5FD);

@@ -117,23 +117,48 @@ class _VaultHomeView extends StatelessWidget {
                             : vaultPageHeadingStyle(context),
                       ),
                       const SizedBox(height: 5),
-                      Text(
-                        isWide
-                            ? "Here's what's happening with your vault."
-                            : (_truncatedId(activeVaultName).isNotEmpty
-                                ? '${_displayVaultName(activeVaultName)} (${_truncatedId(activeVaultName)})'
-                                : _displayVaultName(activeVaultName)),
-                        maxLines: isWide ? 2 : 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: isWide
-                            ? DashboardTypography.greetingSubtitle(
-                                colorScheme.onSurfaceVariant,
-                              )
-                            : TextStyle(
-                                color: colorScheme.onSurfaceVariant,
-                                fontSize: 12,
+                      if (isWide)
+                        Text(
+                          "Here's what's happening with your vault.",
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: DashboardTypography.greetingSubtitle(
+                            colorScheme.onSurfaceVariant,
+                          ),
+                        )
+                      else if (_truncatedId(activeVaultName).isNotEmpty)
+                        Text.rich(
+                          TextSpan(
+                            text: '${_displayVaultName(activeVaultName)} (',
+                            style: TextStyle(
+                              color: colorScheme.onSurfaceVariant,
+                              fontSize: 12,
+                            ),
+                            children: [
+                              TextSpan(
+                                text: _truncatedId(activeVaultName),
+                                style: EntryTypography.technicalMonospace(
+                                  fontSize: 11,
+                                  color: colorScheme.onSurfaceVariant,
+                                  letterSpacing: 0.5,
+                                ),
                               ),
-                      ),
+                              const TextSpan(text: ')'),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      else
+                        Text(
+                          _displayVaultName(activeVaultName),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
+                        ),
                     ],
                   ),
                 ),

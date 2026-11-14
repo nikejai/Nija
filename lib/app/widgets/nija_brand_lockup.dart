@@ -34,7 +34,7 @@ class NijaBrandLockup extends StatelessWidget {
     final resolvedNameStyle =
         (nameStyle ??
         (emphasizePrimaryName
-            ? EntryTypography.heroTitle
+            ? EntryTypography.heroWordmark
             : EntryTypography.brandName))(colorScheme.onSurface);
     final resolvedNativeStyle =
         (nativeNameStyle ?? EntryTypography.brandNativeName)(

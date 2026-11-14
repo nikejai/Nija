@@ -5,6 +5,7 @@ import '../../../app/theme/entry_typography.dart';
 import '../../../core/config/guardian_profiles.dart';
 import '../../../core/localization/app_strings.dart';
 import 'onboarding_scaffold.dart';
+import 'widgets/origami_guardian_icon.dart';
 
 class UnlockScreen extends StatefulWidget {
   const UnlockScreen({
@@ -211,9 +212,9 @@ class _UnlockScreenState extends State<UnlockScreen> {
                               borderRadius: BorderRadius.circular(18),
                             ),
                             alignment: Alignment.center,
-                            child: Text(
-                              widget.guardianProfile.icon,
-                              style: const TextStyle(fontSize: 26),
+                            child: OrigamiGuardianIcon(
+                              guardianId: widget.guardianProfile.id,
+                              size: 34,
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -229,8 +230,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
                             Text(
                               _truncatedId(),
                               textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontFamily: 'monospace',
+                              style: EntryTypography.technicalMonospace(
                                 fontSize: 12,
                                 color: colorScheme.onSurfaceVariant,
                                 letterSpacing: 0.5,

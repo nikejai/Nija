@@ -32,12 +32,15 @@ class AppTheme {
         colorScheme: colorScheme,
         scaffoldBackgroundColor: AppColors.background,
         cardTheme: CardThemeData(
-          color: Colors.white,
-          elevation: 0,
+          color: AppColors.surface,
+          elevation: 1,
           surfaceTintColor: Colors.transparent,
           margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0x0F000000), width: 1),
+          ),
+          shadowColor: const Color(0x0A000000),
         ),
         appBarTheme: const AppBarThemeData(
           backgroundColor: Colors.white,
@@ -330,8 +333,8 @@ class AppTheme {
   }
 
   static ThemeData dark() {
-    const background = Color(0xFF09090B);
-    const surface = Color(0xFF18181B);
+    const background = AppColors.darkBackground;
+    const surface = AppColors.darkSurface;
     const textPrimary = Color(0xFFFAFAFA);
     const textSecondary = Color(0xFFA1A1AA);
     const border = Color(0xFF27272A);
@@ -364,11 +367,14 @@ class AppTheme {
         scaffoldBackgroundColor: background,
         cardTheme: CardThemeData(
           color: surface,
-          elevation: 0,
+          elevation: 1,
           surfaceTintColor: Colors.transparent,
           margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0x14FFFFFF), width: 1),
+          ),
+          shadowColor: const Color(0x1A000000),
         ),
         appBarTheme: const AppBarThemeData(
           backgroundColor: surface,

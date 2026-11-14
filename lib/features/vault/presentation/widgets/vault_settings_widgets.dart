@@ -456,11 +456,21 @@ class _SettingsRow extends StatelessWidget {
                       value!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: theme.colorScheme.primary,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: value!.contains(RegExp(r'\d')) &&
+                              (value!.contains('B') ||
+                                  value!.contains('s') ||
+                                  value!.contains('%') ||
+                                  value!.contains('.'))
+                          ? EntryTypography.technicalMonospace(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: theme.colorScheme.primary,
+                            )
+                          : TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
                     ),
                   ),
                 if (onTap != null)
