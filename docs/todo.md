@@ -599,4 +599,40 @@ Work these items strictly one at a time. Each item should be fully implemented, 
   - [x] 17.5.3 Review Google Drive direct sync: Audited cloud sync dependencies (`googleapis`, `google_sign_in`, `http`). Verified that cloud sync remains 100% optional, client-side encrypted (AES-256-GCM), and does not affect offline local-first vault operations. Recommended future Storage Access Framework (SAF) folder sync to allow provider-agnostic local sync.
   - [x] 17.5.4 Verified clean static analysis (`flutter analyze`), 100% test pass rate across 182 tests (`flutter test`), and successful debug APK build (`flutter build apk --debug`).
 
+## 18) UI/UX Polish, Critical Fixes & Visual Cohesion
+
+### Phase 1: Critical Bugs & Security
+- [ ] **Persist custom vault name**: Display the user-entered vault name (Nija Vault or fallback "Personal Vault") instead of the raw UUID across the Unlock screen, Home header, and "Known vaults" list; move a truncated ID (`6bd4...f219`) to secondary monospace metadata.
+- [ ] **Deduplicate "Known vaults" entries**: Fix state registration during vault creation so a newly created vault appears only once in the Known vaults list.
+- [ ] **Fix overlapping text in Unlock progress modal**: Prevent `Decrypting vault...` and `Starting vault unlock...` from rendering simultaneously on top of each other, and remove the stray `)` character in the top-left corner of the modal.
+- [ ] **Mask Recovery Phrase preview on feeds**: Hide plaintext seed words in card previews (`••••••••••••`) on Home, All Items, and Favorites for any recovery/security item, requiring a tap and explicit "Reveal" action to view the phrase.
+
+### Phase 2: Mobile Layout & Navigation
+- [ ] **Remove duplicate + creation button**: Delete the top-right `+` icon in the header and integrate the bottom floating `+` cleanly into the bottom navigation bar so it doesn't overlap scrolling item cards.
+- [ ] **Compact the Home category summary cards**: Convert the 5-card 2-column grid (which leaves Card orphaned on row 3) into a horizontal scroll strip or single-row compact cards so Recent items appear above the fold.
+- [ ] **Remove duplicate branding on landing screen**: Hide the top-left Nija निज logo lockup on the root landing screen (keep only the theme toggle in the top right) so it doesn't repeat right above the hero logo.
+- [ ] **Refine the Demo Mode banner**: Shorten the button label from `Exit explore demo` to `Exit demo` so it stays on one line, and make the banner `position: sticky` below the top header on scroll.
+- [ ] **Fix rich-text toolbar overflow (New Note)**: Reduce horizontal button padding or wrap the formatting toolbar (Undo, Redo, Font size, B, I, U) in an `overflow-x: auto` container so `U` doesn't clip off the right edge on narrow viewports.
+
+### Phase 3: Forms, Copy & Settings Consistency
+- [ ] **Add password visibility toggles on vault creation**: Add show/hide eye icons to both Master password and Confirm password inputs in Step 1 (Choose Guardian).
+- [ ] **Clarify New Item templates**: Merge Password into Login (or differentiate their schemas) and replace the repeated *Secure item details* subtitles on Card, SSH Key, API Key, Wi-Fi Credential, and Server/Database Credential with distinct descriptions.
+- [ ] **Unify storage quota figures and labels**: Reconcile the conflicting limits shown across Settings (1.00 GB vs. 151 MB) and Document Upload (1024 MB), and clarify that any cap applies to optional cloud/backup storage rather than local vault capacity.
+
+### Phase 4: Visual Design & Brand Cohesion
+- [ ] **Introduce warm surface depth**: Shift the page canvas to warm stone (`#F8F7F4` light / `#111214` dark) against elevated `#FFFFFF` (`#1A1C20` dark) cards with 1px solid `rgba(0, 0, 0, 0.06)` borders and subtle shadows (`0 1px 3px rgba(0,0,0,0.04)`).
+- [ ] **Restyle the Step 1 security callout**: Replace the pastel pink info box (which reads like an error state) with a warm champagne/gold tint (`#FAF6EE` background, `#8A6D3B` text, shield icon) to match the origami N accent.
+- [ ] **Replace Guardian emojis with origami SVGs**: Swap native OS emojis (🦉, 🦁, 🦅) for three custom geometric/origami line-art SVGs in charcoal and warm gold for Owl, Lion, and Falcon.
+- [ ] **Assign unique icons per item template**: Replace the duplicated blue shield icons in New Item with distinct icons for Card, SSH Key, API Key, Wi-Fi Credential, and Server/Database Credential.
+- [ ] **Apply 8% tinted category icon badges**: Carry subtle 8% opacity background tints of each category's accent color into list row badges and filter pills.
+- [ ] **Refine landing page typographic scale**: Increase the Nija wordmark to 28px–32px (-0.02em tracking), style निज at 15px muted charcoal, and keep *Your private vault* slightly subordinate (22px).
+- [ ] **Use monospace for technical metadata**: Apply JetBrains Mono / IBM Plex Mono with tabular-nums to cryptographic specs, masked card digits (`•••• 4821`), truncated vault IDs, and storage metrics.
+
+### Phase 5: Screen Polish & Micro-Interactions
+- [ ] **Wrap item/note detail views in a structured card**: Present note and item details inside a 16px-padded card with a header bar showing the category badge, colored tag pills, Last modified timestamp, and a persistent Copy button.
+- [ ] **Refine the top-right Lock action**: Restyle the oversized rounded rectangle Lock button into a crisp 40×40px circular button or compact 🔒 Lock pill.
+- [ ] **Add one-tap quick copy on vault rows**: Place a direct Copy button beside the ⋮ menu on Login and Card rows that morphs into a checkmark for 2 seconds and shows a floating toast (*Copied · Clears in 30s*).
+- [ ] **Upgrade Guardian selection feedback**: Add a 150ms border/background transition and visual Speed vs. Hardening indicator bars when toggling between Owl, Lion, and Falcon.
+
+
 
