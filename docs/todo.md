@@ -635,4 +635,34 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [ ] **Upgrade Guardian selection feedback**: Add a 150ms border/background transition and visual Speed vs. Hardening indicator bars when toggling between Owl, Lion, and Falcon.
 
 
+## Section 19: Folders & Metadata Hub (Explorer)
+
+### Phase 1: Domain Model & Metadata Engine
+- [ ] **Define `VaultFolder` domain model**: Create `VaultFolder` entity (`id`, `name`, `parentId`, `color`, `icon`, `createdAt`, `updatedAt`, `tags`, `metadata`) and extend vault item/document payloads with `folderId` reference.
+- [ ] **Implement folder tree structure & path resolver**: Build tree builder utility to resolve absolute breadcrumb paths (e.g. `/Documents/Work/Invoices`), parent-child relationships, subfolder counts, and circular hierarchy prevention.
+- [ ] **Add folder CRUD methods to `VaultService`**: Support creating folders, renaming folders, moving folders/subfolders, and deleting folders (with cascading or orphan-reparenting options) without altering underlying encrypted container format.
+- [ ] **Metadata Hub storage integration**: Store folder topology as lightweight encrypted vault metadata entries alongside existing items so no separate or monolithic folder file is created, ensuring full compatibility with local persistence, cloud sync, and vault export.
+
+### Phase 2: Navigation & Explorer Shell
+- [ ] **Integrate Folders into Bottom Navigation**: Add `Folders` navigation destination (`Icons.folder_outlined` / `Icons.folder`) between `All Items` and `Favorites` on mobile bottom navigation bar and wide desktop/web navigation rail.
+- [ ] **Build Windows Explorer-style Header & Breadcrumb Bar**: Render interactive breadcrumb path navigation (`Home > Work > Q4 Reports`) with back/forward history navigation buttons, path segment dropdowns, and current folder statistics (item count, total size).
+- [ ] **Unified Action Bar**: Provide top actions for `New Folder`, `Upload File`, `View Mode Switcher` (List / Grid / Tree), `Sort Menu`, and `Multi-Select`.
+
+### Phase 3: Multiple Explorer Views (List, Grid, Tree)
+- [ ] **List View**: Dense Windows Explorer detail table displaying columns for Name, Date Modified, Type/Format, and Size, with interactive column header sorting.
+- [ ] **Grid View**: Responsive multi-column card grid featuring distinct folder icons, document preview thumbnails, item count badges, and quick-action triggers.
+- [ ] **Tree View**: Collapsible hierarchical tree navigator (as a split left pane on wide screens or toggleable drawer on mobile) displaying nested folders with expand/collapse carets.
+- [ ] **Sorting & Filtering**: Comprehensive sorting by Name (A–Z / Z–A), Date Modified (newest/oldest), Size (largest/smallest), and Type, plus quick search within current folder vs. recursive search.
+
+### Phase 4: File Management, Metadata & Operations
+- [ ] **Direct File Upload into Active Folder**: Enable uploading files directly into the active folder; automatically extract file metadata (original filename, byte size, MIME type, extension, creation/modification timestamps).
+- [ ] **File & Folder Operations (Copy, Move, Delete)**: Implement context menu and toolbar actions:
+  - **Copy**: Duplicate file or metadata reference to selected target folder.
+  - **Move**: Reassign folder parent with an interactive destination folder picker modal.
+  - **Delete**: Soft-delete or permanent removal with confirmation dialog and bulk multi-select support.
+  - **Rename**: Quick inline or modal renaming with duplicate-name validation.
+- [ ] **Rich Metadata Inspector Drawer/Sheet**: Provide an item/file metadata panel showing cryptographic integrity hash, encryption algorithm, size breakdown, parent folder path, tags, and custom metadata key-value pairs.
+
+
+
 
