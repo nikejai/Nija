@@ -620,13 +620,13 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [x] **Unify storage quota figures and labels**: Reconciled limits across Settings and Document Upload using unified `VaultLimits.formatBytes` (displaying `1.00 GB` consistently instead of `1024 MB` or stale `151 MB`), raised document attachment ceiling to 25 MB, and clarified that local device storage is unlimited while the 1.00 GB allocation applies to optional cloud sync.
 
 ### Phase 4: Visual Design & Brand Cohesion
-- [ ] **Introduce warm surface depth**: Shift the page canvas to warm stone (`#F8F7F4` light / `#111214` dark) against elevated `#FFFFFF` (`#1A1C20` dark) cards with 1px solid `rgba(0, 0, 0, 0.06)` borders and subtle shadows (`0 1px 3px rgba(0,0,0,0.04)`).
-- [ ] **Restyle the Step 1 security callout**: Replace the pastel pink info box (which reads like an error state) with a warm champagne/gold tint (`#FAF6EE` background, `#8A6D3B` text, shield icon) to match the origami N accent.
-- [ ] **Replace Guardian emojis with origami SVGs**: Swap native OS emojis (🦉, 🦁, 🦅) for three custom geometric/origami line-art SVGs in charcoal and warm gold for Owl, Lion, and Falcon.
-- [ ] **Assign unique icons per item template**: Replace the duplicated blue shield icons in New Item with distinct icons for Card, SSH Key, API Key, Wi-Fi Credential, and Server/Database Credential.
-- [ ] **Apply 8% tinted category icon badges**: Carry subtle 8% opacity background tints of each category's accent color into list row badges and filter pills.
-- [ ] **Refine landing page typographic scale**: Increase the Nija wordmark to 28px–32px (-0.02em tracking), style निज at 15px muted charcoal, and keep *Your private vault* slightly subordinate (22px).
-- [ ] **Use monospace for technical metadata**: Apply JetBrains Mono / IBM Plex Mono with tabular-nums to cryptographic specs, masked card digits (`•••• 4821`), truncated vault IDs, and storage metrics.
+- [x] **Introduce warm surface depth**: Shift the page canvas to warm stone (`#F8F7F4` light / `#111214` dark) against elevated `#FFFFFF` (`#1A1C20` dark) cards with 1px solid `rgba(0, 0, 0, 0.06)` borders and subtle shadows (`0 1px 3px rgba(0,0,0,0.04)`).
+- [x] **Restyle the Step 1 security callout**: Replace the pastel pink info box (which reads like an error state) with a warm champagne/gold tint (`#FAF6EE` background, `#8A6D3B` text, shield icon) to match the origami N accent.
+- [x] **Replace Guardian emojis with origami SVGs**: Swap native OS emojis (🦉, 🦁, 🦅) for three custom geometric/origami line-art SVGs in charcoal and warm gold for Owl, Lion, and Falcon.
+- [x] **Assign unique icons per item template**: Replace the duplicated blue shield icons in New Item with distinct icons for Card, SSH Key, API Key, Wi-Fi Credential, and Server/Database Credential.
+- [x] **Apply 8% tinted category icon badges**: Carry subtle 8% opacity background tints of each category's accent color into list row badges and filter pills.
+- [x] **Refine landing page typographic scale**: Increase the Nija wordmark to 28px–32px (-0.02em tracking), style निज at 15px muted charcoal, and keep *Your private vault* slightly subordinate (22px).
+- [x] **Use monospace for technical metadata**: Apply JetBrains Mono / IBM Plex Mono with tabular-nums to cryptographic specs, masked card digits (`•••• 4821`), truncated vault IDs, and storage metrics.
 
 ### Phase 5: Screen Polish & Micro-Interactions
 - [ ] **Wrap item/note detail views in a structured card**: Present note and item details inside a 16px-padded card with a header bar showing the category badge, colored tag pills, Last modified timestamp, and a persistent Copy button.

@@ -320,8 +320,7 @@ class _KnownVaultCard extends StatelessWidget {
                         if (_truncatedId(entry).isNotEmpty) ...[
                           Text(
                             _truncatedId(entry),
-                            style: TextStyle(
-                              fontFamily: 'monospace',
+                            style: EntryTypography.technicalMonospace(
                               fontSize: 11,
                               color: colorScheme.onSurfaceVariant,
                               letterSpacing: 0.5,

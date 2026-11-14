@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../app/theme/dashboard_typography.dart';
+import '../../../app/theme/entry_typography.dart';
 import '../../../app/widgets/nija_brand_lockup.dart';
 import '../../../core/config/app_features.dart';
 import '../../../core/config/vault_limits.dart';

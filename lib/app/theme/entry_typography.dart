@@ -21,11 +21,19 @@ class EntryTypography {
 
   static TextStyle brandNativeName(Color color) =>
       GoogleFonts.notoSansDevanagari(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        height: 1.05,
+        fontSize: 15,
+        fontWeight: FontWeight.w500,
+        height: 1.1,
         color: color,
       );
+
+  static TextStyle heroWordmark(Color color) => GoogleFonts.inter(
+    fontSize: 30,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.6, // -0.02em tracking
+    height: 1.05,
+    color: color,
+  );
 
   static TextStyle brandTagline(Color color) => GoogleFonts.inter(
     fontSize: 11,
@@ -35,11 +43,26 @@ class EntryTypography {
   );
 
   static TextStyle heroTitle(Color color) => GoogleFonts.inter(
-    fontSize: 34,
-    fontWeight: FontWeight.w800,
-    letterSpacing: -1.53,
-    height: 1.05,
+    fontSize: 22,
+    fontWeight: FontWeight.w600,
+    letterSpacing: -0.4,
+    height: 1.2,
     color: color,
+  );
+
+  static TextStyle technicalMonospace({
+    double fontSize = 12,
+    FontWeight fontWeight = FontWeight.w400,
+    Color? color,
+    double? letterSpacing = 0.4,
+    double? height,
+  }) => GoogleFonts.jetBrainsMono(
+    fontSize: fontSize,
+    fontWeight: fontWeight,
+    color: color,
+    letterSpacing: letterSpacing,
+    height: height,
+    fontFeatures: const [FontFeature.tabularFigures()],
   );
 
   static TextStyle heroDescription(Color color) => GoogleFonts.inter(
