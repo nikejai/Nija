@@ -365,7 +365,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
     final type = item['type']?.toString().trim().toLowerCase() ?? '';
     if (type != 'identity') return const <Map<String, dynamic>>[];
     return (item['idPhotos'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map>()
+        .whereType<Map<dynamic, dynamic>>()
         .map((entry) => Map<String, dynamic>.from(entry))
         .where(
           (entry) => (entry['bytesBase64']?.toString() ?? '').trim().isNotEmpty,
@@ -1371,7 +1371,7 @@ class _VaultDetailBusyOverlay extends StatelessWidget {
 
 List<Map<String, dynamic>> _itemAttachments(Map<String, dynamic> item) {
   return (item['attachments'] as List<dynamic>? ?? const <dynamic>[])
-      .whereType<Map>()
+      .whereType<Map<dynamic, dynamic>>()
       .map((entry) => Map<String, dynamic>.from(entry))
       .where((entry) {
         final section = entry['documentSection']?.toString().trim() ?? '';

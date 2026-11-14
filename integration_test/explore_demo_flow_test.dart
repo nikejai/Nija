@@ -140,7 +140,7 @@ Future<void> _pumpAndCollect(
   } else {
     await tester.pump(duration);
   }
-  final exception = tester.takeException();
+  final Object? exception = tester.takeException();
   if (exception != null) {
     frameworkErrors.add(exception);
   }
@@ -159,7 +159,7 @@ Future<void> _simulateMouseMove(
   await gesture.moveTo(const Offset(980, 520));
   await _pumpAndCollect(tester, frameworkErrors);
   await tester.pumpAndSettle();
-  final exception = tester.takeException();
+  final Object? exception = tester.takeException();
   if (exception != null) {
     frameworkErrors.add(exception);
   }

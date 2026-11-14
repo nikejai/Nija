@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/config/vault_limits.dart';
 import '../../../core/localization/app_strings.dart';
+import 'widgets/password_generator_sheet.dart';
 import 'widgets/vault_page_heading.dart';
 
 class VaultFieldTemplate {
@@ -335,7 +336,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       ..clear()
       ..addAll(
         (item['idPhotos'] as List<dynamic>? ?? const <dynamic>[])
-            .whereType<Map>()
+            .whereType<Map<dynamic, dynamic>>()
             .map((entry) => Map<String, dynamic>.from(entry))
             .where((entry) {
               final bytes = entry['bytesBase64']?.toString() ?? '';
@@ -345,6 +346,15 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
     _attachments
       ..clear()
       ..addAll(_initialAttachments(item));
+  }
+
+  bool _isPasswordField(String label) {
+    final l = label.toLowerCase();
+    return l.contains('password') ||
+        l.contains('passphrase') ||
+        l.contains('secret') ||
+        l.contains('key') ||
+        l.contains('pin');
   }
 
   String _documentDescription(
@@ -364,7 +374,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
 
   List<Map<String, dynamic>> _initialAttachments(Map<String, dynamic> item) {
     return (item['attachments'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map>()
+        .whereType<Map<dynamic, dynamic>>()
         .map((entry) => Map<String, dynamic>.from(entry))
         .where((entry) {
           final fileName = entry['documentFileName']?.toString().trim() ?? '';
@@ -548,12 +558,47 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                     hintText: hint == field.label ? null : hint,
                                     suffixIcon: field.sensitive && !isLong
                                         ? SizedBox(
-                                            width: 56,
+                                            width: _isPasswordField(field.label)
+                                                ? 84
+                                                : 56,
                                             child: Row(
                                               mainAxisAlignment:
                                                   MainAxisAlignment.end,
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
+                                                if (_isPasswordField(
+                                                  field.label,
+                                                ))
+                                                  InkWell(
+                                                    key: ValueKey(
+                                                      'generate-${field.label}',
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          12,
+                                                        ),
+                                                    onTap: () {
+                                                      PasswordGeneratorSheet.show(
+                                                        context: context,
+                                                        fieldLabel: field.label,
+                                                        onSelected: (pwd) {
+                                                          controller.text = pwd;
+                                                          _revealedSensitiveFields
+                                                              .add(key);
+                                                          setState(() {});
+                                                        },
+                                                      );
+                                                    },
+                                                    child: const Padding(
+                                                      padding: EdgeInsets.all(
+                                                        4,
+                                                      ),
+                                                      child: Icon(
+                                                        Icons.auto_awesome,
+                                                        size: 17,
+                                                      ),
+                                                    ),
+                                                  ),
                                                 InkWell(
                                                   borderRadius:
                                                       BorderRadius.circular(12),
@@ -1163,9 +1208,7 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                           color: colorScheme.surface,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
-                            side: BorderSide(
-                              color: colorScheme.outlineVariant,
-                            ),
+                            side: BorderSide(color: colorScheme.outlineVariant),
                           ),
                           child: ListTile(
                             minVerticalPadding: 12,
@@ -1209,10 +1252,9 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                                 }
                                 await _showSavedSuccessSheet(context);
                                 if (!context.mounted) return;
-                                Navigator.of(context).pop({
-                                  'kind': 'note',
-                                  'entry': createdNote,
-                                });
+                                Navigator.of(
+                                  context,
+                                ).pop({'kind': 'note', 'entry': createdNote});
                                 return;
                               }
                               if (option.kind == 'document' &&
@@ -1254,10 +1296,9 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                               }
                               await _showSavedSuccessSheet(context);
                               if (!context.mounted) return;
-                              Navigator.of(context).pop({
-                                'kind': 'item',
-                                'entry': createdItem,
-                              });
+                              Navigator.of(
+                                context,
+                              ).pop({'kind': 'item', 'entry': createdItem});
                             },
                           ),
                         );

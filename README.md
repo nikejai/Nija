@@ -91,6 +91,16 @@ The app follows a layered approach:
     - add/edit tags in item form (`Tags (comma separated)`)
     - tag chips shown in key list rows
     - search also matches key tags
+  - offline password and passphrase generator:
+    - built directly into password and secret field editors
+    - random character generation (custom length 8–48, A-Z, a-z, 0-9, symbols)
+    - memorable dictionary passphrase generation with customizable word counts and separators
+    - live cryptographic entropy evaluation and strength indicators
+  - desktop and web keyboard shortcuts:
+    - `Cmd/Ctrl + F`: Jump to All Items and focus search
+    - `Cmd/Ctrl + N`: Open Add Item category flow
+    - `Cmd/Ctrl + L`: Immediately lock active vault
+    - `Escape`: Clear search filter or exit selection mode
 - Localization:
   - English and Spanish
   - manual selector in `Settings -> Language` (`System default`, `English`, `Español`)

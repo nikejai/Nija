@@ -6907,7 +6907,7 @@ class _EncryptedImportEntryPreviewScreenState
         ? Map<String, dynamic>.from(rawEntry)
         : const <String, dynamic>{};
     final fields = (item['fields'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map>()
+        .whereType<Map<dynamic, dynamic>>()
         .map((field) => Map<String, dynamic>.from(field))
         .toList();
     if (fields.isEmpty) {
@@ -6974,7 +6974,7 @@ class _EncryptedImportEntryPreviewScreenState
       final delta = rawEntry['delta'];
       if (delta is List) {
         return delta
-            .whereType<Map>()
+            .whereType<Map<dynamic, dynamic>>()
             .map((op) => op['insert']?.toString() ?? '')
             .join()
             .trim();
@@ -8721,7 +8721,7 @@ class _MergeItemPreview extends StatelessWidget {
         ? item['title'].toString().trim()
         : 'Untitled';
     final fields = (item['fields'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map>()
+        .whereType<Map<dynamic, dynamic>>()
         .map((field) => Map<String, dynamic>.from(field))
         .toList();
 

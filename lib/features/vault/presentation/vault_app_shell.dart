@@ -38,6 +38,9 @@ part 'custom_template_manager_screen.dart';
 part 'document_detail_screen.dart';
 part 'item_detail_screen.dart';
 part 'widgets/vault_settings_widgets.dart';
+part 'widgets/vault_common_widgets.dart';
+part 'widgets/vault_debug_view.dart';
+part 'widgets/vault_home_view.dart';
 
 String _vaultDashboardTypeCode(String type) {
   return switch (type) {
@@ -245,6 +248,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   static const int _debugInternalsFeedbackStartTapCount = 3;
   final _clipboard = SecureClipboard();
   final _allItemsSearchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
   final _encryptedShareCodec = EncryptedShareCodec();
   late final SecretSharePortabilityAdapter _secretSharePortability;
   int _tabIndex = 0;
@@ -467,6 +471,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   void dispose() {
     _persistDebounceTimer?.cancel();
     _allItemsSearchController.dispose();
+    _searchFocusNode.dispose();
     _clipboard.dispose();
     super.dispose();
   }
@@ -501,6 +506,43 @@ class _VaultAppShellState extends State<VaultAppShell> {
     };
   }
 
+  void _handleSearchShortcut() {
+    setState(() {
+      _allItemsTypeFilter = 'all';
+      _tabIndex = 1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _searchFocusNode.requestFocus();
+      }
+    });
+  }
+
+  void _handleNewItemShortcut() {
+    _openAddItemScreen(context);
+  }
+
+  void _handleLockShortcut() {
+    widget.onLockNow();
+  }
+
+  void _handleEscapeShortcut() {
+    if (_allItemsSelectionMode) {
+      setState(() {
+        _allItemsSelectionMode = false;
+        _selectedAllItemsKeys.clear();
+      });
+      return;
+    }
+    if (_allItemsSearchController.text.isNotEmpty) {
+      setState(() {
+        _allItemsSearchController.clear();
+        _allItemsQuery = '';
+      });
+      return;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -529,153 +571,175 @@ class _VaultAppShellState extends State<VaultAppShell> {
       }
     }
 
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        unawaited(_handleBackNavigation());
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _handleSearchShortcut,
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+            _handleSearchShortcut,
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true):
+            _handleNewItemShortcut,
+        const SingleActivator(LogicalKeyboardKey.keyN, meta: true):
+            _handleNewItemShortcut,
+        const SingleActivator(LogicalKeyboardKey.keyL, control: true):
+            _handleLockShortcut,
+        const SingleActivator(LogicalKeyboardKey.keyL, meta: true):
+            _handleLockShortcut,
+        const SingleActivator(LogicalKeyboardKey.escape): _handleEscapeShortcut,
       },
-      child: Scaffold(
-        body: Row(
-          children: [
-            if (useSideNavigation)
-              _VaultSideNavigation(
-                selectedIndex: selectedTabIndex,
-                debugTabVisible: debugTabVisible,
-                activeVaultName: _activeVaultName,
-                itemCount: _items.length + _notes.length,
-                vaultMetaLabel: widget.isExploreDemoSession
-                    ? 'Demo · sample data'
-                    : '${_items.length + _notes.length} items · local',
-                onLockNow: widget.onLockNow,
-                onSwitchVault: widget.onSwitchVault,
-                onThemeToggle: widget.onThemeModeChanged == null
-                    ? null
-                    : _toggleThemeMode,
-                themeMode: widget.themeMode,
-                onDestinationSelected: selectDestination,
-              ),
-            Expanded(
-              child: useSideNavigation
-                  ? Column(
-                      children: [
-                        _VaultDesktopHeader(
-                          title: _desktopTabTitle(selectedTabIndex),
-                          themeMode: widget.themeMode,
-                          onThemeModeChanged: widget.onThemeModeChanged == null
-                              ? null
-                              : _toggleThemeMode,
-                        ),
-                        Expanded(
-                          child: Stack(
-                            children: [
-                              KeyedSubtree(
-                                key: ValueKey<int>(_tabIndex),
-                                child: _VaultWideContentFrame(
-                                  child: _buildActiveTab(context),
-                                ),
+      child: Focus(
+        autofocus: true,
+        child: PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, result) {
+            if (didPop) return;
+            unawaited(_handleBackNavigation());
+          },
+          child: Scaffold(
+            body: Row(
+              children: [
+                if (useSideNavigation)
+                  _VaultSideNavigation(
+                    selectedIndex: selectedTabIndex,
+                    debugTabVisible: debugTabVisible,
+                    activeVaultName: _activeVaultName,
+                    itemCount: _items.length + _notes.length,
+                    vaultMetaLabel: widget.isExploreDemoSession
+                        ? 'Demo · sample data'
+                        : '${_items.length + _notes.length} items · local',
+                    onLockNow: widget.onLockNow,
+                    onSwitchVault: widget.onSwitchVault,
+                    onThemeToggle: widget.onThemeModeChanged == null
+                        ? null
+                        : _toggleThemeMode,
+                    themeMode: widget.themeMode,
+                    onDestinationSelected: selectDestination,
+                  ),
+                Expanded(
+                  child: useSideNavigation
+                      ? Column(
+                          children: [
+                            _VaultDesktopHeader(
+                              title: _desktopTabTitle(selectedTabIndex),
+                              themeMode: widget.themeMode,
+                              onThemeModeChanged:
+                                  widget.onThemeModeChanged == null
+                                  ? null
+                                  : _toggleThemeMode,
+                            ),
+                            Expanded(
+                              child: Stack(
+                                children: [
+                                  KeyedSubtree(
+                                    key: ValueKey<int>(_tabIndex),
+                                    child: _VaultWideContentFrame(
+                                      child: _buildActiveTab(context),
+                                    ),
+                                  ),
+                                  if (_isBusyOverlayVisible)
+                                    _buildBusyOverlay(context),
+                                ],
                               ),
-                              if (_isBusyOverlayVisible)
-                                _buildBusyOverlay(context),
-                            ],
-                          ),
+                            ),
+                          ],
+                        )
+                      : Stack(
+                          children: [
+                            SafeArea(
+                              child: KeyedSubtree(
+                                key: ValueKey<int>(_tabIndex),
+                                child: _buildActiveTab(context),
+                              ),
+                            ),
+                            if (_isBusyOverlayVisible)
+                              _buildBusyOverlay(context),
+                          ],
                         ),
-                      ],
-                    )
-                  : Stack(
-                      children: [
-                        SafeArea(
-                          child: KeyedSubtree(
-                            key: ValueKey<int>(_tabIndex),
-                            child: _buildActiveTab(context),
-                          ),
-                        ),
-                        if (_isBusyOverlayVisible) _buildBusyOverlay(context),
-                      ],
-                    ),
+                ),
+              ],
             ),
-          ],
-        ),
-        bottomNavigationBar: useSideNavigation
-            ? null
-            : NavigationBarTheme(
-                data: NavigationBarThemeData(
-                  backgroundColor: colorScheme.surface,
-                  indicatorColor: colorScheme.primaryContainer,
-                  labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
-                    states,
-                  ) {
-                    if (states.contains(WidgetState.selected)) {
-                      return TextStyle(
-                        color: colorScheme.primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      );
-                    }
-                    return TextStyle(
-                      color: colorScheme.onSurfaceVariant,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    );
-                  }),
-                  iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((
-                    states,
-                  ) {
-                    if (states.contains(WidgetState.selected)) {
-                      return IconThemeData(
-                        color: colorScheme.primary,
-                        size: 24,
-                      );
-                    }
-                    return IconThemeData(
-                      color: colorScheme.onSurfaceVariant,
-                      size: 22,
-                    );
-                  }),
-                ),
-                child: NavigationBar(
-                  selectedIndex: selectedTabIndex,
-                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                  destinations: [
-                    NavigationDestination(
-                      icon: const Icon(Icons.shield_outlined),
-                      selectedIcon: const Icon(Icons.shield),
-                      label: AppStrings.tabVault,
-                    ),
-                    NavigationDestination(
-                      icon: const Icon(Icons.grid_view_outlined),
-                      selectedIcon: const Icon(Icons.grid_view),
-                      label: AppStrings.tabTypes,
-                    ),
-                    NavigationDestination(
-                      icon: const Icon(Icons.star_outline),
-                      selectedIcon: const Icon(Icons.star),
-                      label: AppStrings.tabNotes,
-                    ),
-                    NavigationDestination(
-                      icon: const Icon(Icons.settings_outlined),
-                      selectedIcon: const Icon(Icons.settings),
-                      label: AppStrings.tabSettings,
-                    ),
-                    if (debugTabVisible)
-                      const NavigationDestination(
-                        icon: Icon(Icons.bug_report_outlined),
-                        selectedIcon: Icon(Icons.bug_report),
-                        label: 'Debug',
+            bottomNavigationBar: useSideNavigation
+                ? null
+                : NavigationBarTheme(
+                    data: NavigationBarThemeData(
+                      backgroundColor: colorScheme.surface,
+                      indicatorColor: colorScheme.primaryContainer,
+                      labelTextStyle:
+                          WidgetStateProperty.resolveWith<TextStyle>((states) {
+                            if (states.contains(WidgetState.selected)) {
+                              return TextStyle(
+                                color: colorScheme.primary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              );
+                            }
+                            return TextStyle(
+                              color: colorScheme.onSurfaceVariant,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            );
+                          }),
+                      iconTheme: WidgetStateProperty.resolveWith<IconThemeData>(
+                        (states) {
+                          if (states.contains(WidgetState.selected)) {
+                            return IconThemeData(
+                              color: colorScheme.primary,
+                              size: 24,
+                            );
+                          }
+                          return IconThemeData(
+                            color: colorScheme.onSurfaceVariant,
+                            size: 22,
+                          );
+                        },
                       ),
-                  ],
-                  onDestinationSelected: selectDestination,
-                ),
-              ),
-        floatingActionButton: _tabIndex == 0 || _tabIndex == 1
-            ? FloatingActionButton.small(
-                onPressed: () => _openAddItemScreen(context),
-                child: const Icon(Icons.add),
-              )
-            : null,
-        floatingActionButtonLocation: useSideNavigation
-            ? FloatingActionButtonLocation.endFloat
-            : FloatingActionButtonLocation.centerDocked,
+                    ),
+                    child: NavigationBar(
+                      selectedIndex: selectedTabIndex,
+                      labelBehavior:
+                          NavigationDestinationLabelBehavior.alwaysShow,
+                      destinations: [
+                        NavigationDestination(
+                          icon: const Icon(Icons.shield_outlined),
+                          selectedIcon: const Icon(Icons.shield),
+                          label: AppStrings.tabVault,
+                        ),
+                        NavigationDestination(
+                          icon: const Icon(Icons.grid_view_outlined),
+                          selectedIcon: const Icon(Icons.grid_view),
+                          label: AppStrings.tabTypes,
+                        ),
+                        NavigationDestination(
+                          icon: const Icon(Icons.star_outline),
+                          selectedIcon: const Icon(Icons.star),
+                          label: AppStrings.tabNotes,
+                        ),
+                        NavigationDestination(
+                          icon: const Icon(Icons.settings_outlined),
+                          selectedIcon: const Icon(Icons.settings),
+                          label: AppStrings.tabSettings,
+                        ),
+                        if (debugTabVisible)
+                          const NavigationDestination(
+                            icon: Icon(Icons.bug_report_outlined),
+                            selectedIcon: Icon(Icons.bug_report),
+                            label: 'Debug',
+                          ),
+                      ],
+                      onDestinationSelected: selectDestination,
+                    ),
+                  ),
+            floatingActionButton: _tabIndex == 0 || _tabIndex == 1
+                ? FloatingActionButton.small(
+                    onPressed: () => _openAddItemScreen(context),
+                    child: const Icon(Icons.add),
+                  )
+                : null,
+            floatingActionButtonLocation: useSideNavigation
+                ? FloatingActionButtonLocation.endFloat
+                : FloatingActionButtonLocation.centerDocked,
+          ),
+        ),
       ),
     );
   }
@@ -877,219 +941,40 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Widget _buildVaultTab(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final dashboardData = _dashboardData();
-    final recentItems = dashboardData.recentItems;
-    final dashboardTypes = dashboardData.dashboardTypes;
-    final isWide = _isWideLayout(context);
-
-    return SafeArea(
-      top: !isWide,
-      bottom: !isWide,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          isWide ? 24 : 16,
-          isWide ? 22 : 10,
-          isWide ? 24 : 16,
-          isWide ? 22 : 8,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (isWide) ...[
-                        Text(
-                          'Dashboard',
-                          style: DashboardTypography.microLabel(
-                            colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                      ],
-                      Text(
-                        isWide ? _dashboardGreeting() : 'Nija',
-                        style: isWide
-                            ? DashboardTypography.greetingTitle(
-                                colorScheme.onSurface,
-                              )
-                            : vaultPageHeadingStyle(context),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        isWide
-                            ? "Here's what's happening with your vault."
-                            : _activeVaultName,
-                        maxLines: isWide ? 2 : 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: isWide
-                            ? DashboardTypography.greetingSubtitle(
-                                colorScheme.onSurfaceVariant,
-                              )
-                            : TextStyle(
-                                color: colorScheme.onSurfaceVariant,
-                                fontSize: 12,
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (isWide)
-                  FilledButton.icon(
-                    key: const ValueKey('dashboard-add-item'),
-                    onPressed: () => _openAddItemScreen(context),
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add Item'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 42),
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  )
-                else ...[
-                  IconButton(
-                    key: const ValueKey('dashboard-add-item'),
-                    onPressed: () => _openAddItemScreen(context),
-                    icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
-                    tooltip: 'Create',
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.outlined(
-                    onPressed: widget.onLockNow,
-                    icon: Icon(
-                      Icons.lock_outline,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    tooltip: 'Lock vault',
-                  ),
-                ],
-              ],
-            ),
-            if (!isWide)
-              Text(
-                'All your important information,\nin one secure place.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: isWide ? 720 : double.infinity,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        style: TextStyle(color: colorScheme.onSurface),
-                        decoration: InputDecoration(
-                          hintText: 'Search your data...',
-                          hintStyle: TextStyle(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                          prefixIcon: Icon(
-                            Icons.search,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                          filled: true,
-                          fillColor: colorScheme.surfaceContainerHighest,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 0,
-                          ),
-                        ),
-                        textInputAction: TextInputAction.search,
-                        onSubmitted: _applyDashboardSearchToAllItems,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: IconButton(
-                        key: const ValueKey('dashboard-filter-selector'),
-                        onPressed: () => _openAllItemsFiltersOverlay(
-                          _allTypeFilterOptions(),
-                          showAllItemsOnApply: true,
-                        ),
-                        icon: Icon(
-                          Icons.tune,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(height: isWide ? 18 : 12),
-            Expanded(
-              child: isWide
-                  ? _WideDashboardLayout(
-                      data: dashboardData,
-                      dashboardTypes: dashboardTypes,
-                      recentItems: recentItems,
-                      adapters: _vaultListEntryAdapters,
-                      keyForRow: _vaultListKeyForRow,
-                      iconForType: _iconForDashboardType,
-                      colorForType: _colorForDashboardType,
-                      onTypeTap: (type) => _selectDashboardType(type),
-                      onViewAll: () => setState(() {
-                        _allItemsTypeFilter = 'all';
-                        _tabIndex = 1;
-                      }),
-                      onAddItem: () => _openAddItemScreen(context),
-                      onImportData: () {
-                        if (_blockExploreDemoWrite(
-                          'Create or unlock a vault to import data.',
-                        )) {
-                          return;
-                        }
-                        widget.onImportVault();
-                      },
-                      onSwitchVault: widget.onSwitchVault ?? widget.onLockNow,
-                      onShowDemoPreview: _showHomeDemoPreviewOption,
-                      onHideDemoPreview: _hideHomeDemoPreview,
-                      onOpenRow: (row) => _openDashboardRow(context, row),
-                      onRowActions: (row) =>
-                          _showVaultListRowQuickActions(context, row),
-                    )
-                  : _MobileDashboardList(
-                      data: dashboardData,
-                      recentItems: recentItems,
-                      adapters: _vaultListEntryAdapters,
-                      keyForRow: _vaultListKeyForRow,
-                      iconForType: _iconForDashboardType,
-                      colorForType: _colorForDashboardType,
-                      onTypeTap: (type) => _selectDashboardType(type),
-                      onViewAll: () => setState(() {
-                        _allItemsTypeFilter = 'all';
-                        _tabIndex = 1;
-                      }),
-                      onShowDemoPreview: _showHomeDemoPreviewOption,
-                      onHideDemoPreview: _hideHomeDemoPreview,
-                      onOpenRow: (row) => _openDashboardRow(context, row),
-                      onRowActions: (row) =>
-                          _showVaultListRowQuickActions(context, row),
-                    ),
-            ),
-          ],
-        ),
+    return _VaultHomeView(
+      isWide: _isWideLayout(context),
+      dashboardData: _dashboardData(),
+      activeVaultName: _activeVaultName,
+      greeting: _dashboardGreeting(),
+      onAddItem: () => _openAddItemScreen(context),
+      onLockNow: widget.onLockNow,
+      onApplySearch: _applyDashboardSearchToAllItems,
+      onOpenFilters: () => _openAllItemsFiltersOverlay(
+        _allTypeFilterOptions(),
+        showAllItemsOnApply: true,
       ),
+      adapters: _vaultListEntryAdapters,
+      keyForRow: _vaultListKeyForRow,
+      iconForType: _iconForDashboardType,
+      colorForType: _colorForDashboardType,
+      onTypeTap: (type) => _selectDashboardType(type),
+      onViewAll: () => setState(() {
+        _allItemsTypeFilter = 'all';
+        _tabIndex = 1;
+      }),
+      onImportData: () {
+        if (_blockExploreDemoWrite(
+          'Create or unlock a vault to import data.',
+        )) {
+          return;
+        }
+        widget.onImportVault();
+      },
+      onSwitchVault: widget.onSwitchVault ?? widget.onLockNow,
+      onShowDemoPreview: _showHomeDemoPreviewOption,
+      onHideDemoPreview: _hideHomeDemoPreview,
+      onOpenRow: (row) => _openDashboardRow(context, row),
+      onRowActions: (row) => _showVaultListRowQuickActions(context, row),
     );
   }
 
@@ -1218,6 +1103,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 Expanded(
                   child: TextField(
                     controller: _allItemsSearchController,
+                    focusNode: _searchFocusNode,
                     style: TextStyle(color: colorScheme.onSurface),
                     decoration: InputDecoration(
                       hintText: 'Search all items...',
@@ -2483,126 +2369,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Widget _buildDebugInternalsTab(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final internalsFuture = _ensureDebugInternalsFuture();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: FutureBuilder<Map<String, dynamic>>(
-        future: internalsFuture,
-        builder: (context, snapshot) {
-          final data = snapshot.data;
-          return ListView(
-            children: [
-              _DebugHeader(
-                onRefresh: widget.onReadVaultInternals == null
-                    ? null
-                    : _refreshDebugInternals,
-              ),
-              const SizedBox(height: 14),
-              if (widget.onReadVaultInternals == null)
-                Card(
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.info_outline,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    title: const Text('Debug internals unavailable'),
-                    subtitle: Text(
-                      'No debug internals reader is registered.',
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                  ),
-                )
-              else if (snapshot.connectionState == ConnectionState.waiting)
-                const Center(child: CircularProgressIndicator())
-              else if (snapshot.hasError || data == null)
-                Card(
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.error_outline,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                    title: const Text('Unable to read internals'),
-                    subtitle: Text(
-                      snapshot.error?.toString() ?? 'No data',
-                      style: TextStyle(color: colorScheme.onSurfaceVariant),
-                    ),
-                  ),
-                )
-              else ...[
-                _DebugInfoCard(
-                  title: 'Snapshot',
-                  rows: _debugRows(data, const [
-                    'format',
-                    'formatVersion',
-                    'schemaVersion',
-                    'storageLayoutVersion',
-                    'manifestVersion',
-                    'snapshotBytes',
-                    'workingStoreBytes',
-                  ]),
-                ),
-                const SizedBox(height: 10),
-                _DebugInfoCard(
-                  title: 'Identity',
-                  rows: _debugRows(data, const [
-                    'vaultId',
-                    'vaultVersionId',
-                    'revision',
-                    'createdAt',
-                    'updatedAt',
-                    'lastModifiedByDeviceId',
-                  ]),
-                ),
-                const SizedBox(height: 10),
-                _DebugInfoCard(
-                  title: 'Crypto',
-                  rows: _debugMapRows(data['crypto']),
-                ),
-                const SizedBox(height: 10),
-                _DebugInfoCard(
-                  title: 'Encrypted sections',
-                  rows: _encryptedSectionRows(data['encryptedSections']),
-                  maxHeight: 220,
-                ),
-                const SizedBox(height: 10),
-                _DebugInfoCard(
-                  title: 'Working folder',
-                  rows: _workingFolderRows(data['workingStore']),
-                ),
-                const SizedBox(height: 10),
-                _DebugFileTreeCard(store: data['workingStore']),
-                const SizedBox(height: 10),
-                _DebugInfoCard(
-                  title: 'Working files',
-                  rows: _workingFileRows(data['workingStore']),
-                  maxHeight: 260,
-                ),
-                const SizedBox(height: 10),
-                _DebugInfoCard(
-                  title: 'Session',
-                  rows: [
-                    MapEntry<String, String>(
-                      'activeVaultName',
-                      _activeVaultName,
-                    ),
-                    MapEntry<String, String>(
-                      'exportVaultSizeBytes',
-                      widget.vaultSizeBytes.toString(),
-                    ),
-                    MapEntry<String, String>('items', _items.length.toString()),
-                    MapEntry<String, String>('notes', _notes.length.toString()),
-                    MapEntry<String, String>(
-                      'customTypes',
-                      _customTypeDefinitions.length.toString(),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          );
-        },
-      ),
+    return _VaultDebugView(
+      internalsFuture: _ensureDebugInternalsFuture(),
+      onRefresh: widget.onReadVaultInternals == null
+          ? null
+          : _refreshDebugInternals,
+      hasReader: widget.onReadVaultInternals != null,
+      activeVaultName: _activeVaultName,
+      vaultSizeBytes: widget.vaultSizeBytes,
+      itemCount: _items.length,
+      noteCount: _notes.length,
+      customTypeCount: _customTypeDefinitions.length,
     );
   }
 
@@ -2619,153 +2396,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     setState(() {
       _debugInternalsFuture = next;
     });
-  }
-
-  List<MapEntry<String, String>> _debugRows(
-    Map<String, dynamic> data,
-    List<String> keys,
-  ) {
-    return keys
-        .where((key) => data.containsKey(key))
-        .map((key) => MapEntry<String, String>(key, data[key].toString()))
-        .toList();
-  }
-
-  List<MapEntry<String, String>> _debugMapRows(dynamic value) {
-    if (value is! Map) return const <MapEntry<String, String>>[];
-    return _dedupeDebugRows(
-      value.entries
-          .map(
-            (entry) => MapEntry<String, String>(
-              entry.key.toString(),
-              entry.value.toString(),
-            ),
-          )
-          .toList(),
-    );
-  }
-
-  List<MapEntry<String, String>> _encryptedSectionRows(dynamic value) {
-    if (value is! Map) return const <MapEntry<String, String>>[];
-    final coreRows = <MapEntry<String, String>>[];
-    var documentManifests = 0;
-    var documentChunks = 0;
-    var documentBytes = 0;
-    final otherRows = <MapEntry<String, String>>[];
-
-    for (final entry in value.entries) {
-      final name = entry.key.toString();
-      final bytes = int.tryParse(entry.value.toString()) ?? 0;
-      if (_DebugFileTreeCard.isCoreDebugFile(name)) {
-        coreRows.add(MapEntry<String, String>(name, '$bytes bytes'));
-      } else if (_isDocumentManifestName(name)) {
-        documentManifests += 1;
-        documentBytes += bytes;
-      } else if (_isDocumentChunkName(name)) {
-        documentChunks += 1;
-        documentBytes += bytes;
-      } else {
-        otherRows.add(MapEntry<String, String>(name, '$bytes bytes'));
-      }
-    }
-
-    coreRows.sort((a, b) => a.key.compareTo(b.key));
-    otherRows.sort((a, b) => a.key.compareTo(b.key));
-    final rows = <MapEntry<String, String>>[
-      ...coreRows,
-      if (documentManifests > 0)
-        MapEntry<String, String>(
-          'document manifests',
-          '$documentManifests files',
-        ),
-      if (documentChunks > 0)
-        MapEntry<String, String>('document chunks', '$documentChunks files'),
-      if (documentBytes > 0)
-        MapEntry<String, String>('document bytes', '$documentBytes bytes'),
-      ...otherRows,
-    ];
-    return _dedupeDebugRows(rows);
-  }
-
-  List<MapEntry<String, String>> _workingFolderRows(dynamic value) {
-    if (value is! Map) return const <MapEntry<String, String>>[];
-    return <MapEntry<String, String>>[
-      MapEntry<String, String>('type', value['type']?.toString() ?? ''),
-      MapEntry<String, String>('root', value['root']?.toString() ?? ''),
-      const MapEntry<String, String>(
-        'layout',
-        'header.json, manifest.enc, items.enc, notes.enc, settings.enc, tags.enc',
-      ),
-    ];
-  }
-
-  List<MapEntry<String, String>> _workingFileRows(dynamic value) {
-    if (value is! Map) return const <MapEntry<String, String>>[];
-    final files = value['files'];
-    if (files is! Map) return const <MapEntry<String, String>>[];
-    final coreRows = <MapEntry<String, String>>[];
-    final documents = <String, ({int count, int bytes})>{};
-    final otherRows = <MapEntry<String, String>>[];
-    for (final entry in files.entries) {
-      final name = entry.key.toString();
-      final bytes = int.tryParse(entry.value.toString()) ?? 0;
-      final docId = _DebugFileTreeCard.documentTreeId(name);
-      if (_DebugFileTreeCard.isCoreDebugFile(name)) {
-        coreRows.add(MapEntry<String, String>(name, '$bytes bytes'));
-      } else if (docId != null) {
-        final existing = documents[docId] ?? (count: 0, bytes: 0);
-        documents[docId] = (
-          count: existing.count + 1,
-          bytes: existing.bytes + bytes,
-        );
-      } else {
-        otherRows.add(MapEntry<String, String>(name, '$bytes bytes'));
-      }
-    }
-
-    final documentRows =
-        documents.entries
-            .map(
-              (entry) => MapEntry<String, String>(
-                'document ${entry.key}',
-                '${entry.value.count} files, ${entry.value.bytes} bytes',
-              ),
-            )
-            .toList()
-          ..sort((a, b) => a.key.compareTo(b.key));
-    coreRows.sort((a, b) => a.key.compareTo(b.key));
-    otherRows.sort((a, b) => a.key.compareTo(b.key));
-    final rows = _dedupeDebugRows([...coreRows, ...documentRows, ...otherRows]);
-    const maxRows = 80;
-    if (rows.length <= maxRows) return rows;
-    return [
-      ...rows.take(maxRows),
-      MapEntry<String, String>(
-        'more',
-        '${rows.length - maxRows} files hidden; use Refresh after narrowing the issue.',
-      ),
-    ];
-  }
-
-  List<MapEntry<String, String>> _dedupeDebugRows(
-    List<MapEntry<String, String>> rows,
-  ) {
-    final seen = <String>{};
-    final deduped = <MapEntry<String, String>>[];
-    for (final row in rows) {
-      final signature = '${row.key}\u0000${row.value}';
-      if (!seen.add(signature)) continue;
-      deduped.add(row);
-    }
-    return deduped;
-  }
-
-  bool _isDocumentManifestName(String name) {
-    return RegExp(r'^document_.+\.manifest\.enc$').hasMatch(name);
-  }
-
-  bool _isDocumentChunkName(String name) {
-    return RegExp(r'^document_.+_chunk_\d+\.enc$').hasMatch(name);
   }
 
   Future<void> _showRotateMasterPasswordDialog(BuildContext context) async {
@@ -3238,7 +2868,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return [
       _attachmentFromUploadedDocument(document),
       ...(document['attachments'] as List<dynamic>? ?? const <dynamic>[])
-          .whereType<Map>()
+          .whereType<Map<dynamic, dynamic>>()
           .map((entry) => Map<String, dynamic>.from(entry)),
     ];
   }
@@ -5605,1435 +5235,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 }
 
-class _EntryMetadataPanel extends StatelessWidget {
-  const _EntryMetadataPanel({required this.entry});
-
-  final Map<String, dynamic> entry;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Column(
-        children: [
-          _EntryMetadataLine(
-            label: 'Created',
-            value: _entryCreatedLabel(entry),
-          ),
-          const SizedBox(height: 6),
-          _EntryMetadataLine(
-            label: 'Modified',
-            value: _entryModifiedLabel(entry),
-          ),
-          const SizedBox(height: 6),
-          _EntryMetadataLine(label: 'Device', value: _entryDeviceLabel(entry)),
-        ],
-      ),
-    );
-  }
-}
-
-class _EntryMetadataLine extends StatelessWidget {
-  const _EntryMetadataLine({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        SizedBox(
-          width: 74,
-          child: Text(
-            label,
-            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: colorScheme.onSurface,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-String _entryCreatedLabel(Map<String, dynamic> entry) {
-  final value =
-      entry['createdAt'] ?? entry['created_at'] ?? entry['documentUploadedAt'];
-  return _formatEntryTimestamp(value, fallback: 'Unknown');
-}
-
-String _entryModifiedLabel(Map<String, dynamic> entry) {
-  final activityAt = vaultEntryActivityAt(entry);
-  if (activityAt != null) {
-    return _formatEntryTimestamp(
-      activityAt.toIso8601String(),
-      fallback: 'Unknown',
-    );
-  }
-  final legacy = entry['updated']?.toString().trim() ?? '';
-  if (legacy.isNotEmpty && legacy.toLowerCase() != 'now') {
-    return legacy;
-  }
-  return 'Unknown';
-}
-
-String _entryDeviceLabel(Map<String, dynamic> entry) {
-  final label = entry['updatedByDevice']?.toString().trim() ?? '';
-  final id = entry['deviceId']?.toString().trim() ?? '';
-  if (label.isNotEmpty && id.isNotEmpty) {
-    return '$label · ${_shortDeviceId(id)}';
-  }
-  if (label.isNotEmpty) return label;
-  if (id.isNotEmpty) return _shortDeviceId(id);
-  return 'Unknown';
-}
-
-String _shortDeviceId(String id) {
-  if (id.length <= 8) return id;
-  return id.substring(0, 8);
-}
-
-String _formatEntryTimestamp(Object? raw, {required String fallback}) {
-  final value = raw?.toString().trim() ?? '';
-  if (value.isEmpty) return fallback;
-  if (value.toLowerCase() == 'now') return 'Now';
-  final parsed = DateTime.tryParse(value);
-  if (parsed == null) return value;
-  final local = parsed.toLocal();
-  String twoDigits(int number) => number.toString().padLeft(2, '0');
-  return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} '
-      '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.title, required this.subtitle});
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(subtitle, textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AllItemsTypeChip extends StatelessWidget {
-  const _AllItemsTypeChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: selected
-          ? colorScheme.primaryContainer
-          : colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected
-                  ? colorScheme.onPrimaryContainer
-                  : colorScheme.onSurfaceVariant,
-              fontSize: 13,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TinyChip extends StatelessWidget {
-  const _TinyChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          fontSize: 11,
-          color: colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.subtitle});
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: vaultPageHeadingStyle(context)),
-        const SizedBox(height: 2),
-        Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-      ],
-    );
-  }
-}
-
-class _DebugHeader extends StatelessWidget {
-  const _DebugHeader({required this.onRefresh});
-
-  final VoidCallback? onRefresh;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Expanded(
-          child: _SectionHeader(
-            title: 'Vault internals',
-            subtitle: 'Debug-only storage metadata and encrypted sections.',
-          ),
-        ),
-        const SizedBox(width: 12),
-        IconButton.filledTonal(
-          key: const ValueKey('debug-internals-refresh'),
-          onPressed: onRefresh,
-          icon: const Icon(Icons.refresh),
-          tooltip: 'Refresh internals',
-        ),
-      ],
-    );
-  }
-}
-
-class _DebugInfoCard extends StatelessWidget {
-  const _DebugInfoCard({
-    required this.title,
-    required this.rows,
-    this.maxHeight,
-  });
-
-  final String title;
-  final List<MapEntry<String, String>> rows;
-  final double? maxHeight;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            if (rows.isEmpty)
-              Text(
-                'No data',
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              )
-            else
-              _DebugRowsView(rows: rows, maxHeight: maxHeight),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DebugRowsView extends StatelessWidget {
-  const _DebugRowsView({required this.rows, this.maxHeight});
-
-  final List<MapEntry<String, String>> rows;
-  final double? maxHeight;
-
-  @override
-  Widget build(BuildContext context) {
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: rows.map((row) => _DebugInfoRow(row: row)).toList(),
-    );
-    if (maxHeight == null) return content;
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight!),
-      child: Scrollbar(
-        child: SingleChildScrollView(primary: false, child: content),
-      ),
-    );
-  }
-}
-
-class _DebugInfoRow extends StatelessWidget {
-  const _DebugInfoRow({required this.row});
-
-  final MapEntry<String, String> row;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 132,
-            child: Text(
-              row.key,
-              style: TextStyle(
-                color: colorScheme.onSurfaceVariant,
-                fontSize: 12,
-              ),
-            ),
-          ),
-          Expanded(
-            child: SelectableText(
-              row.value,
-              style: TextStyle(
-                color: colorScheme.onSurface,
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DebugFileTreeCard extends StatelessWidget {
-  const _DebugFileTreeCard({required this.store});
-
-  static const int _maxRenderedFiles = 80;
-  static const double _maxHeight = 260;
-  final dynamic store;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final tree = _buildTree();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Vault file tree',
-              style: Theme.of(
-                context,
-              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            if (tree.isEmpty)
-              Text(
-                'No files',
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              )
-            else
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: _maxHeight),
-                child: Scrollbar(
-                  child: SingleChildScrollView(
-                    primary: false,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: tree
-                          .map((line) => _DebugTreeLine(line: line))
-                          .toList(),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<_DebugTreeLineData> _buildTree() {
-    if (store is! Map) return const <_DebugTreeLineData>[];
-    final root = (store as Map)['root']?.toString() ?? 'vault';
-    final files = (store as Map)['files'];
-    if (files is! Map) return const <_DebugTreeLineData>[];
-    final entries =
-        files.entries
-            .map(
-              (entry) => MapEntry<String, int>(
-                entry.key.toString(),
-                int.tryParse(entry.value.toString()) ?? 0,
-              ),
-            )
-            .toList()
-          ..sort((a, b) => a.key.compareTo(b.key));
-
-    final core = <MapEntry<String, int>>[];
-    final documents = <String, List<MapEntry<String, int>>>{};
-    final other = <MapEntry<String, int>>[];
-    for (final entry in entries) {
-      final docId = documentTreeId(entry.key);
-      if (isCoreDebugFile(entry.key)) {
-        core.add(entry);
-      } else if (docId != null) {
-        documents
-            .putIfAbsent(docId, () => <MapEntry<String, int>>[])
-            .add(entry);
-      } else {
-        other.add(entry);
-      }
-    }
-
-    final lines = <_DebugTreeLineData>[
-      _DebugTreeLineData(depth: 0, label: _rootLabel(root), folder: true),
-    ];
-    var renderedFiles = 0;
-
-    bool canRenderMoreFiles() => renderedFiles < _maxRenderedFiles;
-
-    Iterable<_DebugTreeLineData> cappedFileLines(
-      Iterable<MapEntry<String, int>> files, {
-      required int depth,
-    }) sync* {
-      for (final entry in files) {
-        if (!canRenderMoreFiles()) return;
-        renderedFiles++;
-        yield _fileLine(entry, depth: depth);
-      }
-    }
-
-    if (core.isNotEmpty && canRenderMoreFiles()) {
-      lines.add(
-        const _DebugTreeLineData(depth: 1, label: 'core', folder: true),
-      );
-      lines.addAll(cappedFileLines(core, depth: 2));
-    }
-    if (documents.isNotEmpty && canRenderMoreFiles()) {
-      lines.add(
-        const _DebugTreeLineData(depth: 1, label: 'documents', folder: true),
-      );
-      for (final docId in documents.keys.toList()..sort()) {
-        if (!canRenderMoreFiles()) break;
-        final docFiles = documents[docId]!;
-        final docBytes = docFiles.fold<int>(
-          0,
-          (sum, entry) => sum + entry.value,
-        );
-        renderedFiles += docFiles.length;
-        lines.add(
-          _DebugTreeLineData(
-            depth: 2,
-            label: docId,
-            detail: '${docFiles.length} files, $docBytes bytes',
-            folder: true,
-          ),
-        );
-      }
-    }
-    if (other.isNotEmpty && canRenderMoreFiles()) {
-      lines.add(
-        const _DebugTreeLineData(depth: 1, label: 'other', folder: true),
-      );
-      lines.addAll(cappedFileLines(other, depth: 2));
-    }
-    if (entries.length > renderedFiles) {
-      lines.add(
-        _DebugTreeLineData(
-          depth: 1,
-          label:
-              '${entries.length - renderedFiles} more files hidden to keep Debug responsive',
-        ),
-      );
-    }
-    return lines;
-  }
-
-  static _DebugTreeLineData _fileLine(
-    MapEntry<String, int> entry, {
-    required int depth,
-  }) {
-    return _DebugTreeLineData(
-      depth: depth,
-      label: entry.key,
-      detail: '${entry.value} bytes',
-    );
-  }
-
-  static String _rootLabel(String root) {
-    final normalized = root.replaceAll('\\', '/');
-    final parts = normalized.split('/').where((part) => part.isNotEmpty);
-    return parts.isEmpty ? root : parts.last;
-  }
-
-  static bool isCoreDebugFile(String name) {
-    return const <String>{
-      'header.json',
-      'manifest.enc',
-      'items.enc',
-      'notes.enc',
-      'settings.enc',
-      'tags.enc',
-    }.contains(name);
-  }
-
-  static String? documentTreeId(String name) {
-    final manifest = RegExp(r'^document_(.+)\.manifest\.enc$').firstMatch(name);
-    if (manifest != null) return manifest.group(1);
-    final chunk = RegExp(r'^document_(.+)_chunk_\d+\.enc$').firstMatch(name);
-    return chunk?.group(1);
-  }
-}
-
-class _DebugTreeLineData {
-  const _DebugTreeLineData({
-    required this.depth,
-    required this.label,
-    this.detail,
-    this.folder = false,
-  });
-
-  final int depth;
-  final String label;
-  final String? detail;
-  final bool folder;
-}
-
-class _DebugTreeLine extends StatelessWidget {
-  const _DebugTreeLine({required this.line});
-
-  final _DebugTreeLineData line;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: EdgeInsets.only(left: line.depth * 14.0, top: 2, bottom: 2),
-      child: Row(
-        children: [
-          Icon(
-            line.folder
-                ? Icons.folder_outlined
-                : Icons.insert_drive_file_outlined,
-            size: 15,
-            color: line.folder
-                ? colorScheme.primary
-                : colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: SelectableText(
-              line.label,
-              style: TextStyle(
-                color: colorScheme.onSurface,
-                fontSize: 12,
-                fontFamily: 'monospace',
-                fontWeight: line.folder ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ),
-          if (line.detail != null) ...[
-            const SizedBox(width: 8),
-            Text(
-              line.detail!,
-              style: TextStyle(
-                color: colorScheme.onSurfaceVariant,
-                fontSize: 11,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-IconData _iconForHomeType(String type) {
-  final normalized = type.toLowerCase();
-  if (normalized.contains('note')) return Icons.description_outlined;
-  if (normalized.contains('password') || normalized.contains('login')) {
-    return Icons.lock_outline;
-  }
-  if (normalized.contains('ident')) return Icons.badge_outlined;
-  if (normalized.contains('finan') || normalized.contains('bank')) {
-    return Icons.account_balance_wallet_outlined;
-  }
-  if (normalized.contains('document')) return Icons.folder_outlined;
-  if (normalized.contains('health')) return Icons.favorite_outline;
-  return Icons.shield_outlined;
-}
-
-Color _colorForHomeType(String type) {
-  final normalized = type.toLowerCase();
-  if (normalized.contains('note')) return const Color(0xFFA78BFA);
-  if (normalized.contains('password') || normalized.contains('login')) {
-    return const Color(0xFF60A5FA);
-  }
-  if (normalized.contains('ident')) return const Color(0xFF34D399);
-  if (normalized.contains('finan') || normalized.contains('bank')) {
-    return const Color(0xFFFBBF24);
-  }
-  if (normalized.contains('document')) return const Color(0xFFFB923C);
-  if (normalized.contains('health')) return const Color(0xFFF472B6);
-  return const Color(0xFF93C5FD);
-}
-
-IconData _iconForCustomTemplateKey(String? key) {
-  switch (key) {
-    case 'lock':
-      return Icons.lock_outline;
-    case 'note':
-      return Icons.sticky_note_2_outlined;
-    case 'id':
-      return Icons.badge_outlined;
-    case 'wallet':
-      return Icons.account_balance_wallet_outlined;
-    case 'folder':
-      return Icons.folder_outlined;
-    case 'heart':
-      return Icons.favorite_outline;
-    case 'star':
-      return Icons.star_outline;
-    case 'spark':
-      return Icons.auto_awesome_outlined;
-    case 'key':
-      return Icons.key_outlined;
-    case 'password':
-      return Icons.password_outlined;
-    case 'credit_card':
-      return Icons.credit_card;
-    case 'bank':
-      return Icons.account_balance_outlined;
-    case 'receipt':
-      return Icons.receipt_long_outlined;
-    case 'car':
-      return Icons.directions_car_outlined;
-    case 'home':
-      return Icons.home_outlined;
-    case 'work':
-      return Icons.work_outline;
-    case 'travel':
-      return Icons.flight_takeoff_outlined;
-    case 'passport':
-      return Icons.airplane_ticket_outlined;
-    case 'calendar':
-      return Icons.event_outlined;
-    case 'phone':
-      return Icons.phone_iphone_outlined;
-    case 'email':
-      return Icons.alternate_email;
-    case 'wifi':
-      return Icons.wifi_outlined;
-    case 'server':
-      return Icons.dns_outlined;
-    case 'code':
-      return Icons.code_outlined;
-    case 'database':
-      return Icons.storage_outlined;
-    case 'cloud':
-      return Icons.cloud_outlined;
-    case 'medical':
-      return Icons.medical_services_outlined;
-    case 'pet':
-      return Icons.pets_outlined;
-    case 'school':
-      return Icons.school_outlined;
-    case 'shopping':
-      return Icons.shopping_bag_outlined;
-    case 'gift':
-      return Icons.card_giftcard_outlined;
-    case 'photo':
-      return Icons.photo_outlined;
-    case 'link':
-      return Icons.link_outlined;
-    default:
-      return Icons.auto_awesome_outlined;
-  }
-}
-
-Color _colorForCustomTemplateColorKey(String? key) {
-  switch (key) {
-    case 'purple':
-      return const Color(0xFF8B5CF6);
-    case 'indigo':
-      return const Color(0xFF6366F1);
-    case 'blue':
-      return const Color(0xFF60A5FA);
-    case 'sky':
-      return const Color(0xFF38BDF8);
-    case 'cyan':
-      return const Color(0xFF22D3EE);
-    case 'teal':
-      return const Color(0xFF2DD4BF);
-    case 'green':
-      return const Color(0xFF4ADE80);
-    case 'emerald':
-      return const Color(0xFF10B981);
-    case 'lime':
-      return const Color(0xFFA3E635);
-    case 'amber':
-      return const Color(0xFFFBBF24);
-    case 'yellow':
-      return const Color(0xFFFDE047);
-    case 'orange':
-      return const Color(0xFFFB923C);
-    case 'red':
-      return const Color(0xFFF87171);
-    case 'rose':
-      return const Color(0xFFFB7185);
-    case 'pink':
-      return const Color(0xFFF472B6);
-    case 'fuchsia':
-      return const Color(0xFFE879F9);
-    case 'slate':
-      return const Color(0xFF64748B);
-    case 'gray':
-      return const Color(0xFF9CA3AF);
-    default:
-      return const Color(0xFF6366F1);
-  }
-}
-
-class _MobileDashboardList extends StatelessWidget {
-  const _MobileDashboardList({
-    required this.data,
-    required this.recentItems,
-    required this.adapters,
-    required this.keyForRow,
-    required this.iconForType,
-    required this.colorForType,
-    required this.onTypeTap,
-    required this.onViewAll,
-    required this.onShowDemoPreview,
-    required this.onHideDemoPreview,
-    required this.onOpenRow,
-    required this.onRowActions,
-  });
-
-  final _DashboardData data;
-  final List<Map<String, dynamic>> recentItems;
-  final List<VaultListEntryAdapter> adapters;
-  final String Function(Map<String, dynamic> row) keyForRow;
-  final IconData Function(String type) iconForType;
-  final Color Function(String type) colorForType;
-  final ValueChanged<String> onTypeTap;
-  final VoidCallback onViewAll;
-  final VoidCallback onShowDemoPreview;
-  final VoidCallback onHideDemoPreview;
-  final ValueChanged<Map<String, dynamic>> onOpenRow;
-  final ValueChanged<Map<String, dynamic>> onRowActions;
-
-  @override
-  Widget build(BuildContext context) {
-    final categories = _homeDashboardCategories(data);
-    return ListView(
-      children: [
-        if (data.isDemo ||
-            data.canShowDemoPreview ||
-            data.isExploreSession) ...[
-          _DemoDashboardNotice(
-            isActive: data.isDemo || data.isExploreSession,
-            isExploreSession: data.isExploreSession,
-            onShowPreview: onShowDemoPreview,
-            onHidePreview: onHideDemoPreview,
-          ),
-          const SizedBox(height: 12),
-        ],
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            final crossAxisCount = width >= 700 ? 4 : 2;
-            final childAspectRatio = crossAxisCount >= 4 ? 1.2 : 1.45;
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                childAspectRatio: childAspectRatio,
-              ),
-              itemCount: categories.length,
-              itemBuilder: (context, index) {
-                final entry = categories[index];
-                return _HomeTypeCard(
-                  label: entry.label,
-                  count: entry.count,
-                  icon: iconForType(entry.filterType),
-                  accent: colorForType(entry.filterType),
-                  onTap: () => onTypeTap(entry.filterType),
-                );
-              },
-            );
-          },
-        ),
-        const SizedBox(height: 14),
-        _DashboardSectionTitle(title: 'Recent', onViewAll: onViewAll),
-        const SizedBox(height: 6),
-        _DashboardRecentList(
-          recentItems: recentItems,
-          adapters: adapters,
-          keyForRow: keyForRow,
-          onOpenRow: onOpenRow,
-          onRowActions: onRowActions,
-        ),
-      ],
-    );
-  }
-}
-
-class _WideDashboardLayout extends StatelessWidget {
-  const _WideDashboardLayout({
-    required this.data,
-    required this.dashboardTypes,
-    required this.recentItems,
-    required this.adapters,
-    required this.keyForRow,
-    required this.iconForType,
-    required this.colorForType,
-    required this.onTypeTap,
-    required this.onViewAll,
-    required this.onAddItem,
-    required this.onImportData,
-    required this.onSwitchVault,
-    required this.onShowDemoPreview,
-    required this.onHideDemoPreview,
-    required this.onOpenRow,
-    required this.onRowActions,
-  });
-
-  final _DashboardData data;
-  final List<MapEntry<String, int>> dashboardTypes;
-  final List<Map<String, dynamic>> recentItems;
-  final List<VaultListEntryAdapter> adapters;
-  final String Function(Map<String, dynamic> row) keyForRow;
-  final IconData Function(String type) iconForType;
-  final Color Function(String type) colorForType;
-  final ValueChanged<String> onTypeTap;
-  final VoidCallback onViewAll;
-  final VoidCallback onAddItem;
-  final VoidCallback onImportData;
-  final VoidCallback onSwitchVault;
-  final VoidCallback onShowDemoPreview;
-  final VoidCallback onHideDemoPreview;
-  final ValueChanged<Map<String, dynamic>> onOpenRow;
-  final ValueChanged<Map<String, dynamic>> onRowActions;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        if (data.isDemo ||
-            data.canShowDemoPreview ||
-            data.isExploreSession) ...[
-          _DemoDashboardNotice(
-            isActive: data.isDemo || data.isExploreSession,
-            isExploreSession: data.isExploreSession,
-            onShowPreview: onShowDemoPreview,
-            onHidePreview: onHideDemoPreview,
-          ),
-          const SizedBox(height: 12),
-        ],
-        _DesktopDashboardStats(
-          stats: [
-            _DashboardStatData(
-              label: 'Total Items',
-              value: data.totalCount,
-              icon: Icons.inventory_2_outlined,
-            ),
-            _DashboardStatData(
-              label: 'Folders',
-              value: data.folderCount,
-              icon: Icons.folder_outlined,
-            ),
-            _DashboardStatData(
-              label: 'Logins',
-              value: data.typeCounts['Login'] ?? 0,
-              icon: Icons.lock_outline,
-            ),
-            _DashboardStatData(
-              label: 'Notes',
-              value: data.dashboardTypes
-                  .firstWhere(
-                    (entry) => entry.key == 'Notes',
-                    orElse: () => const MapEntry<String, int>('Notes', 0),
-                  )
-                  .value,
-              icon: Icons.description_outlined,
-            ),
-            _DashboardStatData(
-              label: 'Identities',
-              value:
-                  (data.typeCounts['Identity'] ?? 0) +
-                  (data.typeCounts['Passport'] ?? 0) +
-                  (data.typeCounts['Driver License'] ?? 0),
-              icon: Icons.badge_outlined,
-            ),
-            _DashboardStatData(
-              label: 'Documents',
-              value:
-                  (data.typeCounts['Documents'] ?? 0) +
-                  (data.typeCounts['Document'] ?? 0),
-              icon: Icons.folder_copy_outlined,
-            ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final showSidePanel = constraints.maxWidth >= 880;
-            final recent = _DesktopPanel(
-              title: 'Recent Items',
-              trailing: TextButton(
-                onPressed: onViewAll,
-                child: Text(
-                  'View all',
-                  style: DashboardTypography.textLink(
-                    Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-              ),
-              child: _WideDashboardRecentList(
-                recentItems: recentItems,
-                adapters: adapters,
-                keyForRow: keyForRow,
-                onOpenRow: onOpenRow,
-                onRowActions: onRowActions,
-              ),
-            );
-            final actions = _DesktopPanel(
-              title: 'Quick Actions',
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: _QuickActionGrid(
-                  actions: [
-                    _QuickActionTileData(
-                      icon: Icons.add,
-                      label: 'Add Item',
-                      onTap: onAddItem,
-                    ),
-                    _QuickActionTileData(
-                      icon: Icons.grid_view_outlined,
-                      label: 'All Items',
-                      onTap: onViewAll,
-                    ),
-                    _QuickActionTileData(
-                      icon: Icons.download_outlined,
-                      label: 'Import',
-                      onTap: onImportData,
-                    ),
-                    _QuickActionTileData(
-                      icon: Icons.switch_access_shortcut_outlined,
-                      label: 'Switch Vault',
-                      onTap: onSwitchVault,
-                    ),
-                  ],
-                ),
-              ),
-            );
-            if (!showSidePanel) {
-              return Column(
-                children: [recent, const SizedBox(height: 12), actions],
-              );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 7, child: recent),
-                const SizedBox(width: 14),
-                Expanded(flex: 3, child: actions),
-              ],
-            );
-          },
-        ),
-      ],
-    );
-  }
-}
-
-class _DemoDashboardNotice extends StatelessWidget {
-  const _DemoDashboardNotice({
-    required this.isActive,
-    required this.isExploreSession,
-    required this.onShowPreview,
-    required this.onHidePreview,
-  });
-
-  final bool isActive;
-  final bool isExploreSession;
-  final VoidCallback onShowPreview;
-  final VoidCallback onHidePreview;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final activeMessage = isExploreSession
-        ? AppStrings.exploreDemoActiveNotice
-        : 'Viewing sample data. Your vault has not been changed.';
-    final inactiveMessage =
-        'New here? Preview how a filled vault dashboard looks.';
-    final exitLabel = isExploreSession
-        ? AppStrings.exitExploreDemo
-        : 'Exit demo';
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            isActive ? Icons.visibility_outlined : Icons.auto_awesome_outlined,
-            color: colorScheme.primary,
-            size: 20,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              isActive ? activeMessage : inactiveMessage,
-              style: TextStyle(
-                color: colorScheme.onSurfaceVariant,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            fit: FlexFit.loose,
-            child: OutlinedButton(
-              key: ValueKey(
-                isActive
-                    ? 'dashboard-hide-demo-preview'
-                    : 'dashboard-show-demo-preview',
-              ),
-              style: OutlinedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: isActive ? onHidePreview : onShowPreview,
-              child: Text(isActive ? exitLabel : 'View demo preview'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DashboardStatData {
-  const _DashboardStatData({
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
-
-  final String label;
-  final int value;
-  final IconData icon;
-}
-
-class _DesktopDashboardStats extends StatelessWidget {
-  const _DesktopDashboardStats({required this.stats});
-
-  final List<_DashboardStatData> stats;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 1100 ? 6 : 3;
-        return GridView.builder(
-          key: const ValueKey('desktop-dashboard-stats'),
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            mainAxisExtent: 88,
-          ),
-          itemCount: stats.length,
-          itemBuilder: (context, index) {
-            final stat = stats[index];
-            return _DesktopDashboardStatCard(stat: stat);
-          },
-        );
-      },
-    );
-  }
-}
-
-class _DesktopDashboardStatCard extends StatelessWidget {
-  const _DesktopDashboardStatCard({required this.stat});
-
-  final _DashboardStatData stat;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      key: ValueKey<String>('desktop-dashboard-stat-${stat.label}'),
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '${stat.value}',
-            style: DashboardTypography.statValue(colorScheme.onSurface),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            stat.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: DashboardTypography.statLabel(colorScheme.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HomeCategoryData {
-  const _HomeCategoryData({
-    required this.label,
-    required this.filterType,
-    required this.count,
-  });
-
-  final String label;
-  final String filterType;
-  final int count;
-}
-
-List<_HomeCategoryData> _homeDashboardCategories(_DashboardData data) {
-  final candidates = <_HomeCategoryData>[
-    _HomeCategoryData(
-      label: 'Notes',
-      filterType: 'Notes',
-      count: data.dashboardTypes
-          .firstWhere(
-            (entry) => entry.key == 'Notes',
-            orElse: () => const MapEntry<String, int>('Notes', 0),
-          )
-          .value,
-    ),
-    _HomeCategoryData(
-      label: 'Logins',
-      filterType: 'Login',
-      count: data.typeCounts['Login'] ?? 0,
-    ),
-    _HomeCategoryData(
-      label: 'Identities',
-      filterType: 'Identity',
-      count:
-          (data.typeCounts['Identity'] ?? 0) +
-          (data.typeCounts['Passport'] ?? 0) +
-          (data.typeCounts['Driver License'] ?? 0),
-    ),
-    _HomeCategoryData(
-      label: 'Documents',
-      filterType: data.typeCounts.containsKey('Documents')
-          ? 'Documents'
-          : 'Document',
-      count:
-          (data.typeCounts['Documents'] ?? 0) +
-          (data.typeCounts['Document'] ?? 0),
-    ),
-  ];
-  final coveredTypes = <String>{
-    'Notes',
-    'Login',
-    'Identity',
-    'Passport',
-    'Driver License',
-    'Documents',
-    'Document',
-  };
-  for (final entry in data.dashboardTypes) {
-    if (coveredTypes.contains(entry.key)) continue;
-    candidates.add(
-      _HomeCategoryData(
-        label: entry.key,
-        filterType: entry.key,
-        count: entry.value,
-      ),
-    );
-  }
-  return candidates.where((category) => category.count > 0).toList();
-}
-
-class _DashboardSectionTitle extends StatelessWidget {
-  const _DashboardSectionTitle({required this.title, required this.onViewAll});
-
-  final String title;
-  final VoidCallback onViewAll;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text(
-          title,
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const Spacer(),
-        InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onViewAll,
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            child: Text('View all', style: TextStyle(color: Color(0xFF4F46E5))),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _DashboardRecentList extends StatelessWidget {
-  const _DashboardRecentList({
-    required this.recentItems,
-    required this.adapters,
-    required this.keyForRow,
-    required this.onOpenRow,
-    required this.onRowActions,
-  });
-
-  final List<Map<String, dynamic>> recentItems;
-  final List<VaultListEntryAdapter> adapters;
-  final String Function(Map<String, dynamic> row) keyForRow;
-  final ValueChanged<Map<String, dynamic>> onOpenRow;
-  final ValueChanged<Map<String, dynamic>> onRowActions;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    if (recentItems.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colorScheme.outlineVariant),
-        ),
-        child: Text(
-          'No recent items yet.',
-          style: TextStyle(color: colorScheme.onSurfaceVariant),
-        ),
-      );
-    }
-    return VaultEntryList(
-      rows: recentItems,
-      adapters: adapters,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      separatorBuilder: (context, index) => const SizedBox(height: 8),
-      iconAlpha: 0.2,
-      rowPadding: const EdgeInsets.all(12),
-      trailingMode: VaultEntryTrailingMode.more,
-      keyForRow: keyForRow,
-      onTap: onOpenRow,
-      onMoreTap: onRowActions,
-    );
-  }
-}
-
-class _HomeTypeCard extends StatelessWidget {
-  const _HomeTypeCard({
-    required this.label,
-    required this.count,
-    required this.icon,
-    required this.accent,
-    required this.onTap,
-  });
-
-  final String label;
-  final int count;
-  final IconData icon;
-  final Color accent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    const borderRadius = 14.0;
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: colorScheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(borderRadius),
-        side: BorderSide(color: colorScheme.outlineVariant),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(borderRadius),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: accent, size: 20),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: colorScheme.onSurface,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '$count',
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AllItemsSelectionActionBar extends StatelessWidget {
-  const _AllItemsSelectionActionBar({
-    required this.onFavorite,
-    required this.onDelete,
-    required this.onMore,
-  });
-
-  final VoidCallback onFavorite;
-  final VoidCallback onDelete;
-  final VoidCallback onMore;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(6, 8, 6, 4),
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
-      ),
-      child: Row(
-        children: [
-          _SelectionActionNavItem(
-            key: const ValueKey('selection-action-favorite'),
-            icon: Icons.star_outline,
-            label: 'Favorite',
-            onTap: onFavorite,
-          ),
-          _SelectionActionNavItem(
-            key: const ValueKey('selection-action-delete'),
-            icon: Icons.delete_outline,
-            label: 'Delete',
-            onTap: onDelete,
-          ),
-          _SelectionActionNavItem(
-            key: const ValueKey('selection-action-more'),
-            icon: Icons.more_horiz,
-            label: 'More',
-            onTap: onMore,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Desktop/tablet presentation for the existing All Items data and actions.
-/// Mobile intentionally continues to use [VaultEntryList].
 class _WideAllItemsIndex extends StatelessWidget {
   const _WideAllItemsIndex({
     required this.rows,
@@ -7268,47 +5469,6 @@ class _WideItemCell extends StatelessWidget {
       style: TextStyle(
         color: Theme.of(context).colorScheme.onSurfaceVariant,
         fontSize: 12,
-      ),
-    );
-  }
-}
-
-class _SelectionActionNavItem extends StatelessWidget {
-  const _SelectionActionNavItem({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Expanded(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 20, color: colorScheme.onSurfaceVariant),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -7991,320 +6151,4 @@ class _DashboardRecentCandidate {
   final String kind;
   final Map<String, dynamic> entry;
   final DateTime activityAt;
-}
-
-class _AllItemsFilterState {
-  const _AllItemsFilterState({
-    required this.search,
-    required this.selectedTypes,
-    required this.favoritesOnly,
-    required this.dateRange,
-  });
-
-  final String search;
-  final Set<String> selectedTypes;
-  final bool favoritesOnly;
-  final String dateRange;
-}
-
-class _AllItemsFiltersOverlay extends StatefulWidget {
-  const _AllItemsFiltersOverlay({
-    required this.initialState,
-    required this.typeOptions,
-  });
-
-  final _AllItemsFilterState initialState;
-  final List<String> typeOptions;
-
-  @override
-  State<_AllItemsFiltersOverlay> createState() =>
-      _AllItemsFiltersOverlayState();
-}
-
-class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
-  late final TextEditingController _searchController;
-  late Set<String> _selectedTypes;
-  late bool _favoritesOnly;
-  late String _dateRange;
-
-  @override
-  void initState() {
-    super.initState();
-    _searchController = TextEditingController(text: widget.initialState.search);
-    _searchController.addListener(() => setState(() {}));
-    _selectedTypes = {...widget.initialState.selectedTypes};
-    _favoritesOnly = widget.initialState.favoritesOnly;
-    _dateRange = widget.initialState.dateRange;
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: SafeArea(
-        child: SizedBox.expand(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          onPressed: _reset,
-                          child: const Text('Reset'),
-                        ),
-                      ),
-                    ),
-                    const Text(
-                      'Filters',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                      ),
-                    ),
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: _apply,
-                          child: const Text('Done'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-                  children: [
-                    _sectionTitle('Search'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search all items...',
-                        prefixIcon: const Icon(Icons.search, size: 20),
-                        isDense: true,
-                        fillColor: Theme.of(
-                          context,
-                        ).colorScheme.surfaceContainerHighest,
-                        filled: true,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    _sectionTitle('Type'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: widget.typeOptions.map((type) {
-                        final selected = _selectedTypes.contains(type);
-                        return FilterChip(
-                          label: Text(type),
-                          selected: selected,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          onSelected: (_) {
-                            setState(() {
-                              if (selected) {
-                                _selectedTypes.remove(type);
-                              } else {
-                                _selectedTypes.add(type);
-                              }
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 18),
-                    _filterRow(
-                      label: 'Favorites',
-                      trailing: Switch(
-                        value: _favoritesOnly,
-                        onChanged: (value) =>
-                            setState(() => _favoritesOnly = value),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    _sectionTitle('Date Modified'),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children:
-                          [
-                            ('any', 'Anytime'),
-                            ('today', 'Today'),
-                            ('last_7_days', 'Last 7 Days'),
-                            ('last_30_days', 'Last 30 Days'),
-                          ].map((row) {
-                            final selected = row.$1 == _dateRange;
-                            return ChoiceChip(
-                              label: Text(row.$2),
-                              selected: selected,
-                              onSelected: (_) =>
-                                  setState(() => _dateRange = row.$1),
-                            );
-                          }).toList(),
-                    ),
-                    const SizedBox(height: 18),
-                    _filterRow(
-                      label: 'Active Filters',
-                      value:
-                          '${(_searchController.text.trim().isNotEmpty ? 1 : 0) + _selectedTypes.length + (_favoritesOnly ? 1 : 0) + (_dateRange == 'any' ? 0 : 1)}',
-                    ),
-                    const SizedBox(height: 8),
-                    if (_activeFilterChips().isEmpty)
-                      Text(
-                        'No active filters',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      )
-                    else
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _activeFilterChips().map((chip) {
-                          return InputChip(
-                            label: Text(chip.label),
-                            onDeleted: () => _removeActiveFilter(chip),
-                          );
-                        }).toList(),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _sectionTitle(String text) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Text(
-        text,
-        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-      ),
-    );
-  }
-
-  Widget _filterRow({required String label, String? value, Widget? trailing}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-      child: Row(
-        children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-          ),
-          const Spacer(),
-          if (value != null)
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 13,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ?trailing,
-        ],
-      ),
-    );
-  }
-
-  void _reset() {
-    setState(() {
-      _searchController.clear();
-      _selectedTypes = <String>{};
-      _favoritesOnly = false;
-      _dateRange = 'any';
-    });
-  }
-
-  void _apply() {
-    Navigator.of(context).pop(
-      _AllItemsFilterState(
-        search: _searchController.text,
-        selectedTypes: _selectedTypes,
-        favoritesOnly: _favoritesOnly,
-        dateRange: _dateRange,
-      ),
-    );
-  }
-
-  List<_ActiveFilterChip> _activeFilterChips() {
-    final chips = <_ActiveFilterChip>[];
-    final search = _searchController.text.trim();
-    if (search.isNotEmpty) {
-      chips.add(_ActiveFilterChip(key: 'search', label: 'Search: $search'));
-    }
-    for (final type in _selectedTypes.toList()..sort()) {
-      chips.add(_ActiveFilterChip(key: 'type:$type', label: type));
-    }
-    if (_favoritesOnly) {
-      chips.add(const _ActiveFilterChip(key: 'favorites', label: 'Favorites'));
-    }
-    if (_dateRange != 'any') {
-      chips.add(
-        _ActiveFilterChip(
-          key: 'date',
-          label: switch (_dateRange) {
-            'today' => 'Today',
-            'last_7_days' => 'Last 7 Days',
-            'last_30_days' => 'Last 30 Days',
-            _ => 'Date',
-          },
-        ),
-      );
-    }
-    return chips;
-  }
-
-  void _removeActiveFilter(_ActiveFilterChip chip) {
-    setState(() {
-      if (chip.key == 'search') {
-        _searchController.clear();
-        return;
-      }
-      if (chip.key.startsWith('type:')) {
-        final type = chip.key.substring('type:'.length);
-        _selectedTypes.remove(type);
-        return;
-      }
-      if (chip.key == 'favorites') {
-        _favoritesOnly = false;
-        return;
-      }
-      if (chip.key == 'date') {
-        _dateRange = 'any';
-      }
-    });
-  }
-}
-
-class _ActiveFilterChip {
-  const _ActiveFilterChip({required this.key, required this.label});
-
-  final String key;
-  final String label;
 }

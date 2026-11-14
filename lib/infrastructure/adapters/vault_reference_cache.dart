@@ -16,7 +16,7 @@ class VaultReferenceCache {
       final decoded = jsonDecode(raw);
       if (decoded is! List) return <VaultReference>[];
       return decoded
-          .whereType<Map>()
+          .whereType<Map<dynamic, dynamic>>()
           .map(
             (entry) =>
                 VaultReference.fromJson(Map<String, dynamic>.from(entry)),

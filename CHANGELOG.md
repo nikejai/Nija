@@ -2,6 +2,68 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-11-14 23:28:45 IST
+
+- Added Section 17 to `docs/todo.md`: Codebase Slimming, De-bloating & Architecture Modernization.
+  - Documented findings from architectural audit: 41,686 lines of Dart in `lib/`, with 73.6% in presentation/UI (`lib/features/`) vs. 1.6% in `lib/domain/`.
+  - Identified key monolithic files (`onboarding_flow.dart` at 9,150 lines and 48 classes; `vault_app_shell.dart` at 6,154 lines).
+  - Outlined step-by-step de-bloating plan: modularizing `onboarding_flow.dart`, extracting remaining shell tabs, pruning the web runtime anti-tamper subsystem (`lib/core/web_integrity/`), removing in-app billing paywalls (`lib/core/entitlements/`), and auditing heavy dependencies (`flutter_quill`, `pdfrx`).
+
+
+## 2026-11-14 23:21:30 IST
+
+- Added automated GitHub Actions CI pipeline.
+  - Created [`.github/workflows/ci.yml`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/.github/workflows/ci.yml) to automatically run `dart format`, `flutter analyze` with strict rules, `flutter test`, and Android debug APK build verification on push and pull requests to `main`.
+
+## 2026-11-14 23:20:50 IST
+
+- Added offline, cryptographically secure password and passphrase generator.
+  - Implemented `PasswordGenerator` in [`lib/core/security/password_generator.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/core/security/password_generator.dart) using `Random.secure()`.
+  - Added support for customizable character sets (uppercase, lowercase, numbers, symbols) and memorable dictionary passphrases with custom separators and capitalization.
+  - Integrated real-time entropy calculation and strength rating (Weak, Fair, Strong, Very Strong).
+  - Added generator bottom sheet (`PasswordGeneratorSheet`) accessible via one tap directly on sensitive password fields in `AddVaultItemScreen`.
+  - Added full test coverage across generator randomness, length guarantees, entropy calculations, and UI sheet interactions (`test/password_generator_test.dart` and `test/password_generator_sheet_test.dart`).
+
+## 2026-11-14 23:17:30 IST
+
+- Added desktop and web keyboard shortcuts for fast vault productivity.
+  - Implemented `CallbackShortcuts` and focused keyboard handlers:
+    - `Cmd/Ctrl + F`: Switches to All Items tab and focuses the search input.
+    - `Cmd/Ctrl + N`: Opens the Add Item category screen.
+    - `Cmd/Ctrl + L`: Immediately locks the vault.
+    - `Escape`: Exits multi-select selection mode or clears active search query.
+  - Added test coverage in [`test/vault_shell_shortcuts_test.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/test/vault_shell_shortcuts_test.dart).
+  - Validated with clean formatting and static analysis.
+
+## 2026-11-14 20:50:15 IST
+
+- Extracted Vault Home / Dashboard tab into dedicated presentation widget.
+  - Moved `_VaultHomeView`, `_MobileDashboardList`, `_WideDashboardLayout`, `_DemoDashboardNotice`, `_DesktopDashboardStats`, `_DesktopPanel`, `_WideDashboardRecentList`, `_QuickActionGrid`, and related tile widgets into [`lib/features/vault/presentation/widgets/vault_home_view.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/vault_home_view.dart).
+  - Reduced `vault_app_shell.dart` from 8,310 down to 6,092 lines across Phase 2 modularization.
+  - Verified with clean `dart format`, zero analyzer warnings (`flutter analyze`), and all 60 tests passing in `test/vault_shell_test.dart`.
+
+## 2026-11-14 20:47:35 IST
+
+- Extracted Vault Debug view into dedicated presentation widget.
+  - Moved `_VaultDebugView`, `_DebugHeader`, `_DebugInfoCard`, `_DebugRowsView`, `_DebugInfoRow`, `_DebugFileTreeCard`, `_DebugTreeLineData`, `_DebugTreeLine`, and all debug row formatting helpers into [`lib/features/vault/presentation/widgets/vault_debug_view.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/vault_debug_view.dart).
+  - Streamlined `vault_app_shell.dart` debug tab rendering with clean parameter delegation.
+  - Validated with formatting, clean static analysis, and passing `test/vault_shell_test.dart` (60 tests).
+
+## 2026-11-14 20:45:20 IST
+
+- Completed Section 16 of the production hardening roadmap: extracted shared vault widgets.
+  - Extracted `_EntryMetadataPanel`, `_EntryMetadataLine`, `_EmptyState`, `_TinyChip`, `_SectionHeader`, `_DebugHeader`, `_DebugInfoCard`, `_HomeTypeCard`, `_AllItemsSelectionActionBar`, `_SelectionActionNavItem`, `_AllItemsFiltersOverlay`, and template icon/color/timestamp helpers into [`lib/features/vault/presentation/widgets/vault_common_widgets.dart`](file:///Users/niteshjain/workspace/PersonalProjects/nija/nija/lib/features/vault/presentation/widgets/vault_common_widgets.dart).
+  - Reduced `vault_app_shell.dart` size by over 1,000 lines.
+  - Validated with formatting, clean analyzer check, and passing `test/vault_shell_test.dart` suite (60 tests).
+
+## 2026-11-14 20:38:36 IST
+
+- Hardened static analysis with Dart strict mode and concurrency safety lints.
+  - Enabled `strict-casts: true`, `strict-inference: true`, and `strict-raw-types: true` in `analysis_options.yaml`.
+  - Added `unawaited_futures`, `cancel_subscriptions`, and `close_sinks` lint rules.
+  - Added explicit generic type parameters across raw Map and List usages in onboarding, vault forms, detail screens, cache adapters, and test fixtures.
+  - Verified clean static analysis across the entire project and passing test suite (218 tests).
+
 ## 2026-08-22 18:00:43 IST
 
 - Hardened the browser-agent integration test wrapper diagnostics.
