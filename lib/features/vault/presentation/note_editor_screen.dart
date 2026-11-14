@@ -228,13 +228,22 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                               const SizedBox(height: 10),
                               _NoteEditorPanel(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 6,
+                                  horizontal: 4,
+                                  vertical: 4,
                                 ),
                                 child: quill.QuillSimpleToolbar(
                                   controller: _quillController,
                                   config: const quill.QuillSimpleToolbarConfig(
                                     multiRowsDisplay: false,
+                                    toolbarSectionSpacing: 1,
+                                    showDividers: false,
+                                    buttonOptions:
+                                        quill.QuillSimpleToolbarButtonOptions(
+                                      base: quill.QuillToolbarBaseButtonOptions(
+                                        iconButtonFactor: 1.15,
+                                        iconSize: 15,
+                                      ),
+                                    ),
                                     showFontFamily: false,
                                     showFontSize: true,
                                     showSubscript: false,

@@ -151,14 +151,7 @@ class _VaultHomeView extends StatelessWidget {
                       ),
                     ),
                   )
-                else ...[
-                  IconButton(
-                    key: const ValueKey('dashboard-add-item'),
-                    onPressed: onAddItem,
-                    icon: Icon(Icons.add, color: colorScheme.onSurfaceVariant),
-                    tooltip: 'Create',
-                  ),
-                  const SizedBox(width: 8),
+                else
                   IconButton.outlined(
                     onPressed: onLockNow,
                     icon: Icon(
@@ -167,7 +160,6 @@ class _VaultHomeView extends StatelessWidget {
                     ),
                     tooltip: 'Lock vault',
                   ),
-                ],
               ],
             ),
             if (!isWide)
@@ -306,11 +298,13 @@ class _MobileDashboardList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final categories = _homeDashboardCategories(data);
-    return ListView(
+    final showDemoNotice =
+        data.isDemo || data.canShowDemoPreview || data.isExploreSession;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (data.isDemo ||
-            data.canShowDemoPreview ||
-            data.isExploreSession) ...[
+        if (showDemoNotice) ...[
           _DemoDashboardNotice(
             isActive: data.isDemo || data.isExploreSession,
             isExploreSession: data.isExploreSession,
@@ -319,43 +313,45 @@ class _MobileDashboardList extends StatelessWidget {
           ),
           const SizedBox(height: 12),
         ],
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            final crossAxisCount = width >= 700 ? 4 : 2;
-            final childAspectRatio = crossAxisCount >= 4 ? 1.2 : 1.45;
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                childAspectRatio: childAspectRatio,
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 80),
+            children: [
+              if (categories.isNotEmpty) ...[
+                SizedBox(
+                  height: 84,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: categories.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
+                    itemBuilder: (context, index) {
+                      final entry = categories[index];
+                      return SizedBox(
+                        width: 124,
+                        child: _HomeTypeCard(
+                          label: entry.label,
+                          count: entry.count,
+                          icon: iconForType(entry.filterType),
+                          accent: colorForType(entry.filterType),
+                          onTap: () => onTypeTap(entry.filterType),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
+              _DashboardSectionTitle(title: 'Recent', onViewAll: onViewAll),
+              const SizedBox(height: 6),
+              _DashboardRecentList(
+                recentItems: recentItems,
+                adapters: adapters,
+                keyForRow: keyForRow,
+                onOpenRow: onOpenRow,
+                onRowActions: onRowActions,
               ),
-              itemCount: categories.length,
-              itemBuilder: (context, index) {
-                final entry = categories[index];
-                return _HomeTypeCard(
-                  label: entry.label,
-                  count: entry.count,
-                  icon: iconForType(entry.filterType),
-                  accent: colorForType(entry.filterType),
-                  onTap: () => onTypeTap(entry.filterType),
-                );
-              },
-            );
-          },
-        ),
-        const SizedBox(height: 14),
-        _DashboardSectionTitle(title: 'Recent', onViewAll: onViewAll),
-        const SizedBox(height: 6),
-        _DashboardRecentList(
-          recentItems: recentItems,
-          adapters: adapters,
-          keyForRow: keyForRow,
-          onOpenRow: onOpenRow,
-          onRowActions: onRowActions,
+            ],
+          ),
         ),
       ],
     );

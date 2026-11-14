@@ -708,9 +708,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                     child: const Icon(Icons.add),
                   )
                 : null,
-            floatingActionButtonLocation: useSideNavigation
-                ? FloatingActionButtonLocation.endFloat
-                : FloatingActionButtonLocation.centerDocked,
+            floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
           ),
         ),
       ),

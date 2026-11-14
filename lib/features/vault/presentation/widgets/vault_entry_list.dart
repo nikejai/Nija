@@ -288,6 +288,7 @@ class VaultEntryList extends StatefulWidget {
     this.separatorBuilder,
     this.iconAlpha = 0.28,
     this.rowPadding = const EdgeInsets.fromLTRB(10, 10, 8, 10),
+    this.padding,
   });
 
   final List<Map<String, dynamic>> rows;
@@ -305,6 +306,7 @@ class VaultEntryList extends StatefulWidget {
   final IndexedWidgetBuilder? separatorBuilder;
   final double iconAlpha;
   final EdgeInsetsGeometry rowPadding;
+  final EdgeInsetsGeometry? padding;
 
   @override
   State<VaultEntryList> createState() => _VaultEntryListState();
@@ -323,6 +325,7 @@ class _VaultEntryListState extends State<VaultEntryList> {
   Widget build(BuildContext context) {
     final list = ListView.separated(
       controller: widget.shrinkWrap ? null : _scrollController,
+      padding: widget.padding,
       itemCount: widget.rows.length,
       shrinkWrap: widget.shrinkWrap,
       physics: widget.physics,

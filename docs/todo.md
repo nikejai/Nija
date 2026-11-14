@@ -608,11 +608,11 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [x] **Mask Recovery Phrase preview on feeds**: Hide plaintext seed words in card previews (`••••••••••••`) on Home, All Items, and Favorites for any recovery/security item, requiring a tap and explicit "Reveal" action to view the phrase.
 
 ### Phase 2: Mobile Layout & Navigation
-- [ ] **Remove duplicate + creation button**: Delete the top-right `+` icon in the header and integrate the bottom floating `+` cleanly into the bottom navigation bar so it doesn't overlap scrolling item cards.
-- [ ] **Compact the Home category summary cards**: Convert the 5-card 2-column grid (which leaves Card orphaned on row 3) into a horizontal scroll strip or single-row compact cards so Recent items appear above the fold.
-- [ ] **Remove duplicate branding on landing screen**: Hide the top-left Nija निज logo lockup on the root landing screen (keep only the theme toggle in the top right) so it doesn't repeat right above the hero logo.
-- [ ] **Refine the Demo Mode banner**: Shorten the button label from `Exit explore demo` to `Exit demo` so it stays on one line, and make the banner `position: sticky` below the top header on scroll.
-- [ ] **Fix rich-text toolbar overflow (New Note)**: Reduce horizontal button padding or wrap the formatting toolbar (Undo, Redo, Font size, B, I, U) in an `overflow-x: auto` container so `U` doesn't clip off the right edge on narrow viewports.
+- [x] **Remove duplicate + creation button**: Delete the top-right `+` icon in the header and integrate the bottom floating `+` cleanly into the bottom navigation bar so it doesn't overlap scrolling item cards.
+- [x] **Compact the Home category summary cards**: Convert the 5-card 2-column grid (which leaves Card orphaned on row 3) into a horizontal scroll strip or single-row compact cards so Recent items appear above the fold.
+- [x] **Remove duplicate branding on landing screen**: Hide the top-left Nija निज logo lockup on the root landing screen (keep only the theme toggle in the top right) so it doesn't repeat right above the hero logo.
+- [x] **Refine the Demo Mode banner**: Shorten the button label from `Exit explore demo` to `Exit demo` so it stays on one line, and make the banner `position: sticky` below the top header on scroll.
+- [x] **Fix rich-text toolbar overflow (New Note)**: Reduce horizontal button padding or wrap the formatting toolbar (Undo, Redo, Font size, B, I, U) in an `overflow-x: auto` container so `U` doesn't clip off the right edge on narrow viewports.
 
 ### Phase 3: Forms, Copy & Settings Consistency
 - [ ] **Add password visibility toggles on vault creation**: Add show/hide eye icons to both Master password and Confirm password inputs in Step 1 (Choose Guardian).
