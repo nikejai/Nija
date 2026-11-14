@@ -230,7 +230,9 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         key: const ValueKey('settings-vault-storage-row'),
                         icon: Icons.storage_outlined,
                         title: 'Vault storage',
-                        subtitle: 'Local-first encrypted storage',
+                        subtitle: 'Local device storage is unlimited',
+                        detail:
+                            'Optional cloud backup allocation: $vaultUsageLabel. Local-first vault storage is bounded only by your device capacity.',
                         value: vaultUsageLabel,
                       ),
                     ],

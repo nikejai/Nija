@@ -5477,6 +5477,8 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> {
   final _confirmPasswordController = TextEditingController();
   bool _submitting = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
   @override
   void dispose() {
@@ -5569,20 +5571,47 @@ class _SetupScreenState extends State<SetupScreen> {
             TextField(
               controller: widget.passwordController,
               onChanged: (_) => setState(() {}),
-              obscureText: true,
-              decoration: InputDecoration(labelText: AppStrings.masterPassword),
+              obscureText: _obscurePassword,
+              decoration: InputDecoration(
+                labelText: AppStrings.masterPassword,
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                  tooltip:
+                      _obscurePassword ? 'Show password' : 'Hide password',
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
+                ),
+              ),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: _confirmPasswordController,
               onChanged: (_) => setState(() {}),
-              obscureText: true,
+              obscureText: _obscureConfirmPassword,
               decoration: InputDecoration(
                 labelText: AppStrings.confirmPassword,
                 helperText:
                     _confirmPasswordController.text.isEmpty || _canCreateVault
                     ? null
                     : 'Passwords do not match',
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureConfirmPassword
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                  tooltip: _obscureConfirmPassword
+                      ? 'Show password'
+                      : 'Hide password',
+                  onPressed: () => setState(
+                    () =>
+                        _obscureConfirmPassword = !_obscureConfirmPassword,
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 10),

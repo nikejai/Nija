@@ -1419,7 +1419,7 @@ List<_CategoryOption> _buildCategoryOptions(
   final documents = _CategoryOption(
     kind: 'document',
     type: 'Documents',
-    subtitle: 'Encrypted files up to 5 MB',
+    subtitle: 'Encrypted files up to 25 MB',
     icon: Icons.folder_outlined,
     color: const Color(0xFFFB7185),
   );
@@ -1452,40 +1452,60 @@ List<_CategoryOption> _buildCategoryOptions(
 
 String _subtitleForType(String type) {
   final normalized = type.toLowerCase();
-  if (normalized.contains('password') || normalized.contains('login')) {
-    return 'Website, app, Wi-Fi and more';
+  if (normalized == 'login') {
+    return 'Websites, apps, and accounts';
+  }
+  if (normalized == 'password') {
+    return 'Standalone secret, PIN, or passphrase';
   }
   if (normalized.contains('note')) return 'Secure notes and memos';
   if (normalized.contains('document')) return 'Encrypted files and records';
-  if (normalized.contains('ident') || normalized.contains('passport')) {
-    return 'Personal info and IDs';
+  if (normalized.contains('card')) return 'Credit, debit, and payment cards';
+  if (normalized.contains('bank')) return 'Accounts, routing, and IBAN details';
+  if (normalized.contains('passport')) return 'Passports and travel documents';
+  if (normalized.contains('license key')) return 'Software serials and product keys';
+  if (normalized.contains('license') || normalized.contains('driver')) {
+    return 'Driver license and state IDs';
   }
-  if (normalized.contains('finan') || normalized.contains('bank')) {
-    return 'Accounts, cards, budgets';
+  if (normalized.contains('ident')) return 'Personal info and identity records';
+  if (normalized.contains('ssh')) return 'SSH key pairs and passphrases';
+  if (normalized.contains('api')) return 'API tokens, secrets, and developer keys';
+  if (normalized.contains('wi-fi') || normalized.contains('wifi')) {
+    return 'Network SSID, password, and security';
   }
-  if (normalized.contains('document') || normalized.contains('license')) {
-    return 'Files and important docs';
+  if (normalized.contains('server') || normalized.contains('database')) {
+    return 'Database hosts, ports, and credentials';
   }
+  if (normalized.contains('address')) return 'Contact info and street address';
+  if (normalized.contains('finan')) return 'Financial accounts and budgets';
   if (normalized.contains('health')) return 'Medical info and records';
-  return 'Secure item details';
+  return 'Custom encrypted item';
 }
 
 IconData _iconForCategoryType(String type) {
   final normalized = type.toLowerCase();
-  if (normalized.contains('password') || normalized.contains('login')) {
-    return Icons.lock_outline;
-  }
+  if (normalized == 'login') return Icons.lock_outline;
+  if (normalized == 'password') return Icons.password_outlined;
   if (normalized.contains('note')) return Icons.sticky_note_2_outlined;
   if (normalized.contains('document')) return Icons.folder_outlined;
-  if (normalized.contains('ident') || normalized.contains('passport')) {
+  if (normalized.contains('card')) return Icons.credit_card_outlined;
+  if (normalized.contains('bank')) return Icons.account_balance_outlined;
+  if (normalized.contains('passport')) return Icons.flight_takeoff_outlined;
+  if (normalized.contains('license key')) return Icons.verified_outlined;
+  if (normalized.contains('license') || normalized.contains('driver')) {
     return Icons.badge_outlined;
   }
-  if (normalized.contains('finan') || normalized.contains('bank')) {
-    return Icons.account_balance_wallet_outlined;
+  if (normalized.contains('ident')) return Icons.perm_identity_outlined;
+  if (normalized.contains('ssh')) return Icons.terminal_outlined;
+  if (normalized.contains('api')) return Icons.key_outlined;
+  if (normalized.contains('wi-fi') || normalized.contains('wifi')) {
+    return Icons.wifi_outlined;
   }
-  if (normalized.contains('document') || normalized.contains('license')) {
-    return Icons.folder_outlined;
+  if (normalized.contains('server') || normalized.contains('database')) {
+    return Icons.dns_outlined;
   }
+  if (normalized.contains('address')) return Icons.location_on_outlined;
+  if (normalized.contains('finan')) return Icons.account_balance_wallet_outlined;
   if (normalized.contains('health')) return Icons.favorite_outline;
   return Icons.shield_outlined;
 }
@@ -1517,20 +1537,29 @@ IconData _iconForItemType(
 
 Color _colorForCategoryType(String type) {
   final normalized = type.toLowerCase();
-  if (normalized.contains('password') || normalized.contains('login')) {
-    return const Color(0xFF60A5FA);
-  }
+  if (normalized == 'login') return const Color(0xFF60A5FA);
+  if (normalized == 'password') return const Color(0xFF818CF8);
+  if (normalized.contains('card')) return const Color(0xFF6366F1);
   if (normalized.contains('note')) return const Color(0xFFFBBF24);
   if (normalized.contains('document')) return const Color(0xFFFB7185);
-  if (normalized.contains('ident') || normalized.contains('passport')) {
-    return const Color(0xFF34D399);
+  if (normalized.contains('passport')) return const Color(0xFF0EA5E9);
+  if (normalized.contains('license key')) return const Color(0xFF14B8A6);
+  if (normalized.contains('license') || normalized.contains('driver')) {
+    return const Color(0xFFF97316);
   }
-  if (normalized.contains('finan') || normalized.contains('bank')) {
+  if (normalized.contains('ident')) return const Color(0xFF34D399);
+  if (normalized.contains('bank') || normalized.contains('finan')) {
     return const Color(0xFF22C55E);
   }
-  if (normalized.contains('document') || normalized.contains('license')) {
-    return const Color(0xFFFB923C);
+  if (normalized.contains('ssh')) return const Color(0xFFA855F7);
+  if (normalized.contains('api')) return const Color(0xFF06B6D4);
+  if (normalized.contains('wi-fi') || normalized.contains('wifi')) {
+    return const Color(0xFF10B981);
   }
+  if (normalized.contains('server') || normalized.contains('database')) {
+    return const Color(0xFFE11D48);
+  }
+  if (normalized.contains('address')) return const Color(0xFF64748B);
   if (normalized.contains('health')) return const Color(0xFFF472B6);
   return const Color(0xFF93C5FD);
 }

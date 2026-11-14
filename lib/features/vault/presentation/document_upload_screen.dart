@@ -141,7 +141,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Maximum file size: ${_formatBytes(widget.maxDocumentBytes)}',
+                                'Maximum file size: ${VaultLimits.formatBytes(widget.maxDocumentBytes)}',
                                 style: TextStyle(
                                   color: colorScheme.onSurfaceVariant,
                                   fontSize: 12,
@@ -149,7 +149,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Vault space: ${_formatBytes(widget.currentVaultSizeBytes)} of ${_formatBytes(widget.maxVaultBytes)} used',
+                                'Vault space: ${VaultLimits.formatBytes(widget.currentVaultSizeBytes)} of ${VaultLimits.formatBytes(widget.maxVaultBytes)} used (cloud allocation · local storage is unlimited)',
                                 style: TextStyle(
                                   color: colorScheme.onSurfaceVariant,
                                   fontSize: 12,
@@ -513,10 +513,4 @@ String _fileNameWithoutExtension(String name) {
   return name.substring(0, dot);
 }
 
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  final kb = bytes / 1024;
-  if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} KB';
-  final mb = kb / 1024;
-  return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} MB';
-}
+String _formatBytes(int bytes) => VaultLimits.formatBytes(bytes);
