@@ -193,7 +193,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   bool _storageReady = false;
   late final VaultService _vaultService;
   late String _vaultFilePath;
-  String _activeVaultName = 'vault.nija';
+  String _activeVaultName = 'Personal Vault';
+  String? _activeVaultId;
   int _activeVaultSizeBytes = 0;
   int _activeVaultRevision = 0;
   String _activeVaultVersionId = '';
@@ -368,6 +369,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       ),
       OnboardingStep.unlock => UnlockScreen(
         vaultName: _activeVaultName,
+        vaultId: _activeVaultId,
         guardianProfile: _activeGuardianProfile,
         passwordController: _passwordController,
         pinEnabled: _pinEnabled,
@@ -528,42 +530,70 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             if (_isBusy && !_isExploreDemoSession)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black.withValues(alpha: 0.25),
+                  color: Colors.black.withValues(alpha: 0.35),
                   child: Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 340),
                       child: Card(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        elevation: 4,
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 22,
+                            vertical: 20,
+                          ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const SizedBox(
-                                height: 22,
-                                width: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.5,
-                                ),
+                              Row(
+                                children: [
+                                  const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Text(
+                                      _busyMessage,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 15,
+                                          ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 12),
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 220),
-                                child: Text(
-                                  _busyMessage,
-                                  key: ValueKey(_busyMessage),
-                                  style: Theme.of(context).textTheme.bodyLarge
-                                      ?.copyWith(fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                              const SizedBox(height: 10),
+                              const SizedBox(height: 16),
                               LinearProgressIndicator(
                                 value: _busyProgress.clamp(0, 1),
+                                borderRadius: BorderRadius.circular(4),
                               ),
                               const SizedBox(height: 8),
-                              Text(
-                                '${(_busyProgress * 100).clamp(0, 100).toStringAsFixed(0)}%',
-                                style: Theme.of(context).textTheme.bodyMedium,
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Text(
+                                  '${(_busyProgress * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        fontFamily: 'monospace',
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                      ),
+                                ),
                               ),
                             ],
                           ),
@@ -931,6 +961,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<void> _syncUnlockPresentation({String? vaultLabel}) async {
     _activeVaultName = vaultLabel ?? await _resolveVaultLabel(_vaultFilePath);
+    _activeVaultId = await _resolveVaultId(_vaultFilePath);
     _activeGuardianProfile = await _resolveGuardianForVault(_vaultFilePath);
   }
 
@@ -1066,6 +1097,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       if (!mounted) return;
       _activeVaultName = vaultName;
+      _activeVaultId = _draftVaultId;
       await _resetBiometricForVault(_vaultFilePath);
       await _rememberVaultReference(
         _vaultFilePath,
@@ -3045,14 +3077,64 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<List<VaultReference>> _mergedKnownAndPrivateVaultReferences() async {
     final cached = await _vaultReferenceCache.readAll();
     final discovered = await _discoverPrivateVaultReferences();
-    final byId = <String, VaultReference>{};
+    final byCanonicalId = <String, VaultReference>{};
+
     for (final entry in discovered) {
-      byId[entry.id] = entry;
+      byCanonicalId[entry.id] = entry;
     }
+
     for (final entry in cached) {
-      byId[entry.id] = entry;
+      if (byCanonicalId.containsKey(entry.id)) {
+        final existing = byCanonicalId[entry.id]!;
+        byCanonicalId[entry.id] = VaultReference(
+          id: existing.id,
+          label: (entry.label.isNotEmpty &&
+                  entry.label != 'Personal Vault' &&
+                  entry.label != existing.id &&
+                  entry.label != 'vault.nija')
+              ? entry.label
+              : existing.label,
+          addedAtEpochMs: existing.addedAtEpochMs,
+          lastOpenedAtEpochMs: max(
+            existing.lastOpenedAtEpochMs,
+            entry.lastOpenedAtEpochMs,
+          ),
+          sourceDescription: existing.sourceDescription,
+        );
+        continue;
+      }
+
+      String? resolvedId;
+      try {
+        resolvedId = await _resolveVaultId(entry.id);
+      } catch (_) {
+        resolvedId = null;
+      }
+
+      if (resolvedId != null && byCanonicalId.containsKey(resolvedId)) {
+        final existing = byCanonicalId[resolvedId]!;
+        byCanonicalId[resolvedId] = VaultReference(
+          id: existing.id,
+          label: (entry.label.isNotEmpty &&
+                  entry.label != 'Personal Vault' &&
+                  entry.label != resolvedId &&
+                  entry.label != 'vault.nija')
+              ? entry.label
+              : existing.label,
+          addedAtEpochMs: existing.addedAtEpochMs,
+          lastOpenedAtEpochMs: max(
+            existing.lastOpenedAtEpochMs,
+            entry.lastOpenedAtEpochMs,
+          ),
+          sourceDescription: existing.sourceDescription,
+        );
+        continue;
+      }
+
+      byCanonicalId[entry.id] = entry;
     }
-    return byId.values.toList(growable: true)..sort((a, b) {
+
+    return byCanonicalId.values.toList(growable: true)..sort((a, b) {
       final openCmp = b.lastOpenedAtEpochMs.compareTo(a.lastOpenedAtEpochMs);
       if (openCmp != 0) return openCmp;
       return b.addedAtEpochMs.compareTo(a.addedAtEpochMs);
@@ -3102,9 +3184,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       final header = Map<String, dynamic>.from(decoded);
       final vaultId = header['vaultId']?.toString().trim() ?? '';
       final id = vaultId.isEmpty ? vaultStoreId : vaultId;
-      final label = header['vaultName']?.toString().trim().isNotEmpty == true
-          ? header['vaultName'].toString().trim()
-          : id;
+      final rawName = header['vaultName']?.toString().trim();
+      final label = (rawName != null &&
+              rawName.isNotEmpty &&
+              rawName != 'vault.nija')
+          ? rawName
+          : 'Personal Vault';
       final stat = await headerFile.stat();
       return VaultReference(
         id: id,
@@ -3237,7 +3322,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     final normalized = filePath.replaceAll('\\', '/');
     final parts = normalized.split('/');
     final last = parts.isEmpty ? normalized : parts.last;
-    return last.isEmpty ? 'vault.nija' : last;
+    if (last.isEmpty ||
+        last == 'vault.nija' ||
+        last == 'nija_vault.nija' ||
+        last == 'web_vault.nija' ||
+        _isUuidLike(last)) {
+      return 'Personal Vault';
+    }
+    return last;
   }
 
   Future<String> _resolveVaultStoragePath(String candidate) async {
@@ -3268,17 +3360,69 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   }
 
   Future<String> _resolveVaultLabel(String filePath) async {
+    final knownRef = _findVaultReference(filePath);
+    if (knownRef != null &&
+        knownRef.label.isNotEmpty &&
+        knownRef.label != 'vault.nija' &&
+        knownRef.label != 'nija_vault.nija' &&
+        !_isUuidLike(knownRef.label)) {
+      return knownRef.label;
+    }
+
+    if (_enableVaultReferenceCache) {
+      try {
+        final cached = await _vaultReferenceCache.readAll();
+        final match = cached.where((e) => e.id == filePath).firstOrNull;
+        if (match != null &&
+            match.label.isNotEmpty &&
+            match.label != 'vault.nija' &&
+            match.label != 'nija_vault.nija' &&
+            !_isUuidLike(match.label)) {
+          return match.label;
+        }
+      } catch (_) {}
+    }
+
     try {
       final raw = await _vaultService.readRawVaultFile(filePath: filePath);
       final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       final name = decoded['vaultName']?.toString().trim() ?? '';
-      if (name.isNotEmpty) return name;
-      final id = decoded['vaultId']?.toString().trim() ?? '';
-      if (id.isNotEmpty) return id;
+      if (name.isNotEmpty &&
+          name != 'vault.nija' &&
+          name != 'nija_vault.nija' &&
+          !_isUuidLike(name)) {
+        return name;
+      }
     } catch (_) {
       // Fallback to path-based label.
     }
     return _displayNameForVault(filePath);
+  }
+
+  Future<String?> _resolveVaultId(String filePath) async {
+    try {
+      final raw = await _vaultService.readRawVaultFile(filePath: filePath);
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        final id = decoded['vaultId']?.toString().trim() ?? '';
+        if (id.isNotEmpty) return id;
+      }
+    } catch (_) {
+      // Fallback
+    }
+    final normalized = filePath.replaceAll('\\', '/');
+    final last = normalized.split('/').last;
+    final clean =
+        last.endsWith('.nija') ? last.substring(0, last.length - 5) : last;
+    if (_isUuidLike(clean)) return clean;
+    return null;
+  }
+
+  static bool _isUuidLike(String value) {
+    final clean =
+        value.endsWith('.nija') ? value.substring(0, value.length - 5) : value;
+    final parts = clean.split('-');
+    return parts.length == 5 && clean.length == 36;
   }
 
   void _prepareVaultDraft() {

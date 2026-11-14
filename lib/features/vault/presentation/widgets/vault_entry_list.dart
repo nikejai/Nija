@@ -71,7 +71,39 @@ class VaultItemListEntryAdapter extends VaultListEntryAdapter {
   }
 }
 
+bool _isRecoveryOrSecurityNote(Map<String, dynamic> note) {
+  if (note['id']?.toString() == 'note-recovery-phrase') return true;
+  final tags = (note['tags'] as List<dynamic>?)
+          ?.map((t) => t.toString().toLowerCase().trim())
+          .toSet() ??
+      <String>{};
+  if (tags.contains('recovery') || tags.contains('seed')) return true;
+  final title = note['title']?.toString().toLowerCase().trim() ?? '';
+  if (title.contains('recovery phrase') || title.contains('seed phrase')) {
+    return true;
+  }
+  return false;
+}
+
+bool _isRecoveryOrSecurityItem(Map<String, dynamic> entry) {
+  final tags = (entry['tags'] as List<dynamic>?)
+          ?.map((t) => t.toString().toLowerCase().trim())
+          .toSet() ??
+      <String>{};
+  if (tags.contains('recovery') || tags.contains('seed')) return true;
+  final title = entry['title']?.toString().toLowerCase().trim() ?? '';
+  if (title.contains('recovery phrase') || title.contains('seed phrase')) {
+    return true;
+  }
+  final type = entry['type']?.toString().toLowerCase().trim() ?? '';
+  if (type.contains('recovery') || type.contains('seed')) return true;
+  return false;
+}
+
 String _safeVaultItemSubtitle(Map<String, dynamic> entry) {
+  if (_isRecoveryOrSecurityItem(entry)) {
+    return '••••••••••••';
+  }
   final storedSubtitle = entry['subtitle']?.toString().trim() ?? '';
   final fields = entry['fields'];
   if (fields is! List) return storedSubtitle;
@@ -123,6 +155,9 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
 }
 
 String _noteListPreviewText(Map<String, dynamic> note) {
+  if (_isRecoveryOrSecurityNote(note)) {
+    return '••••••••••••';
+  }
   final delta = note['delta'];
   if (delta is! List) {
     return note['preview']?.toString() ?? '';

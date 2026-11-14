@@ -10,6 +10,7 @@ class UnlockScreen extends StatefulWidget {
   const UnlockScreen({
     super.key,
     required this.vaultName,
+    this.vaultId,
     required this.guardianProfile,
     required this.passwordController,
     this.pinEnabled = false,
@@ -30,6 +31,7 @@ class UnlockScreen extends StatefulWidget {
   });
 
   final String vaultName;
+  final String? vaultId;
   final GuardianProfile guardianProfile;
   final TextEditingController passwordController;
   final bool pinEnabled;
@@ -102,6 +104,33 @@ class _UnlockScreenState extends State<UnlockScreen> {
         unawaited(widget.onPinUnlock!());
       });
     }
+  }
+
+  String _displayTitle() {
+    final raw = widget.vaultName.trim();
+    if (raw.isEmpty ||
+        raw == 'vault.nija' ||
+        raw == 'nija_vault.nija' ||
+        raw == 'web_vault.nija' ||
+        _isUuid(raw)) {
+      return 'Personal Vault';
+    }
+    return raw;
+  }
+
+  String _truncatedId() {
+    final rawId = (widget.vaultId ?? (_isUuid(widget.vaultName) ? widget.vaultName : '')).trim();
+    final clean = rawId.endsWith('.nija') ? rawId.substring(0, rawId.length - 5) : rawId;
+    if (clean.length > 8 && _isUuid(clean)) {
+      return '${clean.substring(0, 4)}...${clean.substring(clean.length - 4)}';
+    }
+    return '';
+  }
+
+  static bool _isUuid(String value) {
+    final clean = value.endsWith('.nija') ? value.substring(0, value.length - 5) : value;
+    final parts = clean.split('-');
+    return parts.length == 5 && clean.length == 36;
   }
 
   @override
@@ -189,12 +218,25 @@ class _UnlockScreenState extends State<UnlockScreen> {
                           ),
                           const SizedBox(height: 14),
                           Text(
-                            widget.vaultName,
+                            _displayTitle(),
                             textAlign: TextAlign.center,
                             style: EntryTypography.unlockTitle(
                               colorScheme.onSurface,
                             ),
                           ),
+                          if (_truncatedId().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              _truncatedId(),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                color: colorScheme.onSurfaceVariant,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 8),
                           Text(
                             protectedBy,

@@ -602,10 +602,10 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 ## 18) UI/UX Polish, Critical Fixes & Visual Cohesion
 
 ### Phase 1: Critical Bugs & Security
-- [ ] **Persist custom vault name**: Display the user-entered vault name (Nija Vault or fallback "Personal Vault") instead of the raw UUID across the Unlock screen, Home header, and "Known vaults" list; move a truncated ID (`6bd4...f219`) to secondary monospace metadata.
-- [ ] **Deduplicate "Known vaults" entries**: Fix state registration during vault creation so a newly created vault appears only once in the Known vaults list.
-- [ ] **Fix overlapping text in Unlock progress modal**: Prevent `Decrypting vault...` and `Starting vault unlock...` from rendering simultaneously on top of each other, and remove the stray `)` character in the top-left corner of the modal.
-- [ ] **Mask Recovery Phrase preview on feeds**: Hide plaintext seed words in card previews (`••••••••••••`) on Home, All Items, and Favorites for any recovery/security item, requiring a tap and explicit "Reveal" action to view the phrase.
+- [x] **Persist custom vault name**: Display the user-entered vault name (Nija Vault or fallback "Personal Vault") instead of the raw UUID across the Unlock screen, Home header, and "Known vaults" list; move a truncated ID (`6bd4...f219`) to secondary monospace metadata.
+- [x] **Deduplicate "Known vaults" entries**: Fix state registration during vault creation so a newly created vault appears only once in the Known vaults list.
+- [x] **Fix overlapping text in Unlock progress modal**: Prevent `Decrypting vault...` and `Starting vault unlock...` from rendering simultaneously on top of each other, and remove the stray `)` character in the top-left corner of the modal.
+- [x] **Mask Recovery Phrase preview on feeds**: Hide plaintext seed words in card previews (`••••••••••••`) on Home, All Items, and Favorites for any recovery/security item, requiring a tap and explicit "Reveal" action to view the phrase.
 
 ### Phase 2: Mobile Layout & Navigation
 - [ ] **Remove duplicate + creation button**: Delete the top-right `+` icon in the header and integrate the bottom floating `+` cleanly into the bottom navigation bar so it doesn't overlap scrolling item cards.
