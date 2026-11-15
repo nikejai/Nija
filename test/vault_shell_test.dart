@@ -880,6 +880,112 @@ void main() {
     expect(lockCalls, 1);
   });
 
+  testWidgets('demo preview shows demo folders and items in folders tab', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'empty.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'cabin',
+            'cactus',
+            'canyon',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Enable demo preview
+    expect(find.text('View demo preview'), findsOneWidget);
+    await tester.tap(find.text('View demo preview'));
+    await tester.pumpAndSettle();
+
+    // Open Folders tab
+    await tester.tap(find.text('Folders').first);
+    await tester.pumpAndSettle();
+
+    // Verify root directory shows demo folders and Default
+    expect(find.text('Root Directory'), findsOneWidget);
+    expect(find.text('Personal'), findsOneWidget);
+    expect(find.text('Work'), findsOneWidget);
+    expect(find.text('Finance'), findsOneWidget);
+    expect(find.text('Travel'), findsOneWidget);
+    expect(find.text('Default'), findsOneWidget);
+
+    // Navigate into Work folder
+    await tester.tap(find.text('Work'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Projects & Infra'), findsOneWidget);
+    expect(find.text('GitHub'), findsOneWidget);
+
+    // Navigate into Projects & Infra subfolder
+    await tester.tap(find.text('Projects & Infra'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AWS'), findsOneWidget);
+    expect(find.text('Production DB Cluster'), findsOneWidget);
+
+    // Navigate back to Root using Up/Back buttons
+    await tester.tap(find.byTooltip('Up to parent folder').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Up to parent folder').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Root Directory'), findsOneWidget);
+
+    // Navigate into Finance
+    await tester.tap(find.text('Finance'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tax 2026'), findsOneWidget);
+    expect(find.text('Primary Card'), findsOneWidget);
+
+    // Navigate into Tax 2026 subfolder
+    await tester.tap(find.text('Tax 2026'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('W-2 Wage & Tax Statement'), findsOneWidget);
+  });
+
   testWidgets('demo preview does not replace real all-items data', (
     tester,
   ) async {

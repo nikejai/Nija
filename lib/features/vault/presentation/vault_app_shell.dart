@@ -327,6 +327,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
             (entry) => Map<String, dynamic>.from(entry),
           ),
         );
+        _folders.addAll(VaultHomeDemoData.cloneFolders());
       }
       _dashboardDataCache = null;
       _dashboardDataSignature = null;
@@ -757,11 +758,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
   String? _currentExplorerFolderId;
 
   Widget _buildFoldersTab(BuildContext context) {
+    final demoMode = _shouldShowHomeDemoData;
+    final folders = demoMode ? VaultHomeDemoData.demoFolders : _folders;
+    final items = demoMode ? VaultHomeDemoData.items : _items;
+    final notes = demoMode ? VaultHomeDemoData.notes : _notes;
+
     return VaultFoldersView(
       isWide: _isWideLayout(context),
-      folders: _folders,
-      items: _items,
-      notes: _notes,
+      folders: folders,
+      items: items,
+      notes: notes,
       colorForType: _colorForDashboardType,
       iconForType: _iconForDashboardType,
       onFolderChanged: (folderId) => _currentExplorerFolderId = folderId,
