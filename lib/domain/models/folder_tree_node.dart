@@ -32,7 +32,23 @@ class FolderTreeNode {
   int get totalSizeBytes {
     var total = 0;
     for (final item in items) {
-      final size = item['size'] ?? item['sizeBytes'];
+      var size = item['size'] ?? item['sizeBytes'] ?? item['documentSizeBytes'];
+      if (size == null && item['documents'] is List) {
+        var docTotal = 0;
+        for (final doc in item['documents'] as List) {
+          if (doc is Map) {
+            final ds =
+                doc['documentSizeBytes'] ?? doc['sizeBytes'] ?? doc['size'];
+            if (ds is num) {
+              docTotal += ds.toInt();
+            } else if (ds is String) {
+              docTotal += int.tryParse(ds) ?? 0;
+            }
+          }
+        }
+        if (docTotal > 0) size = docTotal;
+      }
+
       if (size is num) {
         total += size.toInt();
       } else if (size is String) {
