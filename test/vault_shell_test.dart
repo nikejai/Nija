@@ -962,10 +962,19 @@ void main() {
     await tester.tap(find.text('Projects & Infra'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Production Cloud'), findsOneWidget);
+    expect(find.text('API Keys & Auth'), findsOneWidget);
+
+    // Navigate into Production Cloud subfolder
+    await tester.tap(find.text('Production Cloud'));
+    await tester.pumpAndSettle();
+
     expect(find.text('AWS'), findsOneWidget);
     expect(find.text('Production DB Cluster'), findsOneWidget);
 
-    // Navigate back to Root using Up/Back buttons
+    // Navigate back to Root using Up buttons
+    await tester.tap(find.byTooltip('Up to parent folder').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Up to parent folder').first);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Up to parent folder').first);
@@ -977,13 +986,21 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Tax 2026'), findsOneWidget);
-    expect(find.text('Primary Card'), findsOneWidget);
+    expect(find.text('Banking & Cards'), findsOneWidget);
 
     // Navigate into Tax 2026 subfolder
     await tester.tap(find.text('Tax 2026'));
     await tester.pumpAndSettle();
 
     expect(find.text('W-2 Wage & Tax Statement'), findsOneWidget);
+
+    // Navigate up and into Banking & Cards
+    await tester.tap(find.byTooltip('Up to parent folder').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Banking & Cards'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Primary Card'), findsOneWidget);
   });
 
   testWidgets('demo preview does not replace real all-items data', (

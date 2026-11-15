@@ -108,6 +108,9 @@ class VaultFoldersView extends StatefulWidget {
     required this.onMoveItem,
     required this.onCopyItem,
     required this.onDeleteItem,
+    this.isDemoPreview = false,
+    this.onExitDemoPreview,
+    this.onOpenDemoPreview,
     this.onFolderChanged,
     this.iconForType,
     this.colorForType,
@@ -127,6 +130,9 @@ class VaultFoldersView extends StatefulWidget {
   final void Function(Map<String, dynamic> item, String? targetFolderId) onMoveItem;
   final void Function(Map<String, dynamic> item, String? targetFolderId) onCopyItem;
   final ValueChanged<Map<String, dynamic>> onDeleteItem;
+  final bool isDemoPreview;
+  final VoidCallback? onExitDemoPreview;
+  final VoidCallback? onOpenDemoPreview;
   final ValueChanged<String?>? onFolderChanged;
   final IconData Function(String type)? iconForType;
   final Color Function(String type)? colorForType;
@@ -339,6 +345,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Demo preview indicator banner
+          if (widget.isDemoPreview) _buildDemoBanner(context),
+
           // Consolidated, space-optimized Explorer Header
           _buildExplorerHeader(context, breadcrumbs),
           const Divider(height: 1),
@@ -347,6 +356,45 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           Expanded(
             child: _buildExplorerBody(context),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDemoBanner(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('explorer-demo-preview-banner'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorScheme.secondaryContainer.withValues(alpha: 0.5),
+        border: Border(bottom: BorderSide(color: colorScheme.secondary.withValues(alpha: 0.2))),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.visibility_outlined, size: 16, color: colorScheme.secondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Viewing Demo Folders & Files',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSecondaryContainer,
+              ),
+            ),
+          ),
+          if (widget.onExitDemoPreview != null)
+            TextButton(
+              key: const ValueKey('explorer-exit-demo-button'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                minimumSize: const Size(0, 28),
+              ),
+              onPressed: widget.onExitDemoPreview,
+              child: const Text('Exit Demo', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            ),
         ],
       ),
     );
@@ -1193,6 +1241,19 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
             ),
+            if (widget.onOpenDemoPreview != null && !widget.isDemoPreview) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                key: const ValueKey('explorer-empty-demo-preview-button'),
+                icon: const Icon(Icons.visibility_outlined, size: 16),
+                label: const Text('Preview Demo Folders & Files'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 36),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: widget.onOpenDemoPreview,
+              ),
+            ],
           ],
         ),
       ),

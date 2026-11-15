@@ -755,10 +755,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
     };
   }
 
+  bool _showFolderDemoPreview = false;
   String? _currentExplorerFolderId;
 
   Widget _buildFoldersTab(BuildContext context) {
-    final demoMode = _shouldShowHomeDemoData;
+    final demoMode = _showFolderDemoPreview || _shouldShowHomeDemoData || widget.isExploreDemoSession;
     final folders = demoMode ? VaultHomeDemoData.demoFolders : _folders;
     final items = demoMode ? VaultHomeDemoData.items : _items;
     final notes = demoMode ? VaultHomeDemoData.notes : _notes;
@@ -768,6 +769,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
       folders: folders,
       items: items,
       notes: notes,
+      isDemoPreview: demoMode,
+      onOpenDemoPreview: () => setState(() => _showFolderDemoPreview = true),
+      onExitDemoPreview: () => setState(() => _showFolderDemoPreview = false),
       colorForType: _colorForDashboardType,
       iconForType: _iconForDashboardType,
       onFolderChanged: (folderId) => _currentExplorerFolderId = folderId,
@@ -831,6 +835,27 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 onTap: () {
                   Navigator.pop(ctx);
                   _openUploadDocumentToFolder(effectiveFolderId);
+                },
+              ),
+              ListTile(
+                key: const ValueKey('explorer-fab-demo-preview'),
+                leading: const Icon(Icons.visibility_outlined, color: Color(0xFF8B5CF6)),
+                title: Text(
+                  (_showFolderDemoPreview || _shouldShowHomeDemoData || widget.isExploreDemoSession)
+                      ? 'Exit Demo Preview'
+                      : 'Demo Folders Preview',
+                ),
+                subtitle: const Text('Explore nested folders, files, and tree view'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    if (_showFolderDemoPreview || _shouldShowHomeDemoData || widget.isExploreDemoSession) {
+                      _showFolderDemoPreview = false;
+                      _showHomeDemoPreview = false;
+                    } else {
+                      _showFolderDemoPreview = true;
+                    }
+                  });
                 },
               ),
             ],
