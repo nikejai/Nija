@@ -724,7 +724,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   ),
             floatingActionButton: _tabIndex == 0 || _tabIndex == 1 || _tabIndex == 2
                 ? FloatingActionButton.small(
-                    onPressed: () => _openAddItemScreen(context),
+                    onPressed: () {
+                      if (_tabIndex == 2) {
+                        _showFolderSpeedDial(context);
+                      } else {
+                        _openAddItemScreen(context);
+                      }
+                    },
                     child: const Icon(Icons.add),
                   )
                 : null,
@@ -767,6 +773,84 @@ class _VaultAppShellState extends State<VaultAppShell> {
       onMoveItem: _moveItemToFolder,
       onCopyItem: _copyItemToFolder,
       onDeleteItem: _deleteItemFromExplorer,
+    );
+  }
+
+  void _showFolderSpeedDial(BuildContext context) {
+    if (_blockExploreDemoWrite()) return;
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.create_new_folder_outlined, color: Color(0xFFEAB308)),
+                title: const Text('New Folder'),
+                subtitle: const Text('Create a folder to organize items'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showCreateFolderModal(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.add_circle_outline, color: Color(0xFF3B82F6)),
+                title: const Text('Add Item'),
+                subtitle: const Text('Add password, note, card, or credential'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openAddItemScreen(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.upload_file_outlined, color: Color(0xFF10B981)),
+                title: const Text('Upload File'),
+                subtitle: const Text('Upload an encrypted document or attachment'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openUploadDocumentToFolder(null);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCreateFolderModal(BuildContext context) {
+    final controller = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create New Folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Folder Name',
+            hintText: 'e.g. Work, Taxes, Identity',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                _createFolder(name, null, null);
+                Navigator.pop(ctx);
+              }
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1137,8 +1221,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   void _openVaultListRow(BuildContext context, Map<String, dynamic> row) {
-    final kind = row['kind']?.toString() ?? 'item';
-    final entry = row['entry'] as Map<String, dynamic>;
+    final entry = (row['entry'] is Map<String, dynamic>)
+        ? row['entry'] as Map<String, dynamic>
+        : row;
+    final kind = row['kind']?.toString() ??
+        (entry['type'] == 'Secure Note' || entry.containsKey('delta') ? 'note' : 'item');
     if (kind == 'note') {
       _openNoteDetail(context, entry);
     } else if (_isDocumentItem(entry)) {

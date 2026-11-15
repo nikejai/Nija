@@ -425,9 +425,12 @@ void main() {
       List<VaultFolder> folders = const [],
       List<Map<String, dynamic>> items = const [],
       List<Map<String, dynamic>> notes = const [],
+      void Function(String? folderId)? onAddItemToFolder,
       void Function(String name, String? parentId, String? color)? onCreateFolder,
       void Function(String id, String newName)? onRenameFolder,
       void Function(String id, bool cascade)? onDeleteFolder,
+      void Function(Map<String, dynamic> item, String? targetFolderId)? onMoveItem,
+      void Function(Map<String, dynamic> item, String? targetFolderId)? onCopyItem,
     }) {
       return MaterialApp(
         home: Scaffold(
@@ -437,14 +440,14 @@ void main() {
             items: items,
             notes: notes,
             onOpenItem: (_) {},
-            onAddItemToFolder: (_) {},
+            onAddItemToFolder: onAddItemToFolder ?? (_) {},
             onUploadDocumentToFolder: (_) {},
             onCreateFolder: onCreateFolder ?? (_, _, _) {},
             onRenameFolder: onRenameFolder ?? (_, _) {},
             onMoveFolder: (_, _) {},
             onDeleteFolder: onDeleteFolder ?? (_, _) {},
-            onMoveItem: (_, _) {},
-            onCopyItem: (_, _) {},
+            onMoveItem: onMoveItem ?? (_, _) {},
+            onCopyItem: onCopyItem ?? (_, _) {},
             onDeleteItem: (_) {},
           ),
         ),
@@ -577,7 +580,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Drafts'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.more_vert).first);
+      await tester.tap(
+        find.descendant(
+          of: find.widgetWithText(Card, 'Drafts'),
+          matching: find.byIcon(Icons.more_vert),
+        ),
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Rename'));
@@ -611,7 +619,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Temp'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.more_vert).first);
+      await tester.tap(
+        find.descendant(
+          of: find.widgetWithText(Card, 'Temp'),
+          matching: find.byIcon(Icons.more_vert),
+        ),
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Delete'));
@@ -622,6 +635,100 @@ void main() {
 
       expect(deletedId, 'f1');
       expect(cascadeOption, isTrue);
+    });
+
+    testWidgets('displays Default folder at root and shows unorganized items inside it', (tester) async {
+      final unorganizedItem = {
+        'id': 'item-default-1',
+        'title': 'My Secret Password',
+        'type': 'Password',
+        'folderId': null,
+      };
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: const [],
+        items: [unorganizedItem],
+      ));
+      await tester.pumpAndSettle();
+
+      // At root, the Default folder is shown
+      expect(find.text('Default'), findsOneWidget);
+      // Items are grouped inside Default, so not directly in root list
+      expect(find.text('My Secret Password'), findsNothing);
+
+      // Navigate into Default folder
+      await tester.tap(find.text('Default'));
+      await tester.pumpAndSettle();
+
+      // Now inside Default, the item is displayed
+      expect(find.text('My Secret Password'), findsOneWidget);
+    });
+
+    testWidgets('allows adding item to folder from action bar button', (tester) async {
+      String? targetFolderId;
+      await tester.pumpWidget(buildTestFoldersView(
+        onAddItemToFolder: (fid) => targetFolderId = fid,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('explorer-add-item-button')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('explorer-add-item-button')));
+      await tester.pumpAndSettle();
+
+      expect(targetFolderId, isNull);
+    });
+
+    testWidgets('allows moving an item to Default folder', (tester) async {
+      final itemInCustom = {
+        'id': 'item-custom-1',
+        'title': 'Database URL',
+        'type': 'Server',
+        'folderId': 'f1',
+      };
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Infrastructure',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      Map<String, dynamic>? movedItem;
+      String? targetFolder;
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        items: [itemInCustom],
+        onMoveItem: (item, target) {
+          movedItem = item;
+          targetFolder = target;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      // Open Infrastructure folder
+      await tester.tap(find.text('Infrastructure'));
+      await tester.pumpAndSettle();
+      expect(find.text('Database URL'), findsOneWidget);
+
+      // Tap item actions and select Move to...
+      await tester.tap(
+        find.descendant(
+          of: find.widgetWithText(Card, 'Database URL'),
+          matching: find.byIcon(Icons.more_vert),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Move to...'));
+      await tester.pumpAndSettle();
+
+      // Choose Default Folder
+      expect(find.text('Default Folder'), findsOneWidget);
+      await tester.tap(find.text('Default Folder'));
+      await tester.pumpAndSettle();
+
+      expect(movedItem?['id'], 'item-custom-1');
+      expect(targetFolder, isNull);
     });
   });
 }

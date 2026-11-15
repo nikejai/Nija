@@ -23,7 +23,10 @@ class FolderTreeBuilder {
 
     // Associate items to their containing folders
     for (final item in items) {
-      final folderId = item['folderId']?.toString();
+      var folderId = item['folderId']?.toString();
+      if ((folderId == null || folderId.trim().isEmpty) && nodeMap.containsKey('default')) {
+        folderId = 'default';
+      }
       if (folderId != null && nodeMap.containsKey(folderId)) {
         nodeMap[folderId]!.items.add(item);
       }
@@ -163,6 +166,13 @@ class FolderTreeBuilder {
     bool recursive = false,
     List<VaultFolder> folders = const <VaultFolder>[],
   }) {
+    if (folderId == 'default') {
+      return items.where((item) {
+        final fid = item['folderId']?.toString().trim();
+        return fid == null || fid.isEmpty || fid == 'default';
+      }).toList();
+    }
+
     if (folderId == null || folderId.trim().isEmpty) {
       if (!recursive) {
         // Items in root (no folderId or empty folderId)
