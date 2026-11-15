@@ -92,7 +92,9 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         subtitle: currentVaultUpdatedLabel == 'Unknown'
                             ? 'Saved vault metadata'
                             : 'Updated $currentVaultUpdatedLabel',
-                        detail: currentVaultVersionLabel,
+                        value: currentVaultVersionLabel == 'Unknown'
+                            ? null
+                            : currentVaultVersionLabel,
                       ),
                     ],
                   ),
@@ -245,9 +247,18 @@ extension _VaultSettingsTab on _VaultAppShellState {
                               : _cloudBackupAccountLabel == 'Not connected' ||
                                   _cloudBackupLastAtEpochMs <= 0 ||
                                   _cloudBackupUpdatedAt.trim().isEmpty
-                              ? 'Vault updated: Never'
+                              ? 'Never backed up'
                               : 'Vault updated: ${_formatVaultIsoTimestamp(_cloudBackupUpdatedAt)}',
-                          detail: backedUpVaultVersionDisplay,
+                          value: _cloudBackupSummaryRefreshInProgress &&
+                                  _cloudBackupRevision <= 0 &&
+                                  _cloudBackupVersionId.trim().isEmpty
+                              ? 'Checking'
+                              : (_cloudBackupAccountLabel == 'Not connected' ||
+                                      _cloudBackupLastAtEpochMs <= 0 ||
+                                      backedUpVaultVersionDisplay == 'None' ||
+                                      backedUpVaultVersionDisplay == 'Unknown')
+                              ? null
+                              : backedUpVaultVersionDisplay,
                         ),
                       ],
                       if (_cloudRestoreFeatureAvailable ||
@@ -285,10 +296,7 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         key: const ValueKey('settings-vault-storage-row'),
                         icon: Icons.storage_outlined,
                         title: 'Vault storage',
-                        subtitle: 'Local device storage is unlimited',
-                        detail:
-                            'Optional cloud backup allocation: $vaultUsageLabel. Local-first vault storage is bounded only by your device capacity.',
-                        value: vaultUsageLabel,
+                        subtitle: 'Local storage · Allocation: $vaultUsageLabel',
                       ),
                     ],
                   ),
