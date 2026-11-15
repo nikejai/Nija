@@ -19,8 +19,6 @@ import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/secure_clipboard.dart';
 import '../../../domain/validators/vault_validators.dart';
 import '../../../domain/models/vault_folder.dart';
-import '../../../domain/models/folder_tree_node.dart';
-import '../../../domain/models/folder_tree_builder.dart';
 import '../../../application/services/vault_folder_manager.dart';
 import '../application/vault_entry_activity.dart';
 import '../application/vault_home_demo_data.dart';
@@ -36,6 +34,7 @@ import 'widgets/vault_document_preview_widgets.dart';
 import 'widgets/pwa_install_dialog.dart';
 import 'widgets/vault_page_heading.dart';
 import 'widgets/vault_surface_menu.dart';
+import 'widgets/vault_folders_view.dart';
 
 part 'widgets/encrypted_import_widgets.dart';
 part 'custom_template_manager_screen.dart';
@@ -48,7 +47,6 @@ part 'widgets/vault_home_view.dart';
 part 'widgets/vault_types_view.dart';
 part 'widgets/vault_favorites_view.dart';
 part 'widgets/vault_settings_view.dart';
-part 'widgets/vault_folders_view.dart';
 
 String _vaultDashboardTypeCode(String type) {
   return switch (type) {
@@ -747,6 +745,164 @@ class _VaultAppShellState extends State<VaultAppShell> {
       5 when _debugTabVisible => _buildDebugInternalsTab(context),
       _ => _buildVaultTab(context),
     };
+  }
+
+  Widget _buildFoldersTab(BuildContext context) {
+    return VaultFoldersView(
+      isWide: _isWideLayout(context),
+      folders: _folders,
+      items: _items,
+      notes: _notes,
+      colorForType: _colorForDashboardType,
+      iconForType: _iconForDashboardType,
+      onOpenItem: (item) => _openVaultListRow(context, item),
+      onAddItemToFolder: (folderId) =>
+          _openAddItemScreen(context, initialFolderId: folderId),
+      onUploadDocumentToFolder: (folderId) =>
+          _openUploadDocumentToFolder(folderId),
+      onCreateFolder: _createFolder,
+      onRenameFolder: _renameFolder,
+      onMoveFolder: _moveFolder,
+      onDeleteFolder: _deleteFolder,
+      onMoveItem: _moveItemToFolder,
+      onCopyItem: _copyItemToFolder,
+      onDeleteItem: _deleteItemFromExplorer,
+    );
+  }
+
+  void _createFolder(String name, String? parentId, String? color) {
+    _updateState(() {
+      _folders = _folderManager.createFolder(
+        folders: _folders,
+        name: name,
+        parentId: parentId,
+        color: color,
+      );
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _renameFolder(String folderId, String newName) {
+    _updateState(() {
+      _folders = _folderManager.renameFolder(
+        folders: _folders,
+        folderId: folderId,
+        newName: newName,
+      );
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _moveFolder(String folderId, String? newParentId) {
+    _updateState(() {
+      _folders = _folderManager.moveFolder(
+        folders: _folders,
+        folderId: folderId,
+        newParentId: newParentId,
+      );
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _deleteFolder(String folderId, bool cascade) {
+    _updateState(() {
+      final res = _folderManager.deleteFolder(
+        folders: _folders,
+        items: _items,
+        folderId: folderId,
+        cascade: cascade,
+      );
+      _folders = res.folders;
+      _items.clear();
+      _items.addAll(res.items);
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _moveItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
+    final updated = _folderManager.moveItemToFolder(
+      item: item,
+      targetFolderId: targetFolderId,
+    );
+    _updateState(() {
+      final idx = _items.indexWhere((i) => i['id'] == item['id']);
+      if (idx >= 0) {
+        _items[idx] = updated;
+      } else {
+        final noteIdx = _notes.indexWhere((n) => n['id'] == item['id']);
+        if (noteIdx >= 0) {
+          _notes[noteIdx] = updated;
+        }
+      }
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _copyItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
+    final copy = _folderManager.copyItemToFolder(
+      item: item,
+      targetFolderId: targetFolderId,
+    );
+    _updateState(() {
+      if (item['type'] == 'Secure Note' || item.containsKey('delta')) {
+        _notes.add(copy);
+      } else {
+        _items.add(copy);
+      }
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _deleteItemFromExplorer(Map<String, dynamic> item) {
+    final itemId = item['id'];
+    _updateState(() {
+      _items.removeWhere((i) => i['id'] == itemId);
+      _notes.removeWhere((n) => n['id'] == itemId);
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  Future<void> _openUploadDocumentToFolder(String? folderId) async {
+    if (_blockExploreDemoWrite()) return;
+    if (widget.onPersistVaultDocument == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Document storage unavailable in this session.'),
+        ),
+      );
+      return;
+    }
+
+    final created = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => DocumentUploadScreen(
+          currentVaultSizeBytes: _effectiveVaultSizeBytes,
+          maxVaultBytes: _effectiveMaxVaultBytes,
+          maxDocumentBytes: VaultLimits.maxDocumentBytes,
+          onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+        ),
+      ),
+    );
+
+    if (created == null) return;
+    final item = Map<String, dynamic>.from(created);
+    if (folderId != null) {
+      item['folderId'] = folderId;
+    }
+    try {
+      if (!await _isPendingDocumentStored(item)) return;
+      if (!await _arePendingAttachmentsStored(item)) return;
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to save document.')),
+      );
+      return;
+    }
+    _updateState(() {
+      _items.insert(0, item);
+    });
+    await _persistVaultData();
   }
 
   bool get _debugInternalsFeatureAvailable =>

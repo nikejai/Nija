@@ -1,9 +1,11 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/application/services/vault_folder_manager.dart';
 import 'package:nija/domain/models/folder_tree_builder.dart';
 import 'package:nija/domain/models/vault_entry_data.dart';
 import 'package:nija/domain/models/vault_folder.dart';
 import 'package:nija/domain/models/vault_payload.dart';
+import 'package:nija/features/vault/presentation/widgets/vault_folders_view.dart';
 
 void main() {
   group('VaultFolder Model', () {
@@ -165,16 +167,14 @@ void main() {
         items: sampleItems,
       );
 
-      expect(tree.length, 2); // 'Personal' and 'Work' (sorted alphabetically)
+      expect(tree.length, 2);
       expect(tree[0].folder.name, 'Personal');
       expect(tree[1].folder.name, 'Work');
 
       final workNode = tree[1];
       expect(workNode.subfolderCount, 1);
       expect(workNode.directItemCount, 1);
-      // Total items = work doc (1) + project spec (1) + app architecture (1) = 3
       expect(workNode.totalItemCount, 3);
-      // Total bytes = 2048 + 4096 + 8192 = 14336
       expect(workNode.totalSizeBytes, 14336);
 
       final projectsNode = workNode.children.first;
@@ -253,7 +253,6 @@ void main() {
         items: [],
       );
 
-      // Cycle was safely broken so app does not hang or infinite recurse
       expect(tree.isNotEmpty, isTrue);
     });
 
@@ -332,7 +331,6 @@ void main() {
 
       final folders = [f1, f2, f3];
 
-      // Moving f3 to root
       final movedToRoot = manager.moveFolder(
         folders: folders,
         folderId: 'f3',
@@ -340,7 +338,6 @@ void main() {
       );
       expect(movedToRoot.firstWhere((f) => f.id == 'f3').isRoot, isTrue);
 
-      // Attempting to move f1 into its own subfolder f2 should throw ArgumentError
       expect(
         () => manager.moveFolder(
           folders: folders,
@@ -350,7 +347,6 @@ void main() {
         throwsArgumentError,
       );
 
-      // Attempting to move f1 into itself should throw ArgumentError
       expect(
         () => manager.moveFolder(
           folders: folders,
@@ -381,7 +377,6 @@ void main() {
         {'id': 'i2', 'title': 'Receipt', 'folderId': 'f2'},
       ];
 
-      // Reparent delete: f1 is deleted, f2 is moved to root (since f1 was root), i1 is moved to root
       final reparentResult = manager.deleteFolder(
         folders: folders,
         items: items,
@@ -394,7 +389,6 @@ void main() {
       expect(reparentResult.folders.first.parentId, isNull);
       expect(reparentResult.items.firstWhere((i) => i['id'] == 'i1')['folderId'], isNull);
 
-      // Cascade delete: f1 and f2 and all items are deleted
       final cascadeResult = manager.deleteFolder(
         folders: folders,
         items: items,
@@ -423,6 +417,211 @@ void main() {
       expect(copied['id'], isNot('orig-1'));
       expect(copied['title'], 'W2 Form (Copy)');
       expect(copied['folderId'], 'f2');
+    });
+  });
+
+  group('VaultFoldersView UI & Explorer Operations', () {
+    Widget buildTestFoldersView({
+      List<VaultFolder> folders = const [],
+      List<Map<String, dynamic>> items = const [],
+      List<Map<String, dynamic>> notes = const [],
+      void Function(String name, String? parentId, String? color)? onCreateFolder,
+      void Function(String id, String newName)? onRenameFolder,
+      void Function(String id, bool cascade)? onDeleteFolder,
+    }) {
+      return MaterialApp(
+        home: Scaffold(
+          body: VaultFoldersView(
+            isWide: false,
+            folders: folders,
+            items: items,
+            notes: notes,
+            onOpenItem: (_) {},
+            onAddItemToFolder: (_) {},
+            onUploadDocumentToFolder: (_) {},
+            onCreateFolder: onCreateFolder ?? (_, _, _) {},
+            onRenameFolder: onRenameFolder ?? (_, _) {},
+            onMoveFolder: (_, _) {},
+            onDeleteFolder: onDeleteFolder ?? (_, _) {},
+            onMoveItem: (_, _) {},
+            onCopyItem: (_, _) {},
+            onDeleteItem: (_) {},
+          ),
+        ),
+      );
+    }
+
+    testWidgets('renders root directory header and breadcrumbs', (tester) async {
+      await tester.pumpWidget(buildTestFoldersView());
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('explorer-breadcrumb-root')), findsOneWidget);
+      expect(find.text('Root Directory'), findsOneWidget);
+      expect(find.byKey(const ValueKey('explorer-new-folder-button')), findsOneWidget);
+      expect(find.byKey(const ValueKey('explorer-upload-file-button')), findsOneWidget);
+    });
+
+    testWidgets('creates a new folder via the dialog', (tester) async {
+      String? createdName;
+      await tester.pumpWidget(buildTestFoldersView(
+        onCreateFolder: (name, parentId, color) {
+          createdName = name;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('explorer-new-folder-button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Create New Folder'), findsOneWidget);
+      await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Financials');
+      await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(createdName, 'Financials');
+    });
+
+    testWidgets('navigates into folder and updates breadcrumbs', (tester) async {
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Legal',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      await tester.pumpWidget(buildTestFoldersView(folders: [folder1]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Legal'), findsOneWidget);
+
+      await tester.tap(find.text('Legal'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Legal'), findsWidgets);
+      expect(find.byTooltip('Up to parent folder'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('explorer-breadcrumb-root')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Root Directory'), findsOneWidget);
+    });
+
+    testWidgets('switches between List, Grid, and Tree views', (tester) async {
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Photos',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      await tester.pumpWidget(buildTestFoldersView(folders: [folder1]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Grid view'));
+      await tester.pumpAndSettle();
+      expect(find.byType(GridView), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Tree view'));
+      await tester.pumpAndSettle();
+      expect(find.text('Photos'), findsWidgets);
+
+      await tester.tap(find.byTooltip('List view'));
+      await tester.pumpAndSettle();
+      expect(find.byType(GridView), findsNothing);
+    });
+
+    testWidgets('filters items in folder using explorer search box', (tester) async {
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Invoices',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+      final folder2 = VaultFolder(
+        id: 'f2',
+        name: 'Personal',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      await tester.pumpWidget(buildTestFoldersView(folders: [folder1, folder2]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Invoices'), findsOneWidget);
+      expect(find.text('Personal'), findsOneWidget);
+
+      await tester.enterText(find.byKey(const ValueKey('explorer-search-input')), 'Invo');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Invoices'), findsOneWidget);
+      expect(find.text('Personal'), findsNothing);
+    });
+
+    testWidgets('renames a folder via popup menu', (tester) async {
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Drafts',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      String? renamedId;
+      String? renamedValue;
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        onRenameFolder: (id, name) {
+          renamedId = id;
+          renamedValue = name;
+        },
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Drafts'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.more_vert).first);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Rename'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.widgetWithText(TextField, 'Drafts'), 'Published');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(renamedId, 'f1');
+      expect(renamedValue, 'Published');
+    });
+
+    testWidgets('deletes a folder with cascade choice', (tester) async {
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Temp',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      String? deletedId;
+      bool? cascadeOption;
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        onDeleteFolder: (id, cascade) {
+          deletedId = id;
+          cascadeOption = cascade;
+        },
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Temp'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.more_vert).first);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Delete All'));
+      await tester.pumpAndSettle();
+
+      expect(deletedId, 'f1');
+      expect(cascadeOption, isTrue);
     });
   });
 }

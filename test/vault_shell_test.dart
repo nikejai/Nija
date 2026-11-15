@@ -537,6 +537,7 @@ void main() {
     );
 
     expect(find.text('Home'), findsWidgets);
+    expect(find.text('Folders'), findsWidgets);
     expect(find.text('Favorites'), findsWidgets);
     expect(find.text('All Items'), findsAtLeastNWidgets(1));
     expect(find.text('Settings'), findsOneWidget);

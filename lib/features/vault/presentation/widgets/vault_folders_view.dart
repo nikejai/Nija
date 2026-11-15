@@ -1,162 +1,14 @@
-part of '../vault_app_shell.dart';
+import 'package:flutter/material.dart';
 
-extension _VaultFoldersTab on _VaultAppShellState {
-  Widget _buildFoldersTab(BuildContext context) {
-    return _VaultFoldersView(
-      isWide: _isWideLayout(context),
-      folders: _folders,
-      items: _items,
-      notes: _notes,
-      onOpenItem: (item) => _openVaultListRow(context, item),
-      onAddItemToFolder: (folderId) => _openAddItemScreen(context, initialFolderId: folderId),
-      onUploadDocumentToFolder: (folderId) => _openUploadDocumentToFolder(folderId),
-      onCreateFolder: _createFolder,
-      onRenameFolder: _renameFolder,
-      onMoveFolder: _moveFolder,
-      onDeleteFolder: _deleteFolder,
-      onMoveItem: _moveItemToFolder,
-      onCopyItem: _copyItemToFolder,
-      onDeleteItem: _deleteItemFromExplorer,
-    );
-  }
+import '../../../../app/theme/entry_typography.dart';
+import '../../../../core/config/vault_limits.dart';
+import '../../../../domain/models/folder_tree_builder.dart';
+import '../../../../domain/models/folder_tree_node.dart';
+import '../../../../domain/models/vault_folder.dart';
 
-  void _createFolder(String name, String? parentId, String? color) {
-    _updateState(() {
-      _folders = _folderManager.createFolder(
-        folders: _folders,
-        name: name,
-        parentId: parentId,
-        color: color,
-      );
-    });
-    _persistVaultDataUnchecked();
-  }
+enum ExplorerViewMode { list, grid, tree }
 
-  void _renameFolder(String folderId, String newName) {
-    _updateState(() {
-      _folders = _folderManager.renameFolder(
-        folders: _folders,
-        folderId: folderId,
-        newName: newName,
-      );
-    });
-    _persistVaultDataUnchecked();
-  }
-
-  void _moveFolder(String folderId, String? newParentId) {
-    _updateState(() {
-      _folders = _folderManager.moveFolder(
-        folders: _folders,
-        folderId: folderId,
-        newParentId: newParentId,
-      );
-    });
-    _persistVaultDataUnchecked();
-  }
-
-  void _deleteFolder(String folderId, bool cascade) {
-    _updateState(() {
-      final res = _folderManager.deleteFolder(
-        folders: _folders,
-        items: _items,
-        folderId: folderId,
-        cascade: cascade,
-      );
-      _folders = res.folders;
-      _items.clear();
-      _items.addAll(res.items);
-    });
-    _persistVaultDataUnchecked();
-  }
-
-  void _moveItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
-    final updated = _folderManager.moveItemToFolder(
-      item: item,
-      targetFolderId: targetFolderId,
-    );
-    _updateState(() {
-      final idx = _items.indexWhere((i) => i['id'] == item['id']);
-      if (idx >= 0) {
-        _items[idx] = updated;
-      } else {
-        final noteIdx = _notes.indexWhere((n) => n['id'] == item['id']);
-        if (noteIdx >= 0) {
-          _notes[noteIdx] = updated;
-        }
-      }
-    });
-    _persistVaultDataUnchecked();
-  }
-
-  void _copyItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
-    final copy = _folderManager.copyItemToFolder(
-      item: item,
-      targetFolderId: targetFolderId,
-    );
-    _updateState(() {
-      if (item['type'] == 'Secure Note' || item.containsKey('delta')) {
-        _notes.add(copy);
-      } else {
-        _items.add(copy);
-      }
-    });
-    _persistVaultDataUnchecked();
-  }
-
-  void _deleteItemFromExplorer(Map<String, dynamic> item) {
-    final itemId = item['id'];
-    _updateState(() {
-      _items.removeWhere((i) => i['id'] == itemId);
-      _notes.removeWhere((n) => n['id'] == itemId);
-    });
-    _persistVaultDataUnchecked();
-  }
-
-  Future<void> _openUploadDocumentToFolder(String? folderId) async {
-    if (_blockExploreDemoWrite()) return;
-    if (widget.onPersistVaultDocument == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Document storage unavailable in this session.')),
-      );
-      return;
-    }
-
-    final created = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        builder: (_) => DocumentUploadScreen(
-          currentVaultSizeBytes: _effectiveVaultSizeBytes,
-          maxVaultBytes: _effectiveMaxVaultBytes,
-          maxDocumentBytes: VaultLimits.maxDocumentBytes,
-          onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
-        ),
-      ),
-    );
-
-    if (created == null) return;
-    final item = Map<String, dynamic>.from(created);
-    if (folderId != null) {
-      item['folderId'] = folderId;
-    }
-    try {
-      if (!await _isPendingDocumentStored(item)) return;
-      if (!await _arePendingAttachmentsStored(item)) return;
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to save document.')),
-      );
-      return;
-    }
-    _updateState(() {
-      _items.insert(0, item);
-    });
-    await _persistVaultData();
-  }
-}
-
-enum _ExplorerViewMode { list, grid, tree }
-
-enum _FolderSortOption {
+enum FolderSortOption {
   nameAsc,
   nameDesc,
   dateDesc,
@@ -165,8 +17,72 @@ enum _FolderSortOption {
   type,
 }
 
-class _VaultFoldersView extends StatefulWidget {
-  const _VaultFoldersView({
+IconData defaultIconForType(String type) {
+  final normalized = type.toLowerCase();
+  if (normalized.contains('note')) return Icons.description_outlined;
+  if (normalized.contains('password') || normalized.contains('login')) {
+    return Icons.lock_outline;
+  }
+  if (normalized.contains('card')) return Icons.credit_card_outlined;
+  if (normalized.contains('ssh')) return Icons.terminal_outlined;
+  if (normalized.contains('api')) return Icons.key_outlined;
+  if (normalized.contains('wi-fi') || normalized.contains('wifi')) {
+    return Icons.wifi_outlined;
+  }
+  if (normalized.contains('server') || normalized.contains('database')) {
+    return Icons.dns_outlined;
+  }
+  if (normalized.contains('passport')) return Icons.flight_takeoff_outlined;
+  if (normalized.contains('license key')) return Icons.verified_outlined;
+  if (normalized.contains('license') || normalized.contains('driver')) {
+    return Icons.badge_outlined;
+  }
+  if (normalized.contains('crypto') ||
+      normalized.contains('recovery') ||
+      normalized.contains('seed')) {
+    return Icons.currency_bitcoin_outlined;
+  }
+  if (normalized.contains('bank')) return Icons.account_balance_outlined;
+  if (normalized.contains('finan')) return Icons.account_balance_wallet_outlined;
+  if (normalized.contains('ident')) return Icons.perm_identity_outlined;
+  if (normalized.contains('document')) return Icons.folder_outlined;
+  if (normalized.contains('health')) return Icons.favorite_outline;
+  return Icons.shield_outlined;
+}
+
+Color defaultColorForType(String type) {
+  final normalized = type.toLowerCase();
+  if (normalized.contains('note')) return const Color(0xFFA78BFA);
+  if (normalized.contains('password') || normalized.contains('login')) {
+    return const Color(0xFF60A5FA);
+  }
+  if (normalized.contains('card')) return const Color(0xFF38BDF8);
+  if (normalized.contains('ssh')) return const Color(0xFF34D399);
+  if (normalized.contains('api')) return const Color(0xFFF59E0B);
+  if (normalized.contains('wi-fi') || normalized.contains('wifi')) {
+    return const Color(0xFF06B6D4);
+  }
+  if (normalized.contains('server') || normalized.contains('database')) {
+    return const Color(0xFF8B5CF6);
+  }
+  if (normalized.contains('passport')) return const Color(0xFF14B8A6);
+  if (normalized.contains('license key')) return const Color(0xFF10B981);
+  if (normalized.contains('crypto') ||
+      normalized.contains('recovery') ||
+      normalized.contains('seed')) {
+    return const Color(0xFFF97316);
+  }
+  if (normalized.contains('bank')) return const Color(0xFFEAB308);
+  if (normalized.contains('finan')) return const Color(0xFFFBBF24);
+  if (normalized.contains('ident')) return const Color(0xFF34D399);
+  if (normalized.contains('document')) return const Color(0xFFFB923C);
+  if (normalized.contains('health')) return const Color(0xFFF472B6);
+  return const Color(0xFF93C5FD);
+}
+
+class VaultFoldersView extends StatefulWidget {
+  const VaultFoldersView({
+    super.key,
     required this.isWide,
     required this.folders,
     required this.items,
@@ -181,6 +97,8 @@ class _VaultFoldersView extends StatefulWidget {
     required this.onMoveItem,
     required this.onCopyItem,
     required this.onDeleteItem,
+    this.iconForType,
+    this.colorForType,
   });
 
   final bool isWide;
@@ -197,17 +115,19 @@ class _VaultFoldersView extends StatefulWidget {
   final void Function(Map<String, dynamic> item, String? targetFolderId) onMoveItem;
   final void Function(Map<String, dynamic> item, String? targetFolderId) onCopyItem;
   final ValueChanged<Map<String, dynamic>> onDeleteItem;
+  final IconData Function(String type)? iconForType;
+  final Color Function(String type)? colorForType;
 
   @override
-  State<_VaultFoldersView> createState() => _VaultFoldersViewState();
+  State<VaultFoldersView> createState() => _VaultFoldersViewState();
 }
 
-class _VaultFoldersViewState extends State<_VaultFoldersView> {
+class _VaultFoldersViewState extends State<VaultFoldersView> {
   String? _currentFolderId;
   final List<String?> _backHistory = [];
   final List<String?> _forwardHistory = [];
-  _ExplorerViewMode _viewMode = _ExplorerViewMode.list;
-  _FolderSortOption _sortOption = _FolderSortOption.nameAsc;
+  ExplorerViewMode _viewMode = ExplorerViewMode.list;
+  FolderSortOption _sortOption = FolderSortOption.nameAsc;
   final Set<String> _expandedTreeFolderIds = {};
   String _searchFilter = '';
 
@@ -267,13 +187,13 @@ class _VaultFoldersViewState extends State<_VaultFoldersView> {
     }
 
     switch (_sortOption) {
-      case _FolderSortOption.nameAsc:
+      case FolderSortOption.nameAsc:
         list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      case _FolderSortOption.nameDesc:
+      case FolderSortOption.nameDesc:
         list.sort((a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
-      case _FolderSortOption.dateDesc:
+      case FolderSortOption.dateDesc:
         list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-      case _FolderSortOption.dateAsc:
+      case FolderSortOption.dateAsc:
         list.sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
       default:
         list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
@@ -299,21 +219,21 @@ class _VaultFoldersViewState extends State<_VaultFoldersView> {
     }
 
     switch (_sortOption) {
-      case _FolderSortOption.nameAsc:
+      case FolderSortOption.nameAsc:
         list.sort((a, b) => (a['title'] ?? '').toString().toLowerCase().compareTo((b['title'] ?? '').toString().toLowerCase()));
-      case _FolderSortOption.nameDesc:
+      case FolderSortOption.nameDesc:
         list.sort((a, b) => (b['title'] ?? '').toString().toLowerCase().compareTo((a['title'] ?? '').toString().toLowerCase()));
-      case _FolderSortOption.dateDesc:
+      case FolderSortOption.dateDesc:
         list.sort((a, b) => (b['updatedAt'] ?? '').toString().compareTo((a['updatedAt'] ?? '').toString()));
-      case _FolderSortOption.dateAsc:
+      case FolderSortOption.dateAsc:
         list.sort((a, b) => (a['updatedAt'] ?? '').toString().compareTo((b['updatedAt'] ?? '').toString()));
-      case _FolderSortOption.sizeDesc:
+      case FolderSortOption.sizeDesc:
         list.sort((a, b) {
           final sa = (a['size'] ?? a['sizeBytes'] ?? 0) as num;
           final sb = (b['size'] ?? b['sizeBytes'] ?? 0) as num;
           return sb.compareTo(sa);
         });
-      case _FolderSortOption.type:
+      case FolderSortOption.type:
         list.sort((a, b) => (a['type'] ?? 'Item').toString().compareTo((b['type'] ?? 'Item').toString()));
     }
 
@@ -565,28 +485,28 @@ class _VaultFoldersViewState extends State<_VaultFoldersView> {
             mainAxisSize: MainAxisSize.min,
             children: [
               // Sort menu
-              PopupMenuButton<_FolderSortOption>(
+              PopupMenuButton<FolderSortOption>(
                 initialValue: _sortOption,
                 tooltip: 'Sort by',
                 icon: const Icon(Icons.sort, size: 20),
                 onSelected: (option) => setState(() => _sortOption = option),
                 itemBuilder: (context) => const [
-                  PopupMenuItem(value: _FolderSortOption.nameAsc, child: Text('Name (A to Z)')),
-                  PopupMenuItem(value: _FolderSortOption.nameDesc, child: Text('Name (Z to A)')),
-                  PopupMenuItem(value: _FolderSortOption.dateDesc, child: Text('Date (Newest first)')),
-                  PopupMenuItem(value: _FolderSortOption.dateAsc, child: Text('Date (Oldest first)')),
-                  PopupMenuItem(value: _FolderSortOption.sizeDesc, child: Text('Size (Largest first)')),
-                  PopupMenuItem(value: _FolderSortOption.type, child: Text('Type')),
+                  PopupMenuItem(value: FolderSortOption.nameAsc, child: Text('Name (A to Z)')),
+                  PopupMenuItem(value: FolderSortOption.nameDesc, child: Text('Name (Z to A)')),
+                  PopupMenuItem(value: FolderSortOption.dateDesc, child: Text('Date (Newest first)')),
+                  PopupMenuItem(value: FolderSortOption.dateAsc, child: Text('Date (Oldest first)')),
+                  PopupMenuItem(value: FolderSortOption.sizeDesc, child: Text('Size (Largest first)')),
+                  PopupMenuItem(value: FolderSortOption.type, child: Text('Type')),
                 ],
               ),
               const SizedBox(width: 6),
 
               // View Mode switcher (List, Grid, Tree)
-              SegmentedButton<_ExplorerViewMode>(
+              SegmentedButton<ExplorerViewMode>(
                 segments: const [
-                  ButtonSegment(value: _ExplorerViewMode.list, icon: Icon(Icons.view_list, size: 18), tooltip: 'List view'),
-                  ButtonSegment(value: _ExplorerViewMode.grid, icon: Icon(Icons.grid_view, size: 18), tooltip: 'Grid view'),
-                  ButtonSegment(value: _ExplorerViewMode.tree, icon: Icon(Icons.account_tree_outlined, size: 18), tooltip: 'Tree view'),
+                  ButtonSegment(value: ExplorerViewMode.list, icon: Icon(Icons.view_list, size: 18), tooltip: 'List view'),
+                  ButtonSegment(value: ExplorerViewMode.grid, icon: Icon(Icons.grid_view, size: 18), tooltip: 'Grid view'),
+                  ButtonSegment(value: ExplorerViewMode.tree, icon: Icon(Icons.account_tree_outlined, size: 18), tooltip: 'Tree view'),
                 ],
                 selected: {_viewMode},
                 onSelectionChanged: (selected) {
@@ -605,9 +525,9 @@ class _VaultFoldersViewState extends State<_VaultFoldersView> {
   }
 
   Widget _buildExplorerBody(BuildContext context) {
-    if (_viewMode == _ExplorerViewMode.tree) {
+    if (_viewMode == ExplorerViewMode.tree) {
       return _buildTreeView(context);
-    } else if (_viewMode == _ExplorerViewMode.grid) {
+    } else if (_viewMode == ExplorerViewMode.grid) {
       return _buildGridView(context);
     }
     return _buildListView(context);
@@ -733,8 +653,8 @@ class _VaultFoldersViewState extends State<_VaultFoldersView> {
         ? VaultLimits.formatBytes(sizeBytes.toInt())
         : (item['subtitle'] ?? '--').toString();
 
-    final itemIcon = _iconForHomeType(type);
-    final itemColor = _colorForHomeType(type);
+    final itemIcon = widget.iconForType?.call(type) ?? defaultIconForType(type);
+    final itemColor = widget.colorForType?.call(type) ?? defaultColorForType(type);
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 2),
@@ -892,8 +812,8 @@ class _VaultFoldersViewState extends State<_VaultFoldersView> {
     final colorScheme = Theme.of(context).colorScheme;
     final title = (item['title'] ?? 'Untitled').toString();
     final type = (item['type'] ?? 'Item').toString();
-    final itemIcon = _iconForHomeType(type);
-    final itemColor = _colorForHomeType(type);
+    final itemIcon = widget.iconForType?.call(type) ?? defaultIconForType(type);
+    final itemColor = widget.colorForType?.call(type) ?? defaultColorForType(type);
 
     return Card(
       elevation: 1,
