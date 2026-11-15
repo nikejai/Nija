@@ -296,7 +296,7 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         key: const ValueKey('settings-vault-storage-row'),
                         icon: Icons.storage_outlined,
                         title: 'Vault storage',
-                        subtitle: 'Local storage · Allocation: $vaultUsageLabel',
+                        subtitle: vaultUsageLabel,
                       ),
                     ],
                   ),
