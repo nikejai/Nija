@@ -1133,7 +1133,7 @@ void main() {
 
     await tester.tap(find.text('GitHub').first);
     await tester.pumpAndSettle();
-    expect(find.text('nitesh@example.com'), findsWidgets);
+    expect(find.text('alex@example.com'), findsWidgets);
 
     await tester.tap(find.byIcon(Icons.arrow_back).first);
     await tester.pumpAndSettle();
