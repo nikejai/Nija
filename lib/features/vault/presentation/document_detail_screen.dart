@@ -120,6 +120,16 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     Map<String, dynamic> document, {
     VaultDocumentLoadProgress? onProgress,
   }) async {
+    final directBytes = document['__documentBytes__'] ??
+        document['documentBytes'] ??
+        widget.item['__documentBytes__'] ??
+        widget.item['documentBytes'];
+    if (directBytes is List<int> && directBytes.isNotEmpty) {
+      return directBytes;
+    }
+    if (document['demo'] == true || widget.item['demo'] == true) {
+      return VaultHomeDemoData.demoPdfBytes;
+    }
     final sectionName = document['documentSection']?.toString().trim() ?? '';
     if (sectionName.isEmpty) {
       throw StateError('Document section is missing.');

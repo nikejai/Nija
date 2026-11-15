@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import '../../../domain/models/vault_folder.dart';
 
 class VaultHomeDemoData {
@@ -19,6 +22,11 @@ class VaultHomeDemoData {
   ];
 
   static const folders = <String>['Personal', 'Work', 'Finance', 'Travel'];
+
+  /// Valid standard PDF-1.4 file binary containing single centered text: "Demo"
+  static final Uint8List demoPdfBytes = base64Decode(
+    'JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggMzYgPj4Kc3RyZWFtCkJUCi9GMSA1NiBUZgoyMzIgMzk2IFRkCihEZW1vKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI0MSAwMDAwMCBuIAowMDAwMDAwMzExIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMzk3CiUlRU9GCg==',
+  );
 
   static final demoFolders = <VaultFolder>[
     // 1. Personal & Nested Folders
@@ -121,7 +129,7 @@ class VaultHomeDemoData {
     return List<VaultFolder>.from(demoFolders);
   }
 
-  static const items = <Map<String, dynamic>>[
+  static final items = <Map<String, dynamic>>[
     {
       'id': 'demo-login-github',
       'type': 'Login',
@@ -188,6 +196,20 @@ class VaultHomeDemoData {
       'updated': 'Aug 2',
       'updatedAt': '2026-08-02T14:10:00Z',
       'demo': true,
+      'attachments': [
+        {
+          'id': 'demo-attach-benefits',
+          'title': 'Card_Benefits_Guide.pdf',
+          'subtitle': 'Benefits guide · 580 B',
+          'documentFileName': 'Card_Benefits_Guide.pdf',
+          'documentExtension': 'pdf',
+          'documentSizeBytes': 580,
+          'documentStorage': 'inline',
+          'demo': true,
+          'documentBytes': demoPdfBytes,
+          '__documentBytes__': demoPdfBytes,
+        },
+      ],
       'fields': [
         {
           'label': 'Card number',
@@ -202,17 +224,19 @@ class VaultHomeDemoData {
       'id': 'demo-document-insurance',
       'type': 'Documents',
       'title': 'Health Insurance',
-      'subtitle': 'Policy ending 2814 · 512 KB',
+      'subtitle': 'Policy ending 2814 · 580 B',
       'folder': 'Personal',
       'folderId': 'demo-folder-health',
       'updated': 'Aug 9',
       'updatedAt': '2026-08-09T09:30:00Z',
       'documentFileName': 'health-insurance.pdf',
       'documentExtension': 'pdf',
-      'documentSizeBytes': 512000,
-      'size': 512000,
-      'sizeBytes': 512000,
+      'documentSizeBytes': 580,
+      'size': 580,
+      'sizeBytes': 580,
       'demo': true,
+      'documentBytes': demoPdfBytes,
+      '__documentBytes__': demoPdfBytes,
       'fields': [
         {'label': 'Provider', 'value': 'Nija Demo Insurance'},
         {'label': 'Policy number', 'value': '2814', 'sensitive': true},
@@ -223,17 +247,19 @@ class VaultHomeDemoData {
       'id': 'demo-doc-medical',
       'type': 'Documents',
       'title': 'Vaccination & Immunization Record',
-      'subtitle': 'Clinic certified · 180 KB',
+      'subtitle': 'Clinic certified · 580 B',
       'folder': 'Personal',
       'folderId': 'demo-folder-medical',
       'updated': 'Jul 30',
       'updatedAt': '2026-07-30T10:15:00Z',
       'documentFileName': 'immunization_record.pdf',
       'documentExtension': 'pdf',
-      'documentSizeBytes': 184320,
-      'size': 184320,
-      'sizeBytes': 184320,
+      'documentSizeBytes': 580,
+      'size': 580,
+      'sizeBytes': 580,
       'demo': true,
+      'documentBytes': demoPdfBytes,
+      '__documentBytes__': demoPdfBytes,
       'fields': [
         {'label': 'Clinic', 'value': 'Global Health Clinic'},
         {'label': 'Record Type', 'value': 'International Vaccine Card'},
@@ -249,6 +275,20 @@ class VaultHomeDemoData {
       'updated': 'Aug 8',
       'updatedAt': '2026-08-08T18:00:00Z',
       'demo': true,
+      'attachments': [
+        {
+          'id': 'demo-attach-cloud-arch',
+          'title': 'Cloud_Architecture.pdf',
+          'subtitle': 'VPC & IAM topology · 580 B',
+          'documentFileName': 'Cloud_Architecture.pdf',
+          'documentExtension': 'pdf',
+          'documentSizeBytes': 580,
+          'documentStorage': 'inline',
+          'demo': true,
+          'documentBytes': demoPdfBytes,
+          '__documentBytes__': demoPdfBytes,
+        },
+      ],
       'fields': [
         {'label': 'Username or email', 'value': 'work@example.com'},
         {'label': 'Password', 'value': 'aws-demo', 'sensitive': true},
@@ -290,17 +330,33 @@ class VaultHomeDemoData {
       'id': 'demo-doc-agreement',
       'type': 'Documents',
       'title': 'Consulting Services Agreement',
-      'subtitle': 'Signed contract · 740 KB',
+      'subtitle': 'Signed contract · 580 B',
       'folder': 'Work',
       'folderId': 'demo-folder-hr',
       'updated': 'Jul 25',
       'updatedAt': '2026-07-25T11:00:00Z',
       'documentFileName': 'consulting_agreement.pdf',
       'documentExtension': 'pdf',
-      'documentSizeBytes': 757760,
-      'size': 757760,
-      'sizeBytes': 757760,
+      'documentSizeBytes': 580,
+      'size': 580,
+      'sizeBytes': 580,
       'demo': true,
+      'documentBytes': demoPdfBytes,
+      '__documentBytes__': demoPdfBytes,
+      'attachments': [
+        {
+          'id': 'demo-attach-nda',
+          'title': 'Non_Disclosure_Agreement.pdf',
+          'subtitle': 'Mutual NDA addendum · 580 B',
+          'documentFileName': 'Non_Disclosure_Agreement.pdf',
+          'documentExtension': 'pdf',
+          'documentSizeBytes': 580,
+          'documentStorage': 'inline',
+          'demo': true,
+          'documentBytes': demoPdfBytes,
+          '__documentBytes__': demoPdfBytes,
+        },
+      ],
       'fields': [
         {'label': 'Client', 'value': 'Enterprise Cloud Corp'},
         {'label': 'Effective Date', 'value': '01 Aug 2026'},
@@ -310,17 +366,19 @@ class VaultHomeDemoData {
       'id': 'demo-doc-tax',
       'type': 'Documents',
       'title': 'W-2 Wage & Tax Statement',
-      'subtitle': 'Tax Year 2026 · 1.4 MB',
+      'subtitle': 'Tax Year 2026 · 580 B',
       'folder': 'Finance',
       'folderId': 'demo-folder-tax',
       'updated': 'Aug 5',
       'updatedAt': '2026-08-05T11:20:00Z',
       'documentFileName': 'w2_tax_2026.pdf',
       'documentExtension': 'pdf',
-      'documentSizeBytes': 1420000,
-      'size': 1420000,
-      'sizeBytes': 1420000,
+      'documentSizeBytes': 580,
+      'size': 580,
+      'sizeBytes': 580,
       'demo': true,
+      'documentBytes': demoPdfBytes,
+      '__documentBytes__': demoPdfBytes,
       'fields': [
         {'label': 'Employer', 'value': 'Acme Global'},
         {'label': 'Tax Year', 'value': '2026'},
@@ -330,17 +388,19 @@ class VaultHomeDemoData {
       'id': 'demo-doc-1099',
       'type': 'Documents',
       'title': '1099-DIV Dividends Statement',
-      'subtitle': 'Brokerage · 260 KB',
+      'subtitle': 'Brokerage · 580 B',
       'folder': 'Finance',
       'folderId': 'demo-folder-tax',
       'updated': 'Aug 4',
       'updatedAt': '2026-08-04T12:00:00Z',
       'documentFileName': '1099_div_2026.pdf',
       'documentExtension': 'pdf',
-      'documentSizeBytes': 266240,
-      'size': 266240,
-      'sizeBytes': 266240,
+      'documentSizeBytes': 580,
+      'size': 580,
+      'sizeBytes': 580,
       'demo': true,
+      'documentBytes': demoPdfBytes,
+      '__documentBytes__': demoPdfBytes,
       'fields': [
         {'label': 'Brokerage', 'value': 'Apex Clearing'},
         {'label': 'Account', 'value': '•••• 7182'},
@@ -365,17 +425,19 @@ class VaultHomeDemoData {
       'id': 'demo-flight-ticket',
       'type': 'Documents',
       'title': 'Flight Boarding Pass',
-      'subtitle': 'SFO -> BLR · 380 KB',
+      'subtitle': 'SFO -> BLR · 580 B',
       'folder': 'Travel',
       'folderId': 'demo-folder-asia-trip',
       'updated': 'Jul 20',
       'updatedAt': '2026-07-20T14:30:00Z',
       'documentFileName': 'boarding_pass.pdf',
       'documentExtension': 'pdf',
-      'documentSizeBytes': 389120,
-      'size': 389120,
-      'sizeBytes': 389120,
+      'documentSizeBytes': 580,
+      'size': 580,
+      'sizeBytes': 580,
       'demo': true,
+      'documentBytes': demoPdfBytes,
+      '__documentBytes__': demoPdfBytes,
       'fields': [
         {'label': 'Airline', 'value': 'Airways'},
         {'label': 'Flight', 'value': 'AW-102'},
@@ -414,7 +476,15 @@ class VaultHomeDemoData {
 
   static List<Map<String, dynamic>> cloneItems() {
     return items
-        .map((entry) => Map<String, dynamic>.from(entry))
+        .map((entry) {
+          final copy = Map<String, dynamic>.from(entry);
+          if (copy['attachments'] is List) {
+            copy['attachments'] = (copy['attachments'] as List)
+                .map((a) => Map<String, dynamic>.from(a as Map))
+                .toList();
+          }
+          return copy;
+        })
         .toList(growable: false);
   }
 

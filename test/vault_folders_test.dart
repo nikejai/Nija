@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/application/services/vault_folder_manager.dart';
@@ -5,6 +7,7 @@ import 'package:nija/domain/models/folder_tree_builder.dart';
 import 'package:nija/domain/models/vault_entry_data.dart';
 import 'package:nija/domain/models/vault_folder.dart';
 import 'package:nija/domain/models/vault_payload.dart';
+import 'package:nija/features/vault/application/vault_home_demo_data.dart';
 import 'package:nija/features/vault/presentation/widgets/vault_folders_view.dart';
 
 void main() {
@@ -808,6 +811,55 @@ void main() {
 
       expect(movedItem?['id'], 'item-custom-1');
       expect(targetFolder, isNull);
+    });
+  });
+
+  group('Demo PDF and Attachments', () {
+    test('VaultHomeDemoData demoPdfBytes is a valid PDF-1.4 file with only text Demo', () {
+      final bytes = VaultHomeDemoData.demoPdfBytes;
+      expect(bytes, isNotEmpty);
+      expect(bytes.length, equals(580));
+
+      final str = latin1.decode(bytes);
+      expect(str.startsWith('%PDF-1.4'), isTrue);
+      expect(str.contains('(Demo) Tj'), isTrue);
+      expect(str.contains('startxref'), isTrue);
+      expect(str.contains('%%EOF'), isTrue);
+
+      // Verify "Demo" is the only text drawn in text operators
+      final matches = RegExp(r'\((.*?)\)\s*Tj')
+          .allMatches(str)
+          .map((m) => m.group(1))
+          .toList();
+      expect(matches, equals(['Demo']));
+    });
+
+    test('demo documents and attachments carry valid demo PDF bytes', () {
+      final items = VaultHomeDemoData.cloneItems();
+      final docs = items.where((i) => i['type'] == 'Documents').toList();
+      expect(docs, isNotEmpty);
+
+      for (final doc in docs) {
+        expect(doc['documentBytes'], equals(VaultHomeDemoData.demoPdfBytes));
+        expect(doc['__documentBytes__'], equals(VaultHomeDemoData.demoPdfBytes));
+        expect(doc['documentExtension'], equals('pdf'));
+        expect(doc['documentSizeBytes'], equals(VaultHomeDemoData.demoPdfBytes.length));
+      }
+
+      // Verify items with attachments
+      final itemsWithAttachments = items
+          .where((i) => i['attachments'] is List && (i['attachments'] as List).isNotEmpty)
+          .toList();
+      expect(itemsWithAttachments, isNotEmpty);
+
+      for (final item in itemsWithAttachments) {
+        final attachments = item['attachments'] as List;
+        for (final att in attachments) {
+          expect(att['documentExtension'], equals('pdf'));
+          expect(att['documentBytes'], equals(VaultHomeDemoData.demoPdfBytes));
+          expect(att['__documentBytes__'], equals(VaultHomeDemoData.demoPdfBytes));
+        }
+      }
     });
   });
 }

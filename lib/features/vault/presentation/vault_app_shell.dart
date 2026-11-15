@@ -1353,14 +1353,18 @@ class _VaultAppShellState extends State<VaultAppShell> {
     Map<String, dynamic> item,
   ) async {
     final accessedItem = _markItemLastAccessed(item);
+    final isDemoItem = accessedItem['demo'] == true ||
+        _showFolderDemoPreview ||
+        widget.isExploreDemoSession;
     final result = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => _DocumentDetailScreen(
           item: accessedItem,
-          onReadDocument: _isExploreDemoReadOnly
-              ? null
-              : widget.onReadVaultDocument,
-          readOnly: _isExploreDemoReadOnly,
+          onReadDocument: isDemoItem
+              ? ({required sectionName, onProgress}) async =>
+                  VaultHomeDemoData.demoPdfBytes
+              : (_isExploreDemoReadOnly ? null : widget.onReadVaultDocument),
+          readOnly: _isExploreDemoReadOnly || isDemoItem,
           onShareEncryptedDocument: _shareEncryptedDocument,
           onExportEncryptedDocument: _exportEncryptedDocument,
           onSaveDocumentCopy: _saveDocumentCopy,
@@ -1380,8 +1384,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
           onSaveAttachmentCopy: (attachment) => _saveAttachmentCopy(attachment),
           onDeleteAttachment: (detailItem, attachment) =>
               _deleteAttachmentFromItem(detailItem, attachment),
-          showDeleteAction: !_isExploreDemoReadOnly,
-          onShareMenu: _isExploreDemoReadOnly
+          showDeleteAction: !(_isExploreDemoReadOnly || isDemoItem),
+          onShareMenu: (_isExploreDemoReadOnly || isDemoItem)
               ? null
               : () => _showDocumentQuickActions(context, accessedItem),
         ),
@@ -2325,6 +2329,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<List<int>> _readAttachmentBytes(
     Map<String, dynamic> attachment,
   ) async {
+    final directBytes = attachment['__documentBytes__'] ?? attachment['documentBytes'];
+    if (directBytes is List<int> && directBytes.isNotEmpty) {
+      return directBytes;
+    }
+    if (attachment['demo'] == true || _showFolderDemoPreview || widget.isExploreDemoSession) {
+      return VaultHomeDemoData.demoPdfBytes;
+    }
     final sectionName = attachment['documentSection']?.toString().trim() ?? '';
     final reader = widget.onReadVaultDocument;
     if (sectionName.isEmpty || reader == null) {
