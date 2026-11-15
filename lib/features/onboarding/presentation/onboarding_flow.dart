@@ -462,7 +462,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             ? () async {}
             : _restoreCurrentVaultFromCloud,
         onReadCloudBackupAccount: _isExploreDemoSession
-            ? () async => null
+            ? () async =>
+                AppFeatures.isPaidBuild ? 'demo.paid@example.com' : null
             : _readCloudBackupAccountLabel,
         onChangeCloudBackupAccount: _isExploreDemoSession
             ? () async => false
@@ -481,7 +482,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         isExploreDemoSession: _isExploreDemoSession,
         onExitExploreDemo: _exitExploreDemoSession,
         cloudBackupFeatureAvailableOverride: _isExploreDemoSession
-            ? false
+            ? (AppFeatures.isPaidBuild ? true : false)
             : null,
         debugInternalsFeatureAvailableOverride: _isExploreDemoSession
             ? false

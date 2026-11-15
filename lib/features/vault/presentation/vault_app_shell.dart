@@ -273,7 +273,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   final AutomatedBackupService _automatedBackupService =
       AutomatedBackupService();
   Timer? _midnightBackupTimer;
-  bool _cloudBackupEnabled = false;
+  bool _cloudBackupEnabled = AppFeatures.isPaidBuild;
   bool _importingEncryptedSecret = false;
   String _importBusyMessage = 'Importing data...';
   int _backgroundBusyCount = 0;
@@ -416,7 +416,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   void _startExploreDemoPreferences() {
     _automatedBackupEnabled = true;
     _cloudBackupWifiOnly = true;
-    _cloudBackupEnabled = false;
+    _cloudBackupEnabled = AppFeatures.isPaidBuild && _cloudBackupFeatureAvailable;
     _debugInternalsUnlocked = false;
     _debugInternalsEnabled = false;
   }
@@ -1951,6 +1951,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Future<void> _handleCloudBackupLockedTap() async {
     if (!mounted) return;
+    if (widget.isExploreDemoSession) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cloud backup is disabled in demo mode. Create or unlock a vault to use cloud backup.',
+          ),
+        ),
+      );
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Cloud backup is currently unavailable.')),
     );
@@ -2811,7 +2821,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       final wifiOnly =
           prefs.getBool(_prefsKeyCloudBackupWifiOnly) ?? true;
       final localLastAt = prefs.getInt(_prefsKeyLocalBackupLastAt) ?? 0;
-      final enabled = prefs.getBool(_prefsKeyCloudBackupEnabled) ?? false;
+      final enabled = prefs.getBool(_prefsKeyCloudBackupEnabled) ?? AppFeatures.isPaidBuild;
       final lastAt = prefs.getInt(_prefsKeyCloudBackupLastAt) ?? 0;
       final revision = prefs.getInt(_prefsKeyCloudBackupRevision) ?? 0;
       final versionId = prefs.getString(_prefsKeyCloudBackupVersionId) ?? '';

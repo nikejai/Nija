@@ -22,7 +22,10 @@ extension _VaultSettingsTab on _VaultAppShellState {
     final vaultLimitBytes = _effectiveMaxVaultBytes;
     final vaultUsageLabel =
         '${VaultLimits.formatBytes(effectiveVaultSizeBytes)} of ${VaultLimits.formatBytes(vaultLimitBytes)}';
-    final backupSubtitle = _cloudBackupFeatureAvailable
+    final backupSubtitle = widget.isExploreDemoSession &&
+            !_cloudBackupFeatureAvailable
+        ? 'Disabled in demo session'
+        : _cloudBackupFeatureAvailable
         ? (_cloudBackupEnabled
               ? 'Automatic cloud backup is enabled'
               : 'Backup your data locally')
