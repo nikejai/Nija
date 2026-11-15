@@ -840,6 +840,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
             onPressed: () {
               final name = controller.text.trim();
               if (name.isNotEmpty) {

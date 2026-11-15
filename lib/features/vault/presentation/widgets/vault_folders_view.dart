@@ -526,7 +526,10 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           // Metadata metrics subtitle
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Text(
                   _currentFolder == null ? 'Root Directory' : _currentFolder!.name,
@@ -535,7 +538,6 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                     fontSize: 16,
                   ),
                 ),
-                const SizedBox(width: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
@@ -565,99 +567,109 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   Widget _buildExplorerActionBar(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      color: theme.scaffoldBackgroundColor,
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        alignment: WrapAlignment.spaceBetween,
-        children: [
-          // Left: New Folder, Add Item, Upload File buttons
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              FilledButton.icon(
-                key: const ValueKey('explorer-new-folder-button'),
-                icon: const Icon(Icons.create_new_folder_outlined, size: 18),
-                label: const Text('New Folder'),
-                style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-                onPressed: _showCreateFolderDialog,
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                key: const ValueKey('explorer-add-item-button'),
-                icon: const Icon(Icons.add_circle_outline, size: 18),
-                label: const Text('Add Item'),
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-                onPressed: () => widget.onAddItemToFolder(
-                  _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                key: const ValueKey('explorer-upload-file-button'),
-                icon: const Icon(Icons.upload_file_outlined, size: 18),
-                label: const Text('Upload File'),
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-                onPressed: () => widget.onUploadDocumentToFolder(
-                  _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
-                ),
-              ),
-            ],
-          ),
-
-          // Right: View Mode & Sort Dropdowns
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Sort menu
-              PopupMenuButton<FolderSortOption>(
-                initialValue: _sortOption,
-                tooltip: 'Sort by',
-                icon: const Icon(Icons.sort, size: 20),
-                onSelected: (option) => setState(() => _sortOption = option),
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: FolderSortOption.nameAsc, child: Text('Name (A to Z)')),
-                  PopupMenuItem(value: FolderSortOption.nameDesc, child: Text('Name (Z to A)')),
-                  PopupMenuItem(value: FolderSortOption.dateDesc, child: Text('Date (Newest first)')),
-                  PopupMenuItem(value: FolderSortOption.dateAsc, child: Text('Date (Oldest first)')),
-                  PopupMenuItem(value: FolderSortOption.sizeDesc, child: Text('Size (Largest first)')),
-                  PopupMenuItem(value: FolderSortOption.type, child: Text('Type')),
-                ],
-              ),
-              const SizedBox(width: 6),
-
-              // View Mode switcher (List, Grid, Tree)
-              SegmentedButton<ExplorerViewMode>(
-                segments: const [
-                  ButtonSegment(value: ExplorerViewMode.list, icon: Icon(Icons.view_list, size: 18), tooltip: 'List view'),
-                  ButtonSegment(value: ExplorerViewMode.grid, icon: Icon(Icons.grid_view, size: 18), tooltip: 'Grid view'),
-                  ButtonSegment(value: ExplorerViewMode.tree, icon: Icon(Icons.account_tree_outlined, size: 18), tooltip: 'Tree view'),
-                ],
-                selected: {_viewMode},
-                onSelectionChanged: (selected) {
-                  setState(() => _viewMode = selected.first);
-                },
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-            ],
-          ),
-        ],
+    final actions = <Widget>[
+      FilledButton.icon(
+        key: const ValueKey('explorer-new-folder-button'),
+        icon: const Icon(Icons.create_new_folder_outlined, size: 16),
+        label: const Text('New Folder'),
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(0, 34),
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        ),
+        onPressed: _showCreateFolderDialog,
       ),
+      const SizedBox(width: 6),
+      OutlinedButton.icon(
+        key: const ValueKey('explorer-add-item-button'),
+        icon: const Icon(Icons.add_circle_outline, size: 16),
+        label: const Text('Add Item'),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 34),
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        ),
+        onPressed: () => widget.onAddItemToFolder(
+          _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
+        ),
+      ),
+      const SizedBox(width: 6),
+      OutlinedButton.icon(
+        key: const ValueKey('explorer-upload-file-button'),
+        icon: const Icon(Icons.upload_file_outlined, size: 16),
+        label: const Text('Upload File'),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 34),
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        ),
+        onPressed: () => widget.onUploadDocumentToFolder(
+          _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
+        ),
+      ),
+    ];
+
+    final viewControls = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PopupMenuButton<FolderSortOption>(
+          initialValue: _sortOption,
+          tooltip: 'Sort by',
+          icon: const Icon(Icons.sort, size: 20),
+          onSelected: (option) => setState(() => _sortOption = option),
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: FolderSortOption.nameAsc, child: Text('Name (A to Z)')),
+            PopupMenuItem(value: FolderSortOption.nameDesc, child: Text('Name (Z to A)')),
+            PopupMenuItem(value: FolderSortOption.dateDesc, child: Text('Date (Newest first)')),
+            PopupMenuItem(value: FolderSortOption.dateAsc, child: Text('Date (Oldest first)')),
+            PopupMenuItem(value: FolderSortOption.sizeDesc, child: Text('Size (Largest first)')),
+            PopupMenuItem(value: FolderSortOption.type, child: Text('Type')),
+          ],
+        ),
+        const SizedBox(width: 4),
+        SegmentedButton<ExplorerViewMode>(
+          segments: const [
+            ButtonSegment(value: ExplorerViewMode.list, icon: Icon(Icons.view_list, size: 16), tooltip: 'List view'),
+            ButtonSegment(value: ExplorerViewMode.grid, icon: Icon(Icons.grid_view, size: 16), tooltip: 'Grid view'),
+            ButtonSegment(value: ExplorerViewMode.tree, icon: Icon(Icons.account_tree_outlined, size: 16), tooltip: 'Tree view'),
+          ],
+          selected: {_viewMode},
+          onSelectionChanged: (selected) {
+            setState(() => _viewMode = selected.first);
+          },
+          style: const ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+      ],
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      color: theme.scaffoldBackgroundColor,
+      child: widget.isWide
+          ? Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(mainAxisSize: MainAxisSize.min, children: actions),
+                viewControls,
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: actions),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [viewControls],
+                ),
+              ],
+            ),
     );
   }
 
@@ -1194,11 +1206,13 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 FilledButton.icon(
                   icon: const Icon(Icons.create_new_folder_outlined, size: 18),
                   label: const Text('New Folder'),
+                  style: FilledButton.styleFrom(minimumSize: const Size(0, 38)),
                   onPressed: _showCreateFolderDialog,
                 ),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.add_circle_outline, size: 18),
                   label: const Text('Add Item'),
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
                   onPressed: () => widget.onAddItemToFolder(
                     _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
                   ),
@@ -1206,6 +1220,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 OutlinedButton.icon(
                   icon: const Icon(Icons.upload_file_outlined, size: 18),
                   label: const Text('Upload File'),
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
                   onPressed: () => widget.onUploadDocumentToFolder(
                     _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
                   ),
@@ -1238,6 +1253,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
             key: const ValueKey('create-folder-submit-button'),
+            style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
             onPressed: () {
               final name = controller.text.trim();
               if (name.isNotEmpty) {
@@ -1270,6 +1286,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
               FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
                 onPressed: () {
                   final name = controller.text.trim();
                   if (name.isNotEmpty) {
@@ -1295,6 +1312,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
               OutlinedButton(
+                style: OutlinedButton.styleFrom(minimumSize: const Size(64, 38)),
                 onPressed: () {
                   widget.onDeleteFolder(folder.id, false); // Reparent
                   Navigator.pop(ctx);
@@ -1302,7 +1320,10 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 child: const Text('Keep Files'),
               ),
               FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  minimumSize: const Size(64, 38),
+                ),
                 onPressed: () {
                   widget.onDeleteFolder(folder.id, true); // Cascade
                   Navigator.pop(ctx);
@@ -1441,7 +1462,10 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
               FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  minimumSize: const Size(64, 38),
+                ),
                 onPressed: () {
                   widget.onDeleteItem(item);
                   Navigator.pop(ctx);

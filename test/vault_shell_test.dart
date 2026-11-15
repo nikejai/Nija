@@ -543,6 +543,10 @@ void main() {
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Recent'), findsOneWidget);
     expect(find.text('View all'), findsOneWidget);
+
+    await tester.tap(find.text('Folders').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Root Directory'), findsOneWidget);
   });
 
   testWidgets('wide vault shell uses rail/sidebar wireframe', (tester) async {
