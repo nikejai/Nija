@@ -487,6 +487,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             ? false
             : null,
         expandedVaultStorageEntitled: !_isExploreDemoSession,
+        onReadRawVaultContent: _isExploreDemoSession
+            ? null
+            : () => _vaultService.readRawVaultFile(filePath: _vaultFilePath),
+        onRestoreRawVaultContent: _isExploreDemoSession
+            ? null
+            : (content) => _restoreVaultFromRawContent(content),
       ),
     };
 
@@ -4330,6 +4336,23 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
     } finally {
       stopCloudBusy();
+    }
+  }
+
+  Future<bool> _restoreVaultFromRawContent(String rawContent) async {
+    try {
+      await _importVaultFile(
+        imported: ImportedVaultFile(
+          storageId: _vaultFilePath,
+          label: _activeVaultName,
+          content: rawContent,
+        ),
+        continueToUnlock: false,
+        stageRawContent: true,
+      );
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 

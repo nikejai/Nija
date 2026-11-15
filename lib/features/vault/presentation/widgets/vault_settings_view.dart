@@ -150,6 +150,37 @@ extension _VaultSettingsTab on _VaultAppShellState {
                     ],
                   ),
                   _SettingsSection(
+                    title: 'Backup',
+                    children: [
+                      _SettingsRow(
+                        key: const ValueKey(
+                          'settings-automated-backup-master-switch',
+                        ),
+                        icon: Icons.schedule_outlined,
+                        title: 'Automated backups',
+                        subtitle: 'Daily automated backup at midnight',
+                        trailing: Switch(
+                          key: const ValueKey(
+                            'settings-automated-backup-switch',
+                          ),
+                          value: _automatedBackupEnabled,
+                          onChanged: _setAutomatedBackupEnabled,
+                        ),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-local-backup-row'),
+                        icon: Icons.save_outlined,
+                        title: 'Local backup',
+                        subtitle: '2 rolling snapshots · Free version',
+                        detail: _localSnapshotsSummary(),
+                        value: _localSnapshots.isEmpty
+                            ? '0/2'
+                            : '${_localSnapshots.length}/2',
+                        onTap: () => _showLocalSnapshotsDialog(context),
+                      ),
+                    ],
+                  ),
+                  _SettingsSection(
                     title: 'Cloud Backup',
                     children: [
                       _SettingsRow(
@@ -176,6 +207,21 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         ),
                       if (_cloudBackupFeatureAvailable &&
                           _cloudBackupEnabled) ...[
+                        _SettingsRow(
+                          key: const ValueKey(
+                            'settings-cloud-backup-wifi-only-switch',
+                          ),
+                          icon: Icons.wifi_outlined,
+                          title: 'Back up over Wi-Fi only',
+                          subtitle: 'Avoid mobile data usage',
+                          trailing: Switch(
+                            key: const ValueKey(
+                              'settings-cloud-backup-wifi-switch',
+                            ),
+                            value: _cloudBackupWifiOnly,
+                            onChanged: _setCloudBackupWifiOnly,
+                          ),
+                        ),
                         _SettingsRow(
                           key: const ValueKey('settings-cloud-backup-last-at'),
                           icon: Icons.schedule_outlined,
@@ -206,8 +252,8 @@ extension _VaultSettingsTab on _VaultAppShellState {
                                 key: const ValueKey(
                                   'settings-cloud-backup-now',
                                 ),
-                                onPressed: _handleCloudBackupNow,
-                                icon: Icon(_cloudBackupIcon()),
+                                onPressed: _handleBackupNow,
+                                icon: const Icon(Icons.backup_outlined),
                                 label: const Text('Backup now'),
                               ),
                             if (_cloudRestoreFeatureAvailable)
@@ -215,7 +261,8 @@ extension _VaultSettingsTab on _VaultAppShellState {
                                 key: const ValueKey(
                                   'settings-cloud-restore-now',
                                 ),
-                                onPressed: widget.onRestoreFromCloud,
+                                onPressed: () =>
+                                    _showRestoreOptionsDialog(context),
                                 icon: const Icon(Icons.restore_outlined),
                                 label: const Text('Restore'),
                               ),
