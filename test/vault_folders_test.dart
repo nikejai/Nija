@@ -426,31 +426,105 @@ void main() {
       List<Map<String, dynamic>> items = const [],
       List<Map<String, dynamic>> notes = const [],
       void Function(String? folderId)? onAddItemToFolder,
+      void Function(String? folderId)? onUploadDocumentToFolder,
       void Function(String name, String? parentId, String? color)? onCreateFolder,
       void Function(String id, String newName)? onRenameFolder,
       void Function(String id, bool cascade)? onDeleteFolder,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onMoveItem,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onCopyItem,
     }) {
-      return MaterialApp(
-        home: Scaffold(
-          body: VaultFoldersView(
-            isWide: false,
-            folders: folders,
-            items: items,
-            notes: notes,
-            onOpenItem: (_) {},
-            onAddItemToFolder: onAddItemToFolder ?? (_) {},
-            onUploadDocumentToFolder: (_) {},
-            onCreateFolder: onCreateFolder ?? (_, _, _) {},
-            onRenameFolder: onRenameFolder ?? (_, _) {},
-            onMoveFolder: (_, _) {},
-            onDeleteFolder: onDeleteFolder ?? (_, _) {},
-            onMoveItem: onMoveItem ?? (_, _) {},
-            onCopyItem: onCopyItem ?? (_, _) {},
-            onDeleteItem: (_) {},
-          ),
-        ),
+      String? currentFolderId;
+      final createFolderCb = onCreateFolder ?? (_, _, _) {};
+      final addItemCb = onAddItemToFolder ?? (_) {};
+      final uploadCb = onUploadDocumentToFolder ?? (_) {};
+
+      return StatefulBuilder(
+        builder: (context, setState) {
+          return MaterialApp(
+            home: Builder(
+              builder: (ctx) => Scaffold(
+                body: VaultFoldersView(
+                  isWide: false,
+                  folders: folders,
+                  items: items,
+                  notes: notes,
+                  onFolderChanged: (id) => currentFolderId = id,
+                  onOpenItem: (_) {},
+                  onAddItemToFolder: addItemCb,
+                  onUploadDocumentToFolder: uploadCb,
+                  onCreateFolder: createFolderCb,
+                  onRenameFolder: onRenameFolder ?? (_, _) {},
+                  onMoveFolder: (_, _) {},
+                  onDeleteFolder: onDeleteFolder ?? (_, _) {},
+                  onMoveItem: onMoveItem ?? (_, _) {},
+                  onCopyItem: onCopyItem ?? (_, _) {},
+                  onDeleteItem: (_) {},
+                ),
+                floatingActionButton: FloatingActionButton.small(
+                  key: const ValueKey('vault-fab'),
+                  onPressed: () {
+                    showModalBottomSheet<void>(
+                      context: ctx,
+                      builder: (bCtx) => SafeArea(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ListTile(
+                              key: const ValueKey('explorer-fab-new-folder'),
+                              title: const Text('New Folder'),
+                              onTap: () {
+                                Navigator.pop(bCtx);
+                                final controller = TextEditingController();
+                                showDialog<void>(
+                                  context: ctx,
+                                  builder: (dCtx) => AlertDialog(
+                                    title: const Text('Create New Folder'),
+                                    content: TextField(
+                                      key: const ValueKey('create-folder-name-input'),
+                                      controller: controller,
+                                    ),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Cancel')),
+                                      FilledButton(
+                                        key: const ValueKey('create-folder-submit-button'),
+                                        onPressed: () {
+                                          createFolderCb(controller.text.trim(), currentFolderId, null);
+                                          Navigator.pop(dCtx);
+                                        },
+                                        child: const Text('Create'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                            ListTile(
+                              key: const ValueKey('explorer-fab-add-item'),
+                              title: const Text('Add Item'),
+                              onTap: () {
+                                Navigator.pop(bCtx);
+                                addItemCb(currentFolderId);
+                              },
+                            ),
+                            ListTile(
+                              key: const ValueKey('explorer-fab-upload-file'),
+                              title: const Text('Upload File'),
+                              onTap: () {
+                                Navigator.pop(bCtx);
+                                uploadCb(currentFolderId);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Icon(Icons.add),
+                ),
+              ),
+            ),
+          );
+        },
       );
     }
 
@@ -460,8 +534,7 @@ void main() {
 
       expect(find.byKey(const ValueKey('explorer-breadcrumb-root')), findsOneWidget);
       expect(find.text('Root Directory'), findsOneWidget);
-      expect(find.byKey(const ValueKey('explorer-new-folder-button')), findsOneWidget);
-      expect(find.byKey(const ValueKey('explorer-upload-file-button')), findsOneWidget);
+      expect(find.byKey(const ValueKey('vault-fab')), findsOneWidget);
     });
 
     testWidgets('creates a new folder via the dialog', (tester) async {
@@ -473,7 +546,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('explorer-new-folder-button')));
+      await tester.tap(find.byKey(const ValueKey('vault-fab')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('explorer-fab-new-folder')));
       await tester.pumpAndSettle();
 
       expect(find.text('Create New Folder'), findsOneWidget);
@@ -671,8 +747,11 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('explorer-add-item-button')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('explorer-add-item-button')));
+      await tester.tap(find.byKey(const ValueKey('vault-fab')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('explorer-fab-add-item')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('explorer-fab-add-item')));
       await tester.pumpAndSettle();
 
       expect(targetFolderId, isNull);

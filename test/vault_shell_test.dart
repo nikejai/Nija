@@ -547,6 +547,23 @@ void main() {
     await tester.tap(find.text('Folders').first);
     await tester.pumpAndSettle();
     expect(find.text('Root Directory'), findsOneWidget);
+
+    // Verify FAB speed dial works on Folders tab
+    await tester.tap(find.byKey(const ValueKey('vault-fab')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('explorer-fab-new-folder')), findsOneWidget);
+    expect(find.byKey(const ValueKey('explorer-fab-add-item')), findsOneWidget);
+    expect(find.byKey(const ValueKey('explorer-fab-upload-file')), findsOneWidget);
+
+    // Create a new folder via FAB
+    await tester.tap(find.byKey(const ValueKey('explorer-fab-new-folder')));
+    await tester.pumpAndSettle();
+    expect(find.text('Create New Folder'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Personal Vault');
+    await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Personal Vault'), findsOneWidget);
   });
 
   testWidgets('wide vault shell uses rail/sidebar wireframe', (tester) async {

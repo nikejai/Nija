@@ -108,6 +108,7 @@ class VaultFoldersView extends StatefulWidget {
     required this.onMoveItem,
     required this.onCopyItem,
     required this.onDeleteItem,
+    this.onFolderChanged,
     this.iconForType,
     this.colorForType,
   });
@@ -126,6 +127,7 @@ class VaultFoldersView extends StatefulWidget {
   final void Function(Map<String, dynamic> item, String? targetFolderId) onMoveItem;
   final void Function(Map<String, dynamic> item, String? targetFolderId) onCopyItem;
   final ValueChanged<Map<String, dynamic>> onDeleteItem;
+  final ValueChanged<String?>? onFolderChanged;
   final IconData Function(String type)? iconForType;
   final Color Function(String type)? colorForType;
 
@@ -136,7 +138,6 @@ class VaultFoldersView extends StatefulWidget {
 class _VaultFoldersViewState extends State<VaultFoldersView> {
   String? _currentFolderId;
   final List<String?> _backHistory = [];
-  final List<String?> _forwardHistory = [];
   ExplorerViewMode _viewMode = ExplorerViewMode.list;
   FolderSortOption _sortOption = FolderSortOption.nameAsc;
   final Set<String> _expandedTreeFolderIds = {};
@@ -151,6 +152,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     _searchController = TextEditingController(text: _searchFilter);
     _searchFocusNode = FocusNode();
     _searchController.addListener(_onSearchChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onFolderChanged?.call(_currentFolderId);
+    });
   }
 
   @override
@@ -190,28 +194,20 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     if (_currentFolderId == targetFolderId) return;
     setState(() {
       _backHistory.add(_currentFolderId);
-      _forwardHistory.clear();
       _currentFolderId = targetFolderId;
       if (targetFolderId != null) {
         _expandedTreeFolderIds.add(targetFolderId);
       }
     });
+    widget.onFolderChanged?.call(targetFolderId);
   }
 
   void _navigateBack() {
     if (_backHistory.isEmpty) return;
     setState(() {
-      _forwardHistory.add(_currentFolderId);
       _currentFolderId = _backHistory.removeLast();
     });
-  }
-
-  void _navigateForward() {
-    if (_forwardHistory.isEmpty) return;
-    setState(() {
-      _backHistory.add(_currentFolderId);
-      _currentFolderId = _forwardHistory.removeLast();
-    });
+    widget.onFolderChanged?.call(_currentFolderId);
   }
 
   void _navigateUp() {
@@ -343,12 +339,8 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Windows Explorer Header & Breadcrumb Bar
+          // Consolidated, space-optimized Explorer Header
           _buildExplorerHeader(context, breadcrumbs),
-          const Divider(height: 1),
-
-          // Explorer Action Bar (Views, Sort, Actions)
-          _buildExplorerActionBar(context),
           const Divider(height: 1),
 
           // Main View Content
@@ -364,310 +356,227 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final canGoBack = _backHistory.isNotEmpty;
-    final canGoForward = _forwardHistory.isNotEmpty;
     final canGoUp = _currentFolderId != null;
 
-    final addressBar = Container(
-      height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colorScheme.outlineVariant),
+    final sortButton = PopupMenuButton<FolderSortOption>(
+      key: const ValueKey('explorer-sort-button'),
+      initialValue: _sortOption,
+      tooltip: 'Sort by',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      icon: const Icon(Icons.sort, size: 20),
+      onSelected: (option) => setState(() => _sortOption = option),
+      itemBuilder: (context) => const [
+        PopupMenuItem(value: FolderSortOption.nameAsc, child: Text('Name (A to Z)')),
+        PopupMenuItem(value: FolderSortOption.nameDesc, child: Text('Name (Z to A)')),
+        PopupMenuItem(value: FolderSortOption.dateDesc, child: Text('Date (Newest first)')),
+        PopupMenuItem(value: FolderSortOption.dateAsc, child: Text('Date (Oldest first)')),
+        PopupMenuItem(value: FolderSortOption.sizeDesc, child: Text('Size (Largest first)')),
+        PopupMenuItem(value: FolderSortOption.type, child: Text('Type')),
+      ],
+    );
+
+    final viewSegmented = SegmentedButton<ExplorerViewMode>(
+      segments: const [
+        ButtonSegment(
+          value: ExplorerViewMode.list,
+          icon: Icon(Icons.view_list, size: 16),
+          tooltip: 'List view',
+        ),
+        ButtonSegment(
+          value: ExplorerViewMode.grid,
+          icon: Icon(Icons.grid_view, size: 16),
+          tooltip: 'Grid view',
+        ),
+        ButtonSegment(
+          value: ExplorerViewMode.tree,
+          icon: Icon(Icons.account_tree_outlined, size: 16),
+          tooltip: 'Tree view',
+        ),
+      ],
+      selected: {_viewMode},
+      onSelectionChanged: (selected) {
+        setState(() => _viewMode = selected.first);
+      },
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            // Root chip
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                key: const ValueKey('explorer-breadcrumb-root'),
-                onTap: () => _navigateToFolder(null),
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.home_outlined, size: 16, color: colorScheme.primary),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Root',
-                        style: TextStyle(
-                          fontWeight: _currentFolderId == null ? FontWeight.bold : FontWeight.normal,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            for (final segment in breadcrumbs) ...[
-              Icon(Icons.chevron_right, size: 16, color: colorScheme.onSurfaceVariant),
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => _navigateToFolder(segment.id),
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    child: Text(
-                      segment.name,
-                      style: TextStyle(
-                        fontWeight: segment.id == _currentFolderId ? FontWeight.bold : FontWeight.normal,
-                        fontSize: 13,
-                        color: segment.id == _currentFolderId ? colorScheme.primary : colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
+    );
+
+    final searchField = SizedBox(
+      height: 36,
+      child: TextField(
+        key: const ValueKey('explorer-search-input'),
+        controller: _searchController,
+        focusNode: _searchFocusNode,
+        style: const TextStyle(fontSize: 13),
+        decoration: InputDecoration(
+          hintText: _currentFolderId == null
+              ? 'Search all folders & items...'
+              : 'Search in this folder...',
+          hintStyle: TextStyle(
+            fontSize: 13,
+            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+          ),
+          prefixIcon: const Icon(Icons.search, size: 16),
+          prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: colorScheme.outlineVariant),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+          ),
+          suffixIcon: _searchFilter.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear, size: 14),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchFilter = '');
+                  },
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                )
+              : null,
         ),
       ),
     );
 
-    final searchField = TextField(
-      key: const ValueKey('explorer-search-input'),
-      controller: _searchController,
-      focusNode: _searchFocusNode,
-      decoration: InputDecoration(
-        hintText: _currentFolderId == null ? 'Search all folders & items...' : 'Search in this folder...',
-        prefixIcon: const Icon(Icons.search, size: 16),
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-        suffixIcon: _searchFilter.isNotEmpty
-            ? IconButton(
-                icon: const Icon(Icons.clear, size: 14),
-                onPressed: () {
-                  _searchController.clear();
-                  setState(() => _searchFilter = '');
-                },
-                visualDensity: VisualDensity.compact,
-              )
-            : null,
-      ),
-    );
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: theme.scaffoldBackgroundColor,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final breadcrumbsWidget = SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (widget.isWide)
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, size: 20),
-                  onPressed: canGoBack ? _navigateBack : null,
-                  tooltip: 'Back',
-                  visualDensity: VisualDensity.compact,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.arrow_forward, size: 20),
-                  onPressed: canGoForward ? _navigateForward : null,
-                  tooltip: 'Forward',
-                  visualDensity: VisualDensity.compact,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.arrow_upward, size: 20),
-                  onPressed: canGoUp ? _navigateUp : null,
-                  tooltip: 'Up to parent folder',
-                  visualDensity: VisualDensity.compact,
-                ),
-                const SizedBox(width: 8),
-                Expanded(child: addressBar),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 220,
-                  height: 38,
-                  child: searchField,
-                ),
-              ],
-            )
-          else ...[
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, size: 20),
-                  onPressed: canGoBack ? _navigateBack : null,
-                  tooltip: 'Back',
-                  visualDensity: VisualDensity.compact,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.arrow_forward, size: 20),
-                  onPressed: canGoForward ? _navigateForward : null,
-                  tooltip: 'Forward',
-                  visualDensity: VisualDensity.compact,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.arrow_upward, size: 20),
-                  onPressed: canGoUp ? _navigateUp : null,
-                  tooltip: 'Up to parent folder',
-                  visualDensity: VisualDensity.compact,
-                ),
-                const SizedBox(width: 4),
-                Expanded(child: addressBar),
-              ],
+          if (canGoBack) ...[
+            IconButton(
+              icon: const Icon(Icons.arrow_back, size: 18),
+              onPressed: _navigateBack,
+              tooltip: 'Back',
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
             ),
-            const SizedBox(height: 6),
-            SizedBox(
-              height: 38,
-              child: searchField,
-            ),
+            const SizedBox(width: 2),
           ],
-          const SizedBox(height: 6),
-          // Metadata metrics subtitle
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  _currentFolder == null ? 'Root Directory' : _currentFolder!.name,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
+          if (canGoUp) ...[
+            IconButton(
+              icon: const Icon(Icons.arrow_upward, size: 18),
+              onPressed: _navigateUp,
+              tooltip: 'Up to parent folder',
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            ),
+            const SizedBox(width: 2),
+          ],
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              key: const ValueKey('explorer-breadcrumb-root'),
+              onTap: () => _navigateToFolder(null),
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.folder_outlined,
+                      size: 16,
+                      color: _currentFolderId == null ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Root Directory',
+                      style: TextStyle(
+                        fontWeight: _currentFolderId == null ? FontWeight.bold : FontWeight.w500,
+                        fontSize: 13,
+                        color: _currentFolderId == null ? colorScheme.primary : colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: colorScheme.primary.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+              ),
+            ),
+          ),
+          for (final segment in breadcrumbs) ...[
+            Icon(Icons.chevron_right, size: 14, color: colorScheme.onSurfaceVariant),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => _navigateToFolder(segment.id),
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                   child: Text(
-                    _currentFolderId == null
-                        ? '${_childFolders.length} folders · ${widget.items.length + widget.notes.length} total items'
-                        : '${_childFolders.length} folders · ${_currentItems.length} items'
-                            '${_currentTotalSizeBytes > 0 ? " · ${VaultLimits.formatBytes(_currentTotalSizeBytes)}" : ""}',
-                    style: EntryTypography.technicalMonospace(
-                      fontSize: 11,
-                      color: colorScheme.primary,
-                      fontWeight: FontWeight.w600,
+                    segment.name,
+                    style: TextStyle(
+                      fontWeight: segment.id == _currentFolderId ? FontWeight.bold : FontWeight.w500,
+                      fontSize: 13,
+                      color: segment.id == _currentFolderId ? colorScheme.primary : colorScheme.onSurface,
                     ),
                   ),
                 ),
-              ],
+              ),
+            ),
+          ],
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              _currentFolderId == null
+                  ? '${_childFolders.length} folders · ${widget.items.length + widget.notes.length} total items'
+                  : '${_childFolders.length} folders · ${_currentItems.length} items'
+                      '${_currentTotalSizeBytes > 0 ? " · ${VaultLimits.formatBytes(_currentTotalSizeBytes)}" : ""}',
+              style: EntryTypography.technicalMonospace(
+                fontSize: 10,
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
       ),
     );
-  }
-
-  Widget _buildExplorerActionBar(BuildContext context) {
-    final theme = Theme.of(context);
-
-    final actions = <Widget>[
-      FilledButton.icon(
-        key: const ValueKey('explorer-new-folder-button'),
-        icon: const Icon(Icons.create_new_folder_outlined, size: 16),
-        label: const Text('New Folder'),
-        style: FilledButton.styleFrom(
-          minimumSize: const Size(0, 34),
-          visualDensity: VisualDensity.compact,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        ),
-        onPressed: _showCreateFolderDialog,
-      ),
-      const SizedBox(width: 6),
-      OutlinedButton.icon(
-        key: const ValueKey('explorer-add-item-button'),
-        icon: const Icon(Icons.add_circle_outline, size: 16),
-        label: const Text('Add Item'),
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size(0, 34),
-          visualDensity: VisualDensity.compact,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        ),
-        onPressed: () => widget.onAddItemToFolder(
-          _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
-        ),
-      ),
-      const SizedBox(width: 6),
-      OutlinedButton.icon(
-        key: const ValueKey('explorer-upload-file-button'),
-        icon: const Icon(Icons.upload_file_outlined, size: 16),
-        label: const Text('Upload File'),
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size(0, 34),
-          visualDensity: VisualDensity.compact,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        ),
-        onPressed: () => widget.onUploadDocumentToFolder(
-          _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
-        ),
-      ),
-    ];
-
-    final viewControls = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        PopupMenuButton<FolderSortOption>(
-          initialValue: _sortOption,
-          tooltip: 'Sort by',
-          icon: const Icon(Icons.sort, size: 20),
-          onSelected: (option) => setState(() => _sortOption = option),
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: FolderSortOption.nameAsc, child: Text('Name (A to Z)')),
-            PopupMenuItem(value: FolderSortOption.nameDesc, child: Text('Name (Z to A)')),
-            PopupMenuItem(value: FolderSortOption.dateDesc, child: Text('Date (Newest first)')),
-            PopupMenuItem(value: FolderSortOption.dateAsc, child: Text('Date (Oldest first)')),
-            PopupMenuItem(value: FolderSortOption.sizeDesc, child: Text('Size (Largest first)')),
-            PopupMenuItem(value: FolderSortOption.type, child: Text('Type')),
-          ],
-        ),
-        const SizedBox(width: 4),
-        SegmentedButton<ExplorerViewMode>(
-          segments: const [
-            ButtonSegment(value: ExplorerViewMode.list, icon: Icon(Icons.view_list, size: 16), tooltip: 'List view'),
-            ButtonSegment(value: ExplorerViewMode.grid, icon: Icon(Icons.grid_view, size: 16), tooltip: 'Grid view'),
-            ButtonSegment(value: ExplorerViewMode.tree, icon: Icon(Icons.account_tree_outlined, size: 16), tooltip: 'Tree view'),
-          ],
-          selected: {_viewMode},
-          onSelectionChanged: (selected) {
-            setState(() => _viewMode = selected.first);
-          },
-          style: const ButtonStyle(
-            visualDensity: VisualDensity.compact,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-        ),
-      ],
-    );
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       color: theme.scaffoldBackgroundColor,
       child: widget.isWide
           ? Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(mainAxisSize: MainAxisSize.min, children: actions),
-                viewControls,
+                Expanded(child: breadcrumbsWidget),
+                const SizedBox(width: 12),
+                SizedBox(width: 220, child: searchField),
+                const SizedBox(width: 8),
+                sortButton,
+                const SizedBox(width: 8),
+                viewSegmented,
               ],
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: actions),
-                ),
-                const SizedBox(height: 4),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [viewControls],
+                  children: [
+                    Expanded(child: breadcrumbsWidget),
+                    const SizedBox(width: 4),
+                    sortButton,
+                    const SizedBox(width: 4),
+                    viewSegmented,
+                  ],
                 ),
+                const SizedBox(height: 6),
+                searchField,
               ],
             ),
     );
@@ -694,34 +603,36 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     }
 
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       children: [
-        // Table Header
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(8),
+        // Table Header only on wide screens
+        if (widget.isWide) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Text('Name', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text('Type', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text('Size', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                ),
+                const SizedBox(width: 40),
+              ],
+            ),
           ),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 4,
-                child: Text('Name', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text('Type', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text('Size', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
-              ),
-              const SizedBox(width: 40),
-            ],
-          ),
-        ),
-        const SizedBox(height: 4),
+          const SizedBox(height: 4),
+        ],
 
         // Subfolders
         for (final folder in subfolders)
@@ -750,54 +661,95 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
         borderRadius: BorderRadius.circular(8),
         onTap: () => _navigateToFolder(folder.id),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 4,
-                child: Row(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: widget.isWide
+              ? Row(
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: Row(
+                        children: [
+                          Icon(
+                            isDefault ? Icons.folder_special : Icons.folder,
+                            color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              folder.name,
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        isDefault ? 'Default folder' : 'File folder',
+                        style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text('--', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                    ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, size: 18),
+                      onSelected: (val) => _handleFolderAction(folder, val),
+                      itemBuilder: (ctx) => [
+                        const PopupMenuItem(value: 'open', child: Text('Open')),
+                        if (!isDefault) ...const [
+                          PopupMenuItem(value: 'rename', child: Text('Rename')),
+                          PopupMenuItem(value: 'move', child: Text('Move to...')),
+                          PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                        ],
+                      ],
+                    ),
+                  ],
+                )
+              : Row(
                   children: [
                     Icon(
                       isDefault ? Icons.folder_special : Icons.folder,
                       color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
-                      size: 22,
+                      size: 24,
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        folder.name,
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                        overflow: TextOverflow.ellipsis,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            folder.name,
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            isDefault ? 'Default folder' : 'File folder',
+                            style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                          ),
+                        ],
                       ),
                     ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, size: 18),
+                      onSelected: (val) => _handleFolderAction(folder, val),
+                      itemBuilder: (ctx) => [
+                        const PopupMenuItem(value: 'open', child: Text('Open')),
+                        if (!isDefault) ...const [
+                          PopupMenuItem(value: 'rename', child: Text('Rename')),
+                          PopupMenuItem(value: 'move', child: Text('Move to...')),
+                          PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  isDefault ? 'Default folder' : 'File folder',
-                  style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
-                ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text('--', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, size: 18),
-                onSelected: (val) => _handleFolderAction(folder, val),
-                itemBuilder: (ctx) => [
-                  const PopupMenuItem(value: 'open', child: Text('Open')),
-                  if (!isDefault) ...const [
-                    PopupMenuItem(value: 'rename', child: Text('Rename')),
-                    PopupMenuItem(value: 'move', child: Text('Move to...')),
-                    PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
-                  ],
-                ],
-              ),
-            ],
-          ),
         ),
       ),
     );
@@ -826,57 +778,101 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
         borderRadius: BorderRadius.circular(8),
         onTap: () => widget.onOpenItem(item),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              Expanded(
-                flex: 4,
-                child: Row(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: widget.isWide
+              ? Row(
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color: itemColor.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Icon(itemIcon, color: itemColor, size: 16),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(type, style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        sizeLabel,
+                        style: EntryTypography.technicalMonospace(fontSize: 11, color: colorScheme.onSurfaceVariant),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, size: 18),
+                      onSelected: (val) => _handleItemAction(item, val),
+                      itemBuilder: (ctx) => [
+                        const PopupMenuItem(value: 'open', child: Text('Open Details')),
+                        const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
+                        const PopupMenuItem(value: 'move', child: Text('Move to...')),
+                        const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                      ],
+                    ),
+                  ],
+                )
+              : Row(
                   children: [
                     Container(
-                      width: 26,
-                      height: 26,
+                      width: 28,
+                      height: 28,
                       decoration: BoxDecoration(
                         color: itemColor.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: Icon(itemIcon, color: itemColor, size: 16),
+                      child: Icon(itemIcon, color: itemColor, size: 18),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        title,
-                        style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-                        overflow: TextOverflow.ellipsis,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            sizeLabel.isNotEmpty && sizeLabel != '--' ? '$type · $sizeLabel' : type,
+                            style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
+                    ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert, size: 18),
+                      onSelected: (val) => _handleItemAction(item, val),
+                      itemBuilder: (ctx) => [
+                        const PopupMenuItem(value: 'open', child: Text('Open Details')),
+                        const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
+                        const PopupMenuItem(value: 'move', child: Text('Move to...')),
+                        const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                      ],
                     ),
                   ],
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(type, style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  sizeLabel,
-                  style: EntryTypography.technicalMonospace(fontSize: 11, color: colorScheme.onSurfaceVariant),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert, size: 18),
-                onSelected: (val) => _handleItemAction(item, val),
-                itemBuilder: (ctx) => [
-                  const PopupMenuItem(value: 'open', child: Text('Open Details')),
-                  const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
-                  const PopupMenuItem(value: 'move', child: Text('Move to...')),
-                  const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
-                ],
-              ),
-            ],
-          ),
         ),
       ),
     );
@@ -1193,39 +1189,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Create a subfolder, add a new credential, or upload encrypted files.',
+              'Tap the + button below to create a folder, add items, or upload files.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: [
-                FilledButton.icon(
-                  icon: const Icon(Icons.create_new_folder_outlined, size: 18),
-                  label: const Text('New Folder'),
-                  style: FilledButton.styleFrom(minimumSize: const Size(0, 38)),
-                  onPressed: _showCreateFolderDialog,
-                ),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.add_circle_outline, size: 18),
-                  label: const Text('Add Item'),
-                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
-                  onPressed: () => widget.onAddItemToFolder(
-                    _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
-                  ),
-                ),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.upload_file_outlined, size: 18),
-                  label: const Text('Upload File'),
-                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 38)),
-                  onPressed: () => widget.onUploadDocumentToFolder(
-                    _currentFolderId == VaultFoldersView.defaultFolderId ? null : _currentFolderId,
-                  ),
-                ),
-              ],
             ),
           ],
         ),
@@ -1234,40 +1200,6 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   }
 
   // --- ACTIONS & DIALOGS ---
-  void _showCreateFolderDialog() {
-    final controller = TextEditingController();
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Create New Folder'),
-        content: TextField(
-          key: const ValueKey('create-folder-name-input'),
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Folder Name',
-            hintText: 'e.g. Work, Taxes, Identity',
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            key: const ValueKey('create-folder-submit-button'),
-            style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
-            onPressed: () {
-              final name = controller.text.trim();
-              if (name.isNotEmpty) {
-                widget.onCreateFolder(name, _currentFolderId, null);
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _handleFolderAction(VaultFolder folder, String action) {
     switch (action) {
       case 'open':

@@ -724,6 +724,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   ),
             floatingActionButton: _tabIndex == 0 || _tabIndex == 1 || _tabIndex == 2
                 ? FloatingActionButton.small(
+                    key: const ValueKey('vault-fab'),
                     onPressed: () {
                       if (_tabIndex == 2) {
                         _showFolderSpeedDial(context);
@@ -753,6 +754,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     };
   }
 
+  String? _currentExplorerFolderId;
+
   Widget _buildFoldersTab(BuildContext context) {
     return VaultFoldersView(
       isWide: _isWideLayout(context),
@@ -761,6 +764,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       notes: _notes,
       colorForType: _colorForDashboardType,
       iconForType: _iconForDashboardType,
+      onFolderChanged: (folderId) => _currentExplorerFolderId = folderId,
       onOpenItem: (item) => _openVaultListRow(context, item),
       onAddItemToFolder: (folderId) =>
           _openAddItemScreen(context, initialFolderId: folderId),
@@ -778,6 +782,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   void _showFolderSpeedDial(BuildContext context) {
     if (_blockExploreDemoWrite()) return;
+    final effectiveFolderId = _currentExplorerFolderId == VaultFoldersView.defaultFolderId
+        ? null
+        : _currentExplorerFolderId;
+
     showModalBottomSheet<void>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -790,30 +798,33 @@ class _VaultAppShellState extends State<VaultAppShell> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
+                key: const ValueKey('explorer-fab-new-folder'),
                 leading: const Icon(Icons.create_new_folder_outlined, color: Color(0xFFEAB308)),
                 title: const Text('New Folder'),
                 subtitle: const Text('Create a folder to organize items'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _showCreateFolderModal(context);
+                  _showCreateFolderModal(context, parentFolderId: effectiveFolderId);
                 },
               ),
               ListTile(
+                key: const ValueKey('explorer-fab-add-item'),
                 leading: const Icon(Icons.add_circle_outline, color: Color(0xFF3B82F6)),
                 title: const Text('Add Item'),
                 subtitle: const Text('Add password, note, card, or credential'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _openAddItemScreen(context);
+                  _openAddItemScreen(context, initialFolderId: effectiveFolderId);
                 },
               ),
               ListTile(
+                key: const ValueKey('explorer-fab-upload-file'),
                 leading: const Icon(Icons.upload_file_outlined, color: Color(0xFF10B981)),
                 title: const Text('Upload File'),
                 subtitle: const Text('Upload an encrypted document or attachment'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _openUploadDocumentToFolder(null);
+                  _openUploadDocumentToFolder(effectiveFolderId);
                 },
               ),
             ],
@@ -823,13 +834,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
-  void _showCreateFolderModal(BuildContext context) {
+  void _showCreateFolderModal(BuildContext context, {String? parentFolderId}) {
     final controller = TextEditingController();
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Create New Folder'),
         content: TextField(
+          key: const ValueKey('create-folder-name-input'),
           controller: controller,
           autofocus: true,
           decoration: const InputDecoration(
@@ -840,11 +852,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
+            key: const ValueKey('create-folder-submit-button'),
             style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
             onPressed: () {
               final name = controller.text.trim();
               if (name.isNotEmpty) {
-                _createFolder(name, null, null);
+                _createFolder(name, parentFolderId, null);
                 Navigator.pop(ctx);
               }
             },
