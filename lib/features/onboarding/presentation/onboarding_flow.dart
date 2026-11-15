@@ -171,6 +171,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   List<Map<String, dynamic>> _vaultItems = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _vaultNotes = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _customTypeDefinitions = <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> _folders = <Map<String, dynamic>>[];
   Future<void> _persistVaultChain = Future<void>.value();
   Timer? _busyWatchdog;
   Timer? _backgroundLockTimer;
@@ -402,6 +403,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         initialItems: _vaultItems,
         initialNotes: _vaultNotes,
         initialCustomTypeDefinitions: _customTypeDefinitions,
+        initialFolders: _folders,
         languageMode: widget.languageMode,
         onLanguageModeChanged: widget.onLanguageModeChanged,
         themeMode: widget.themeMode,
@@ -422,6 +424,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
                 required customTypeDefinitions,
               }) async {}
             : _persistVaultData,
+        onPersistFolders: _isExploreDemoSession
+            ? null
+            : (folders) => _persistVaultData(
+                  items: _vaultItems,
+                  notes: _vaultNotes,
+                  customTypeDefinitions: _customTypeDefinitions,
+                  folders: folders,
+                ),
         onPersistVaultDocument: _isExploreDemoSession
             ? null
             : _persistVaultDocument,
@@ -2202,6 +2212,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
                 const <dynamic>[])
             .map((entry) => Map<String, dynamic>.from(entry as Map))
             .toList();
+    final folders =
+        (payload.settings['folders'] as List<dynamic>? ??
+                const <dynamic>[])
+            .map((entry) => Map<String, dynamic>.from(entry as Map))
+            .toList();
     if (!mounted) return;
     setState(() {
       _vaultItems = payload.items
@@ -2211,6 +2226,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           .map((note) => Map<String, dynamic>.from(note))
           .toList();
       _customTypeDefinitions = customTypes;
+      _folders = folders;
     });
     await _refreshVaultSize();
     await _ensureRecoveryPhraseNoteInVault(password: password);
@@ -2269,6 +2285,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     required List<Map<String, dynamic>> items,
     required List<Map<String, dynamic>> notes,
     required List<Map<String, dynamic>> customTypeDefinitions,
+    List<Map<String, dynamic>>? folders,
     String? passwordOverride,
   }) async {
     final run = _persistVaultChain.then(
@@ -2276,6 +2293,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         items: items,
         notes: notes,
         customTypeDefinitions: customTypeDefinitions,
+        folders: folders,
         passwordOverride: passwordOverride,
       ),
     );
@@ -2287,6 +2305,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     required List<Map<String, dynamic>> items,
     required List<Map<String, dynamic>> notes,
     required List<Map<String, dynamic>> customTypeDefinitions,
+    List<Map<String, dynamic>>? folders,
     String? passwordOverride,
   }) async {
     final password =
@@ -2315,6 +2334,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         'customTypeDefinitions': customTypeDefinitions
             .map((entry) => Map<String, dynamic>.from(entry))
             .toList(),
+        'folders': (folders ?? _folders)
+            .map((entry) => Map<String, dynamic>.from(entry))
+            .toList(),
       },
       audit: const <Map<String, dynamic>>[],
     );
@@ -2333,6 +2355,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           .map((note) => Map<String, dynamic>.from(note))
           .toList();
       _customTypeDefinitions = customTypeDefinitions
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+      _folders = (folders ?? _folders)
           .map((entry) => Map<String, dynamic>.from(entry))
           .toList();
     });
@@ -2478,6 +2503,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         _vaultItems = VaultHomeDemoData.cloneItems();
         _vaultNotes = VaultHomeDemoData.cloneNotes();
         _customTypeDefinitions = <Map<String, dynamic>>[];
+        _folders = <Map<String, dynamic>>[];
         _stepTransitionForward = true;
         _step = OnboardingStep.app;
       });

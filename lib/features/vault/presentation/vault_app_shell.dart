@@ -18,6 +18,10 @@ import '../../../core/platform/pwa_install_service.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/secure_clipboard.dart';
 import '../../../domain/validators/vault_validators.dart';
+import '../../../domain/models/vault_folder.dart';
+import '../../../domain/models/folder_tree_node.dart';
+import '../../../domain/models/folder_tree_builder.dart';
+import '../../../application/services/vault_folder_manager.dart';
 import '../application/vault_entry_activity.dart';
 import '../application/vault_home_demo_data.dart';
 import '../../../infrastructure/adapters/vault_portability_model.dart';
@@ -44,6 +48,7 @@ part 'widgets/vault_home_view.dart';
 part 'widgets/vault_types_view.dart';
 part 'widgets/vault_favorites_view.dart';
 part 'widgets/vault_settings_view.dart';
+part 'widgets/vault_folders_view.dart';
 
 String _vaultDashboardTypeCode(String type) {
   return switch (type) {
@@ -87,6 +92,8 @@ typedef PersistVaultData =
       required List<Map<String, dynamic>> notes,
       required List<Map<String, dynamic>> customTypeDefinitions,
     });
+typedef PersistVaultFolders =
+    Future<void> Function(List<Map<String, dynamic>> folders);
 typedef PersistVaultDocument =
     Future<String> Function({
       required String documentId,
@@ -126,6 +133,7 @@ class VaultAppShell extends StatefulWidget {
     required this.initialItems,
     required this.initialNotes,
     required this.initialCustomTypeDefinitions,
+    this.initialFolders = const <Map<String, dynamic>>[],
     required this.languageMode,
     required this.onLanguageModeChanged,
     this.themeMode = ThemeMode.system,
@@ -138,6 +146,7 @@ class VaultAppShell extends StatefulWidget {
     this.onPinChanged,
     required this.onBiometricChanged,
     required this.onPersistVaultData,
+    this.onPersistFolders,
     this.onPersistVaultDocument,
     this.onPersistVaultDocumentStream,
     this.onReadVaultDocument,
@@ -172,6 +181,7 @@ class VaultAppShell extends StatefulWidget {
   final List<Map<String, dynamic>> initialItems;
   final List<Map<String, dynamic>> initialNotes;
   final List<Map<String, dynamic>> initialCustomTypeDefinitions;
+  final List<Map<String, dynamic>> initialFolders;
   final String languageMode;
   final LanguageModeChanged onLanguageModeChanged;
   final ThemeMode themeMode;
@@ -184,6 +194,7 @@ class VaultAppShell extends StatefulWidget {
   final BiometricChanged? onPinChanged;
   final BiometricChanged onBiometricChanged;
   final PersistVaultData onPersistVaultData;
+  final PersistVaultFolders? onPersistFolders;
   final PersistVaultDocument? onPersistVaultDocument;
   final PersistVaultDocumentStream? onPersistVaultDocumentStream;
   final ReadVaultDocument? onReadVaultDocument;
@@ -272,6 +283,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
   late final List<Map<String, dynamic>> _customTypeDefinitions;
   late final List<Map<String, dynamic>> _items;
   late final List<Map<String, dynamic>> _notes;
+  late List<VaultFolder> _folders;
+  final VaultFolderManager _folderManager = const VaultFolderManager();
   late final List<VaultListEntryAdapter> _vaultListEntryAdapters;
   late String _activeVaultName;
 
@@ -296,6 +309,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
         .toList();
     _notes = widget.initialNotes
         .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+    _folders = widget.initialFolders
+        .map((entry) => VaultFolder.fromJson(entry))
         .toList();
     _allowHomeDemoData =
         widget.isExploreDemoSession ||
@@ -525,13 +541,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final debugTabVisible = _debugTabVisible;
     final selectedTabIndex = debugTabVisible
         ? _tabIndex
-        : (_tabIndex > 3 ? 3 : _tabIndex);
+        : (_tabIndex > 4 ? 4 : _tabIndex);
     // Mobile is the source experience. Tablet/web gain the rail and bounded
     // workspace frame without changing the routes or mobile interactions.
     final useSideNavigation = _isWideLayout(context);
     void selectDestination(int value) {
       if (value == _tabIndex) return;
-      if (value == 4 && _debugTabVisible) {
+      if (value == 5 && _debugTabVisible) {
         _ensureDebugInternalsFuture();
       }
       setState(() {
@@ -540,7 +556,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         }
         _tabIndex = value;
       });
-      if (value == 3) {
+      if (value == 4) {
         unawaited(_refreshCloudBackupSummary());
       }
     }
@@ -684,6 +700,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
                           label: AppStrings.tabTypes,
                         ),
                         NavigationDestination(
+                          icon: const Icon(Icons.folder_outlined),
+                          selectedIcon: const Icon(Icons.folder),
+                          label: AppStrings.tabFolders,
+                        ),
+                        NavigationDestination(
                           icon: const Icon(Icons.star_outline),
                           selectedIcon: const Icon(Icons.star),
                           label: AppStrings.tabNotes,
@@ -703,7 +724,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       onDestinationSelected: selectDestination,
                     ),
                   ),
-            floatingActionButton: _tabIndex == 0 || _tabIndex == 1
+            floatingActionButton: _tabIndex == 0 || _tabIndex == 1 || _tabIndex == 2
                 ? FloatingActionButton.small(
                     onPressed: () => _openAddItemScreen(context),
                     child: const Icon(Icons.add),
@@ -720,9 +741,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return switch (_tabIndex) {
       0 => _buildVaultTab(context),
       1 => _buildTypesTab(context),
-      2 => _buildFavoritesTab(context),
-      3 => _buildSettingsTab(context),
-      4 when _debugTabVisible => _buildDebugInternalsTab(context),
+      2 => _buildFoldersTab(context),
+      3 => _buildFavoritesTab(context),
+      4 => _buildSettingsTab(context),
+      5 when _debugTabVisible => _buildDebugInternalsTab(context),
       _ => _buildVaultTab(context),
     };
   }
@@ -778,9 +800,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return switch (tabIndex) {
       0 => AppStrings.tabVault,
       1 => AppStrings.tabTypes,
-      2 => AppStrings.tabNotes,
-      3 => AppStrings.tabSettings,
-      4 => 'Debug',
+      2 => AppStrings.tabFolders,
+      3 => AppStrings.tabNotes,
+      4 => AppStrings.tabSettings,
+      5 => 'Debug',
       _ => AppStrings.tabVault,
     };
   }
@@ -2181,7 +2204,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
     };
   }
 
-  Future<void> _openAddItemScreen(BuildContext context) async {
+  Future<void> _openAddItemScreen(
+    BuildContext context, {
+    String? initialFolderId,
+  }) async {
     if (_blockExploreDemoWrite()) return;
     final created = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
@@ -2216,6 +2242,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final kind = created['kind']?.toString() ?? 'item';
     final entry = created['entry'];
     if (entry is! Map<String, dynamic>) return;
+    if (initialFolderId != null) {
+      entry['folderId'] = initialFolderId;
+    }
     if (kind == 'note') {
       setState(() => _notes.insert(0, Map<String, dynamic>.from(entry)));
       await _persistVaultData();
@@ -2408,6 +2437,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
           _customTypeDefinitions,
         ),
       );
+      if (widget.onPersistFolders != null) {
+        await widget.onPersistFolders!(
+          _folders.map((f) => f.toJson()).toList(),
+        );
+      }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -4820,18 +4854,25 @@ class _VaultSideNavigation extends StatelessWidget {
         index: 1,
       ),
       _VaultNavDestination(
+        code: 'FD',
+        label: AppStrings.tabFolders,
+        icon: Icons.folder_outlined,
+        selectedIcon: Icons.folder,
+        index: 2,
+      ),
+      _VaultNavDestination(
         code: 'FV',
         label: AppStrings.tabNotes,
         icon: Icons.star_outline,
         selectedIcon: Icons.star,
-        index: 2,
+        index: 3,
       ),
       _VaultNavDestination(
         code: 'ST',
         label: AppStrings.tabSettings,
         icon: Icons.settings_outlined,
         selectedIcon: Icons.settings,
-        index: 3,
+        index: 4,
       ),
       if (debugTabVisible)
         const _VaultNavDestination(
@@ -4839,7 +4880,7 @@ class _VaultSideNavigation extends StatelessWidget {
           label: 'Debug',
           icon: Icons.bug_report_outlined,
           selectedIcon: Icons.bug_report,
-          index: 4,
+          index: 5,
         ),
     ];
 

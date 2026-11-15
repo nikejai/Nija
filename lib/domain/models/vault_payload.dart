@@ -1,4 +1,5 @@
 import '../../application/services/vault_migrator.dart';
+import 'vault_folder.dart';
 
 class VaultPayload {
   const VaultPayload({
@@ -16,6 +17,28 @@ class VaultPayload {
   final List<String> tags;
   final Map<String, dynamic> settings;
   final List<Map<String, dynamic>> audit;
+
+  List<VaultFolder> get folders {
+    final raw = settings['folders'];
+    if (raw is! List) return const <VaultFolder>[];
+    return raw
+        .whereType<Map<dynamic, dynamic>>()
+        .map((entry) => VaultFolder.fromJson(Map<String, dynamic>.from(entry)))
+        .toList();
+  }
+
+  VaultPayload copyWithFolders(List<VaultFolder> newFolders) {
+    final updatedSettings = Map<String, dynamic>.from(settings);
+    updatedSettings['folders'] = newFolders.map((f) => f.toJson()).toList();
+    return VaultPayload(
+      schemaVersion: schemaVersion,
+      items: items,
+      notes: notes,
+      tags: tags,
+      settings: updatedSettings,
+      audit: audit,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'schemaVersion': schemaVersion,

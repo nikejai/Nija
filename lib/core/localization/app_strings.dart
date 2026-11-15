@@ -336,6 +336,7 @@ class AppStrings {
   static String get biometricDisableConfirmMessage =>
       _t('biometricDisableConfirmMessage');
   static String get tabVault => _t('tabVault');
+  static String get tabFolders => _t('tabFolders');
   static String get tabNotes => _t('tabNotes');
   static String get tabTypes => _t('tabTypes');
   static String get tabSettings => _t('tabSettings');
@@ -776,6 +777,7 @@ class AppStrings {
       'biometricDisableConfirmMessage':
           'Disable biometrics for this vault on this device?',
       'tabVault': 'Home',
+      'tabFolders': 'Folders',
       'tabNotes': 'Favorites',
       'tabTypes': 'All Items',
       'tabSettings': 'Settings',
@@ -1024,6 +1026,7 @@ class AppStrings {
       'biometricDisableConfirmMessage':
           '¿Desactivar biometría para esta bóveda en este dispositivo?',
       'tabVault': 'Inicio',
+      'tabFolders': 'Carpetas',
       'tabNotes': 'Favoritos',
       'tabTypes': 'Todos',
       'tabSettings': 'Ajustes',
