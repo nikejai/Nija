@@ -462,14 +462,23 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   }) {
     final hasBytes = bytes != null && bytes.isNotEmpty;
 
-    final openButton = OutlinedButton.icon(
+    final openButton = OutlinedButton(
       key: const ValueKey('document-detail-open'),
       onPressed: hasBytes ? () => _openDocument(bytes, selectedDocument) : null,
-      icon: const Icon(Icons.open_in_new_outlined, size: 16),
-      label: const Text('Open'),
       style: OutlinedButton.styleFrom(
         visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      ),
+      child: const FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.open_in_new_outlined, size: 16),
+            SizedBox(width: 4),
+            Text('Open'),
+          ],
+        ),
       ),
     );
 
@@ -507,20 +516,23 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         ),
       ],
       child: IgnorePointer(
-        child: OutlinedButton.icon(
+        child: OutlinedButton(
           onPressed: hasBytes ? () {} : null,
-          icon: const Icon(Icons.download_outlined, size: 16),
-          label: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Save copy'),
-              SizedBox(width: 2),
-              Icon(Icons.arrow_drop_down, size: 16),
-            ],
-          ),
           style: OutlinedButton.styleFrom(
             visualDensity: VisualDensity.compact,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          ),
+          child: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.download_outlined, size: 16),
+                SizedBox(width: 4),
+                Text('Save copy'),
+                Icon(Icons.arrow_drop_down, size: 16),
+              ],
+            ),
           ),
         ),
       ),
@@ -560,20 +572,23 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         ),
       ],
       child: IgnorePointer(
-        child: OutlinedButton.icon(
+        child: OutlinedButton(
           onPressed: hasBytes ? () {} : null,
-          icon: const Icon(Icons.share_outlined, size: 16),
-          label: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Share'),
-              SizedBox(width: 2),
-              Icon(Icons.arrow_drop_down, size: 16),
-            ],
-          ),
           style: OutlinedButton.styleFrom(
             visualDensity: VisualDensity.compact,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          ),
+          child: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.share_outlined, size: 16),
+                SizedBox(width: 4),
+                Text('Share'),
+                Icon(Icons.arrow_drop_down, size: 16),
+              ],
+            ),
           ),
         ),
       ),
@@ -595,9 +610,9 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     return Row(
       children: [
         Expanded(child: openButton),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         Expanded(child: saveMenuButton),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         Expanded(child: shareMenuButton),
       ],
     );
