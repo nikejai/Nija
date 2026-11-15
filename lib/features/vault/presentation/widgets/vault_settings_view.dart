@@ -48,6 +48,9 @@ extension _VaultSettingsTab on _VaultAppShellState {
             _cloudBackupRevision <= 0 &&
             _cloudBackupVersionId.trim().isEmpty
         ? 'Checking'
+        : _cloudBackupAccountLabel == 'Not connected' ||
+            _cloudBackupLastAtEpochMs <= 0
+        ? 'None'
         : backedUpVaultVersionLabel;
     final theme = Theme.of(context);
 
@@ -239,8 +242,10 @@ extension _VaultSettingsTab on _VaultAppShellState {
                               _cloudBackupSummaryRefreshInProgress &&
                                   _cloudBackupUpdatedAt.trim().isEmpty
                               ? 'Vault updated: Checking cloud backup...'
-                              : _cloudBackupUpdatedAt.trim().isEmpty
-                              ? 'Vault updated: Unknown'
+                              : _cloudBackupAccountLabel == 'Not connected' ||
+                                  _cloudBackupLastAtEpochMs <= 0 ||
+                                  _cloudBackupUpdatedAt.trim().isEmpty
+                              ? 'Vault updated: Never'
                               : 'Vault updated: ${_formatVaultIsoTimestamp(_cloudBackupUpdatedAt)}',
                           detail: backedUpVaultVersionDisplay,
                         ),

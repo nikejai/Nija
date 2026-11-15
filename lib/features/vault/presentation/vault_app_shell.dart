@@ -417,6 +417,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
     _automatedBackupEnabled = true;
     _cloudBackupWifiOnly = true;
     _cloudBackupEnabled = AppFeatures.isPaidBuild && _cloudBackupFeatureAvailable;
+    _cloudBackupLastAtEpochMs = 0;
+    _cloudBackupRevision = 0;
+    _cloudBackupVersionId = '';
+    _cloudBackupUpdatedAt = '';
     _debugInternalsUnlocked = false;
     _debugInternalsEnabled = false;
   }
@@ -2826,13 +2830,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
       final revision = prefs.getInt(_prefsKeyCloudBackupRevision) ?? 0;
       final versionId = prefs.getString(_prefsKeyCloudBackupVersionId) ?? '';
       final updatedAt = prefs.getString(_prefsKeyCloudBackupUpdatedAt) ?? '';
+      final hasVerifiedBackup = revision > 0 || versionId.trim().isNotEmpty;
       if (!mounted) return;
       setState(() {
         _automatedBackupEnabled = automatedEnabled;
         _cloudBackupWifiOnly = wifiOnly;
         _localBackupLastAtEpochMs = localLastAt;
         _cloudBackupEnabled = enabled && _cloudBackupFeatureAvailable;
-        _cloudBackupLastAtEpochMs = lastAt;
+        _cloudBackupLastAtEpochMs = hasVerifiedBackup ? lastAt : 0;
         _cloudBackupRevision = revision;
         _cloudBackupVersionId = versionId;
         _cloudBackupUpdatedAt = updatedAt;
@@ -2972,6 +2977,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _handleBackupNow() async {
     if (!_cloudBackupFeatureAvailable) return;
     if (_isBusyOverlayVisible) return;
+    if (widget.isExploreDemoSession) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cloud backup is disabled in demo mode. Create or unlock a vault to use cloud backup.',
+          ),
+        ),
+      );
+      return;
+    }
     if (!await _verifyWebTransferReady()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2982,6 +2997,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     await _runWithBusy('Cloud backup in progress...', () async {
       await widget.onBackupToCloud();
       if (!mounted) return;
+      await _refreshCloudBackupAccountLabel();
+      if (!mounted) return;
       final cloudBackup = await _readCloudBackupSummary();
       if (!mounted) return;
       if (cloudBackup != null) {
@@ -2991,16 +3008,19 @@ class _VaultAppShellState extends State<VaultAppShell> {
         );
         return;
       }
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final revision = widget.activeVaultRevision;
-      final versionId = widget.activeVaultVersionId.trim();
-      final updatedAt = widget.activeVaultUpdatedAt.trim();
-      await _persistCloudBackupDisplayState(
-        lastAtEpochMs: now,
-        revision: revision,
-        versionId: versionId,
-        updatedAt: updatedAt,
-      );
+      if (widget.onReadCloudBackupSummary == null &&
+          _cloudBackupAccountLabel != 'Not connected') {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final revision = widget.activeVaultRevision;
+        final versionId = widget.activeVaultVersionId.trim();
+        final updatedAt = widget.activeVaultUpdatedAt.trim();
+        await _persistCloudBackupDisplayState(
+          lastAtEpochMs: now,
+          revision: revision,
+          versionId: versionId,
+          updatedAt: updatedAt,
+        );
+      }
     });
   }
 
@@ -3449,7 +3469,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
         _cloudBackupLastAtEpochMs <= 0) {
       return 'Checking cloud backup...';
     }
-    if (_cloudBackupLastAtEpochMs <= 0) return 'Never';
+    if (_cloudBackupLastAtEpochMs <= 0 ||
+        _cloudBackupAccountLabel == 'Not connected') {
+      return 'Never';
+    }
     return _formatLocalDateTime(
       DateTime.fromMillisecondsSinceEpoch(_cloudBackupLastAtEpochMs),
     );
