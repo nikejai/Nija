@@ -83,10 +83,6 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   void initState() {
     super.initState();
     _isFavorite = widget.item['pinned'] == true;
-    if (widget.readOnly) {
-      _isLoadingDocument = false;
-      return;
-    }
     unawaited(_loadSelectedDocument());
   }
 
@@ -495,9 +491,13 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(width: double.infinity, child: openButton),
-        const SizedBox(height: 8),
-        SizedBox(width: double.infinity, child: saveButton),
+        Row(
+          children: [
+            Expanded(child: openButton),
+            const SizedBox(width: 8),
+            Expanded(child: saveButton),
+          ],
+        ),
         const SizedBox(height: 8),
         SizedBox(width: double.infinity, child: shareDecryptedButton),
         const SizedBox(height: 8),

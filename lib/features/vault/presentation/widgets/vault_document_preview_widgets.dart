@@ -19,26 +19,31 @@ class DocumentPreviewMessage extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final content = Center(
-      child: Padding(
-        padding: const EdgeInsets.all(22),
+      child: SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: colorScheme.onSurfaceVariant, size: 42),
-            const SizedBox(height: 10),
+            Icon(icon, color: colorScheme.onSurfaceVariant, size: 36),
+            const SizedBox(height: 6),
             Text(
               title,
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: colorScheme.onSurface,
                 fontWeight: FontWeight.w700,
+                fontSize: 14,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: TextStyle(color: colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
             ),
           ],
         ),
