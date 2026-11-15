@@ -537,11 +537,33 @@ void main() {
     );
 
     expect(find.text('Home'), findsWidgets);
+    expect(find.text('Folders'), findsWidgets);
     expect(find.text('Favorites'), findsWidgets);
     expect(find.text('All Items'), findsAtLeastNWidgets(1));
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Recent'), findsOneWidget);
     expect(find.text('View all'), findsOneWidget);
+
+    await tester.tap(find.text('Folders').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Root Directory'), findsOneWidget);
+
+    // Verify FAB speed dial works on Folders tab
+    await tester.tap(find.byKey(const ValueKey('vault-fab')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('explorer-fab-new-folder')), findsOneWidget);
+    expect(find.byKey(const ValueKey('explorer-fab-add-item')), findsOneWidget);
+    expect(find.byKey(const ValueKey('explorer-fab-upload-file')), findsOneWidget);
+
+    // Create a new folder via FAB
+    await tester.tap(find.byKey(const ValueKey('explorer-fab-new-folder')));
+    await tester.pumpAndSettle();
+    expect(find.text('Create New Folder'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Personal Vault');
+    await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Personal Vault'), findsOneWidget);
   });
 
   testWidgets('wide vault shell uses rail/sidebar wireframe', (tester) async {
@@ -858,6 +880,129 @@ void main() {
     expect(lockCalls, 1);
   });
 
+  testWidgets('demo preview shows demo folders and items in folders tab', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'empty.nija',
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'cabin',
+            'cactus',
+            'canyon',
+          ],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData:
+              ({
+                required items,
+                required notes,
+                required customTypeDefinitions,
+              }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Enable demo preview
+    expect(find.text('View demo preview'), findsOneWidget);
+    await tester.tap(find.text('View demo preview'));
+    await tester.pumpAndSettle();
+
+    // Open Folders tab
+    await tester.tap(find.text('Folders').first);
+    await tester.pumpAndSettle();
+
+    // Verify root directory shows demo folders and Default
+    expect(find.text('Root Directory'), findsOneWidget);
+    expect(find.text('Personal'), findsOneWidget);
+    expect(find.text('Work'), findsOneWidget);
+    expect(find.text('Finance'), findsOneWidget);
+    expect(find.text('Travel'), findsOneWidget);
+    expect(find.text('Default'), findsOneWidget);
+
+    // Navigate into Work folder
+    await tester.tap(find.text('Work'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Projects & Infra'), findsOneWidget);
+    expect(find.text('GitHub'), findsOneWidget);
+
+    // Navigate into Projects & Infra subfolder
+    await tester.tap(find.text('Projects & Infra'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Production Cloud'), findsOneWidget);
+    expect(find.text('API Keys & Auth'), findsOneWidget);
+
+    // Navigate into Production Cloud subfolder
+    await tester.tap(find.text('Production Cloud'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AWS'), findsOneWidget);
+    expect(find.text('Production DB Cluster'), findsOneWidget);
+
+    // Navigate back to Root using Up buttons
+    await tester.tap(find.byTooltip('Up to parent folder').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Up to parent folder').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Up to parent folder').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Root Directory'), findsOneWidget);
+
+    // Navigate into Finance
+    await tester.tap(find.text('Finance'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tax 2026'), findsOneWidget);
+    expect(find.text('Banking & Cards'), findsOneWidget);
+
+    // Navigate into Tax 2026 subfolder
+    await tester.tap(find.text('Tax 2026'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('W-2 Wage & Tax Statement'), findsOneWidget);
+
+    // Navigate up and into Banking & Cards
+    await tester.tap(find.byTooltip('Up to parent folder').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Banking & Cards'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Primary Card'), findsOneWidget);
+  });
+
   testWidgets('demo preview does not replace real all-items data', (
     tester,
   ) async {
@@ -988,7 +1133,7 @@ void main() {
 
     await tester.tap(find.text('GitHub').first);
     await tester.pumpAndSettle();
-    expect(find.text('nitesh@example.com'), findsWidgets);
+    expect(find.text('alex@example.com'), findsWidgets);
 
     await tester.tap(find.byIcon(Icons.arrow_back).first);
     await tester.pumpAndSettle();

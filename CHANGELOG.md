@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026-11-15 11:50:00 IST
+
+- Completed Section 19: Folders & Metadata Hub (Explorer).
+  - Defined `VaultFolder` domain entity (`id`, `name`, `parentId`, `color`, `icon`, `createdAt`, `updatedAt`, `tags`, `metadata`, `isRoot`, `copyWith`, `toJson`, `fromJson`).
+  - Added optional `folderId` property to `VaultItemData` and `VaultNoteData` models.
+  - Implemented `FolderTreeNode` and `FolderTreeBuilder` with n-ary hierarchy modeling, recursive metrics aggregation (`subfolderCount`, `directItemCount`, `totalItemCount`, `totalSizeBytes`), breadcrumb path resolution, descendant folder lookup, and safe circular reference cycle breaking.
+  - Implemented zero-dependency `VaultFolderManager` service providing full CRUD operations (`createFolder`, `renameFolder`, `moveFolder`, `deleteFolder` with reparenting vs. cascade modes, `moveItemToFolder`, `copyItemToFolder`, and cryptographically secure UUID generation).
+  - Metadata Hub Architecture: Folder topology and item-folder mappings persist within encrypted vault settings payload (`settings['folders']`), avoiding monolithic external folder containers and preserving atomic encryption, local storage, cloud backup, and file export integrity.
+  - Added `Folders` tab to bottom navigation bar on mobile and wide navigation rail with localization support (`tabFolders` for English and Spanish).
+  - Built Windows Explorer-style Header with interactive breadcrumbs, back/forward history navigation, up-to-parent button, folder metadata statistics, and real-time explorer search box.
+  - Built multi-view Explorer supporting List View (dense details with column sorting), Grid View (responsive card tiles with metadata badges), and Tree View (collapsible split-pane hierarchical directory navigator).
+  - Implemented folder sorting by Name (A–Z / Z–A), Date Modified (newest/oldest), Size (largest/smallest), and Type.
+  - Added full test coverage in `test/vault_folder_test.dart` (15 tests) and `test/vault_folders_view_test.dart` (7 tests), with 0 static analyzer issues (`flutter analyze`) and 100% pass rate across all 204 tests (`flutter test`).
+
+
+
 ## 2026-11-15 02:02:00 IST
 
 - Completed Section 18 Phase 4: Visual Design & Brand Cohesion.

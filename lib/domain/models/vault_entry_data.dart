@@ -33,6 +33,7 @@ class VaultItemData {
     required this.pinned,
     required this.tags,
     required this.fields,
+    this.folderId,
   });
 
   final String id;
@@ -42,6 +43,7 @@ class VaultItemData {
   final bool pinned;
   final List<String> tags;
   final List<VaultEntryFieldData> fields;
+  final String? folderId;
 
   factory VaultItemData.fromJson(Map<String, dynamic> json) {
     return VaultItemData(
@@ -50,6 +52,7 @@ class VaultItemData {
       title: json['title']?.toString() ?? 'Untitled',
       subtitle: json['subtitle']?.toString() ?? '',
       pinned: json['pinned'] == true,
+      folderId: json['folderId']?.toString(),
       tags: (json['tags'] as List<dynamic>? ?? const <dynamic>[])
           .map((entry) => entry.toString())
           .toList(),
@@ -69,6 +72,7 @@ class VaultItemData {
     'title': title,
     'subtitle': subtitle,
     'pinned': pinned,
+    if (folderId != null && folderId!.trim().isNotEmpty) 'folderId': folderId,
     'tags': tags,
     'fields': fields.map((field) => field.toJson()).toList(),
   };
@@ -82,6 +86,7 @@ class VaultNoteData {
     required this.pinned,
     required this.tags,
     required this.delta,
+    this.folderId,
   });
 
   final String id;
@@ -90,6 +95,7 @@ class VaultNoteData {
   final bool pinned;
   final List<String> tags;
   final List<Map<String, dynamic>> delta;
+  final String? folderId;
 
   factory VaultNoteData.fromJson(Map<String, dynamic> json) {
     return VaultNoteData(
@@ -97,6 +103,7 @@ class VaultNoteData {
       title: json['title']?.toString() ?? 'Untitled note',
       preview: json['preview']?.toString() ?? '',
       pinned: json['pinned'] == true,
+      folderId: json['folderId']?.toString(),
       tags: (json['tags'] as List<dynamic>? ?? const <dynamic>[])
           .map((entry) => entry.toString())
           .toList(),
@@ -111,6 +118,7 @@ class VaultNoteData {
     'title': title,
     'preview': preview,
     'pinned': pinned,
+    if (folderId != null && folderId!.trim().isNotEmpty) 'folderId': folderId,
     'tags': tags,
     'delta': delta,
   };

@@ -18,6 +18,8 @@ import '../../../core/platform/pwa_install_service.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/secure_clipboard.dart';
 import '../../../domain/validators/vault_validators.dart';
+import '../../../domain/models/vault_folder.dart';
+import '../../../application/services/vault_folder_manager.dart';
 import '../application/vault_entry_activity.dart';
 import '../application/vault_home_demo_data.dart';
 import '../../../infrastructure/adapters/vault_portability_model.dart';
@@ -32,6 +34,7 @@ import 'widgets/vault_document_preview_widgets.dart';
 import 'widgets/pwa_install_dialog.dart';
 import 'widgets/vault_page_heading.dart';
 import 'widgets/vault_surface_menu.dart';
+import 'widgets/vault_folders_view.dart';
 
 part 'widgets/encrypted_import_widgets.dart';
 part 'custom_template_manager_screen.dart';
@@ -87,6 +90,8 @@ typedef PersistVaultData =
       required List<Map<String, dynamic>> notes,
       required List<Map<String, dynamic>> customTypeDefinitions,
     });
+typedef PersistVaultFolders =
+    Future<void> Function(List<Map<String, dynamic>> folders);
 typedef PersistVaultDocument =
     Future<String> Function({
       required String documentId,
@@ -126,6 +131,7 @@ class VaultAppShell extends StatefulWidget {
     required this.initialItems,
     required this.initialNotes,
     required this.initialCustomTypeDefinitions,
+    this.initialFolders = const <Map<String, dynamic>>[],
     required this.languageMode,
     required this.onLanguageModeChanged,
     this.themeMode = ThemeMode.system,
@@ -138,6 +144,7 @@ class VaultAppShell extends StatefulWidget {
     this.onPinChanged,
     required this.onBiometricChanged,
     required this.onPersistVaultData,
+    this.onPersistFolders,
     this.onPersistVaultDocument,
     this.onPersistVaultDocumentStream,
     this.onReadVaultDocument,
@@ -172,6 +179,7 @@ class VaultAppShell extends StatefulWidget {
   final List<Map<String, dynamic>> initialItems;
   final List<Map<String, dynamic>> initialNotes;
   final List<Map<String, dynamic>> initialCustomTypeDefinitions;
+  final List<Map<String, dynamic>> initialFolders;
   final String languageMode;
   final LanguageModeChanged onLanguageModeChanged;
   final ThemeMode themeMode;
@@ -184,6 +192,7 @@ class VaultAppShell extends StatefulWidget {
   final BiometricChanged? onPinChanged;
   final BiometricChanged onBiometricChanged;
   final PersistVaultData onPersistVaultData;
+  final PersistVaultFolders? onPersistFolders;
   final PersistVaultDocument? onPersistVaultDocument;
   final PersistVaultDocumentStream? onPersistVaultDocumentStream;
   final ReadVaultDocument? onReadVaultDocument;
@@ -272,6 +281,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
   late final List<Map<String, dynamic>> _customTypeDefinitions;
   late final List<Map<String, dynamic>> _items;
   late final List<Map<String, dynamic>> _notes;
+  late List<VaultFolder> _folders;
+  final VaultFolderManager _folderManager = const VaultFolderManager();
   late final List<VaultListEntryAdapter> _vaultListEntryAdapters;
   late String _activeVaultName;
 
@@ -297,6 +308,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
     _notes = widget.initialNotes
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList();
+    _folders = widget.initialFolders
+        .map((entry) => VaultFolder.fromJson(entry))
+        .toList();
     _allowHomeDemoData =
         widget.isExploreDemoSession ||
         (widget.initialItems.isEmpty && widget.initialNotes.isEmpty);
@@ -313,6 +327,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
             (entry) => Map<String, dynamic>.from(entry),
           ),
         );
+        _folders.addAll(VaultHomeDemoData.cloneFolders());
       }
       _dashboardDataCache = null;
       _dashboardDataSignature = null;
@@ -525,13 +540,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final debugTabVisible = _debugTabVisible;
     final selectedTabIndex = debugTabVisible
         ? _tabIndex
-        : (_tabIndex > 3 ? 3 : _tabIndex);
+        : (_tabIndex > 4 ? 4 : _tabIndex);
     // Mobile is the source experience. Tablet/web gain the rail and bounded
     // workspace frame without changing the routes or mobile interactions.
     final useSideNavigation = _isWideLayout(context);
     void selectDestination(int value) {
       if (value == _tabIndex) return;
-      if (value == 4 && _debugTabVisible) {
+      if (value == 5 && _debugTabVisible) {
         _ensureDebugInternalsFuture();
       }
       setState(() {
@@ -540,7 +555,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         }
         _tabIndex = value;
       });
-      if (value == 3) {
+      if (value == 4) {
         unawaited(_refreshCloudBackupSummary());
       }
     }
@@ -684,6 +699,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
                           label: AppStrings.tabTypes,
                         ),
                         NavigationDestination(
+                          icon: const Icon(Icons.folder_outlined),
+                          selectedIcon: const Icon(Icons.folder),
+                          label: AppStrings.tabFolders,
+                        ),
+                        NavigationDestination(
                           icon: const Icon(Icons.star_outline),
                           selectedIcon: const Icon(Icons.star),
                           label: AppStrings.tabNotes,
@@ -703,9 +723,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
                       onDestinationSelected: selectDestination,
                     ),
                   ),
-            floatingActionButton: _tabIndex == 0 || _tabIndex == 1
+            floatingActionButton: _tabIndex == 0 || _tabIndex == 1 || _tabIndex == 2
                 ? FloatingActionButton.small(
-                    onPressed: () => _openAddItemScreen(context),
+                    key: const ValueKey('vault-fab'),
+                    onPressed: () {
+                      if (_tabIndex == 2) {
+                        _showFolderSpeedDial(context);
+                      } else {
+                        _openAddItemScreen(context);
+                      }
+                    },
                     child: const Icon(Icons.add),
                   )
                 : null,
@@ -720,11 +747,291 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return switch (_tabIndex) {
       0 => _buildVaultTab(context),
       1 => _buildTypesTab(context),
-      2 => _buildFavoritesTab(context),
-      3 => _buildSettingsTab(context),
-      4 when _debugTabVisible => _buildDebugInternalsTab(context),
+      2 => _buildFoldersTab(context),
+      3 => _buildFavoritesTab(context),
+      4 => _buildSettingsTab(context),
+      5 when _debugTabVisible => _buildDebugInternalsTab(context),
       _ => _buildVaultTab(context),
     };
+  }
+
+  bool _showFolderDemoPreview = false;
+  String? _currentExplorerFolderId;
+
+  Widget _buildFoldersTab(BuildContext context) {
+    final demoMode = _showFolderDemoPreview || _shouldShowHomeDemoData || widget.isExploreDemoSession;
+    final folders = demoMode ? VaultHomeDemoData.demoFolders : _folders;
+    final items = demoMode ? VaultHomeDemoData.items : _items;
+    final notes = demoMode ? VaultHomeDemoData.notes : _notes;
+
+    return VaultFoldersView(
+      isWide: _isWideLayout(context),
+      folders: folders,
+      items: items,
+      notes: notes,
+      isDemoPreview: demoMode,
+      onOpenDemoPreview: () => setState(() => _showFolderDemoPreview = true),
+      onExitDemoPreview: () => setState(() => _showFolderDemoPreview = false),
+      colorForType: _colorForDashboardType,
+      iconForType: _iconForDashboardType,
+      onFolderChanged: (folderId) => _currentExplorerFolderId = folderId,
+      onOpenItem: (item) => _openVaultListRow(context, item),
+      onAddItemToFolder: (folderId) =>
+          _openAddItemScreen(context, initialFolderId: folderId),
+      onUploadDocumentToFolder: (folderId) =>
+          _openUploadDocumentToFolder(folderId),
+      onCreateFolder: _createFolder,
+      onRenameFolder: _renameFolder,
+      onMoveFolder: _moveFolder,
+      onDeleteFolder: _deleteFolder,
+      onMoveItem: _moveItemToFolder,
+      onCopyItem: _copyItemToFolder,
+      onDeleteItem: _deleteItemFromExplorer,
+    );
+  }
+
+  void _showFolderSpeedDial(BuildContext context) {
+    if (_blockExploreDemoWrite()) return;
+    final effectiveFolderId = _currentExplorerFolderId == VaultFoldersView.defaultFolderId
+        ? null
+        : _currentExplorerFolderId;
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                key: const ValueKey('explorer-fab-new-folder'),
+                leading: const Icon(Icons.create_new_folder_outlined, color: Color(0xFFEAB308)),
+                title: const Text('New Folder'),
+                subtitle: const Text('Create a folder to organize items'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showCreateFolderModal(context, parentFolderId: effectiveFolderId);
+                },
+              ),
+              ListTile(
+                key: const ValueKey('explorer-fab-add-item'),
+                leading: const Icon(Icons.add_circle_outline, color: Color(0xFF3B82F6)),
+                title: const Text('Add Item'),
+                subtitle: const Text('Add password, note, card, or credential'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openAddItemScreen(context, initialFolderId: effectiveFolderId);
+                },
+              ),
+              ListTile(
+                key: const ValueKey('explorer-fab-upload-file'),
+                leading: const Icon(Icons.upload_file_outlined, color: Color(0xFF10B981)),
+                title: const Text('Upload File'),
+                subtitle: const Text('Upload an encrypted document or attachment'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openUploadDocumentToFolder(effectiveFolderId);
+                },
+              ),
+              ListTile(
+                key: const ValueKey('explorer-fab-demo-preview'),
+                leading: const Icon(Icons.visibility_outlined, color: Color(0xFF8B5CF6)),
+                title: Text(
+                  (_showFolderDemoPreview || _shouldShowHomeDemoData || widget.isExploreDemoSession)
+                      ? 'Exit Demo Preview'
+                      : 'Demo Folders Preview',
+                ),
+                subtitle: const Text('Explore nested folders, files, and tree view'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    if (_showFolderDemoPreview || _shouldShowHomeDemoData || widget.isExploreDemoSession) {
+                      _showFolderDemoPreview = false;
+                      _showHomeDemoPreview = false;
+                    } else {
+                      _showFolderDemoPreview = true;
+                    }
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCreateFolderModal(BuildContext context, {String? parentFolderId}) {
+    final controller = TextEditingController();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Create New Folder'),
+        content: TextField(
+          key: const ValueKey('create-folder-name-input'),
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Folder Name',
+            hintText: 'e.g. Work, Taxes, Identity',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            key: const ValueKey('create-folder-submit-button'),
+            style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isNotEmpty) {
+                _createFolder(name, parentFolderId, null);
+                Navigator.pop(ctx);
+              }
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _createFolder(String name, String? parentId, String? color) {
+    _updateState(() {
+      _folders = _folderManager.createFolder(
+        folders: _folders,
+        name: name,
+        parentId: parentId,
+        color: color,
+      );
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _renameFolder(String folderId, String newName) {
+    _updateState(() {
+      _folders = _folderManager.renameFolder(
+        folders: _folders,
+        folderId: folderId,
+        newName: newName,
+      );
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _moveFolder(String folderId, String? newParentId) {
+    _updateState(() {
+      _folders = _folderManager.moveFolder(
+        folders: _folders,
+        folderId: folderId,
+        newParentId: newParentId,
+      );
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _deleteFolder(String folderId, bool cascade) {
+    _updateState(() {
+      final res = _folderManager.deleteFolder(
+        folders: _folders,
+        items: _items,
+        folderId: folderId,
+        cascade: cascade,
+      );
+      _folders = res.folders;
+      _items.clear();
+      _items.addAll(res.items);
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _moveItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
+    final updated = _folderManager.moveItemToFolder(
+      item: item,
+      targetFolderId: targetFolderId,
+    );
+    _updateState(() {
+      final idx = _items.indexWhere((i) => i['id'] == item['id']);
+      if (idx >= 0) {
+        _items[idx] = updated;
+      } else {
+        final noteIdx = _notes.indexWhere((n) => n['id'] == item['id']);
+        if (noteIdx >= 0) {
+          _notes[noteIdx] = updated;
+        }
+      }
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _copyItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
+    final copy = _folderManager.copyItemToFolder(
+      item: item,
+      targetFolderId: targetFolderId,
+    );
+    _updateState(() {
+      if (item['type'] == 'Secure Note' || item.containsKey('delta')) {
+        _notes.add(copy);
+      } else {
+        _items.add(copy);
+      }
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _deleteItemFromExplorer(Map<String, dynamic> item) {
+    final itemId = item['id'];
+    _updateState(() {
+      _items.removeWhere((i) => i['id'] == itemId);
+      _notes.removeWhere((n) => n['id'] == itemId);
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  Future<void> _openUploadDocumentToFolder(String? folderId) async {
+    if (_blockExploreDemoWrite()) return;
+    if (widget.onPersistVaultDocument == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Document storage unavailable in this session.'),
+        ),
+      );
+      return;
+    }
+
+    final created = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => DocumentUploadScreen(
+          currentVaultSizeBytes: _effectiveVaultSizeBytes,
+          maxVaultBytes: _effectiveMaxVaultBytes,
+          maxDocumentBytes: VaultLimits.maxDocumentBytes,
+          onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+        ),
+      ),
+    );
+
+    if (created == null) return;
+    final item = Map<String, dynamic>.from(created);
+    if (folderId != null) {
+      item['folderId'] = folderId;
+    }
+    try {
+      if (!await _isPendingDocumentStored(item)) return;
+      if (!await _arePendingAttachmentsStored(item)) return;
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to save document.')),
+      );
+      return;
+    }
+    _updateState(() {
+      _items.insert(0, item);
+    });
+    await _persistVaultData();
   }
 
   bool get _debugInternalsFeatureAvailable =>
@@ -778,9 +1085,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
     return switch (tabIndex) {
       0 => AppStrings.tabVault,
       1 => AppStrings.tabTypes,
-      2 => AppStrings.tabNotes,
-      3 => AppStrings.tabSettings,
-      4 => 'Debug',
+      2 => AppStrings.tabFolders,
+      3 => AppStrings.tabNotes,
+      4 => AppStrings.tabSettings,
+      5 => 'Debug',
       _ => AppStrings.tabVault,
     };
   }
@@ -958,8 +1266,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   void _openVaultListRow(BuildContext context, Map<String, dynamic> row) {
-    final kind = row['kind']?.toString() ?? 'item';
-    final entry = row['entry'] as Map<String, dynamic>;
+    final entry = (row['entry'] is Map<String, dynamic>)
+        ? row['entry'] as Map<String, dynamic>
+        : row;
+    final kind = row['kind']?.toString() ??
+        (entry['type'] == 'Secure Note' || entry.containsKey('delta') ? 'note' : 'item');
     if (kind == 'note') {
       _openNoteDetail(context, entry);
     } else if (_isDocumentItem(entry)) {
@@ -1042,14 +1353,18 @@ class _VaultAppShellState extends State<VaultAppShell> {
     Map<String, dynamic> item,
   ) async {
     final accessedItem = _markItemLastAccessed(item);
+    final isDemoItem = accessedItem['demo'] == true ||
+        _showFolderDemoPreview ||
+        widget.isExploreDemoSession;
     final result = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => _DocumentDetailScreen(
           item: accessedItem,
-          onReadDocument: _isExploreDemoReadOnly
-              ? null
-              : widget.onReadVaultDocument,
-          readOnly: _isExploreDemoReadOnly,
+          onReadDocument: isDemoItem
+              ? ({required sectionName, onProgress}) async =>
+                  VaultHomeDemoData.demoPdfBytes
+              : (_isExploreDemoReadOnly ? null : widget.onReadVaultDocument),
+          readOnly: _isExploreDemoReadOnly || isDemoItem,
           onShareEncryptedDocument: _shareEncryptedDocument,
           onExportEncryptedDocument: _exportEncryptedDocument,
           onSaveDocumentCopy: _saveDocumentCopy,
@@ -1069,8 +1384,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
           onSaveAttachmentCopy: (attachment) => _saveAttachmentCopy(attachment),
           onDeleteAttachment: (detailItem, attachment) =>
               _deleteAttachmentFromItem(detailItem, attachment),
-          showDeleteAction: !_isExploreDemoReadOnly,
-          onShareMenu: _isExploreDemoReadOnly
+          showDeleteAction: !(_isExploreDemoReadOnly || isDemoItem),
+          onShareMenu: (_isExploreDemoReadOnly || isDemoItem)
               ? null
               : () => _showDocumentQuickActions(context, accessedItem),
         ),
@@ -2014,6 +2329,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<List<int>> _readAttachmentBytes(
     Map<String, dynamic> attachment,
   ) async {
+    final directBytes = attachment['__documentBytes__'] ?? attachment['documentBytes'];
+    if (directBytes is List<int> && directBytes.isNotEmpty) {
+      return directBytes;
+    }
+    if (attachment['demo'] == true || _showFolderDemoPreview || widget.isExploreDemoSession) {
+      return VaultHomeDemoData.demoPdfBytes;
+    }
     final sectionName = attachment['documentSection']?.toString().trim() ?? '';
     final reader = widget.onReadVaultDocument;
     if (sectionName.isEmpty || reader == null) {
@@ -2181,7 +2503,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
     };
   }
 
-  Future<void> _openAddItemScreen(BuildContext context) async {
+  Future<void> _openAddItemScreen(
+    BuildContext context, {
+    String? initialFolderId,
+  }) async {
     if (_blockExploreDemoWrite()) return;
     final created = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
@@ -2216,6 +2541,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final kind = created['kind']?.toString() ?? 'item';
     final entry = created['entry'];
     if (entry is! Map<String, dynamic>) return;
+    if (initialFolderId != null) {
+      entry['folderId'] = initialFolderId;
+    }
     if (kind == 'note') {
       setState(() => _notes.insert(0, Map<String, dynamic>.from(entry)));
       await _persistVaultData();
@@ -2408,6 +2736,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
           _customTypeDefinitions,
         ),
       );
+      if (widget.onPersistFolders != null) {
+        await widget.onPersistFolders!(
+          _folders.map((f) => f.toJson()).toList(),
+        );
+      }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -4820,18 +5153,25 @@ class _VaultSideNavigation extends StatelessWidget {
         index: 1,
       ),
       _VaultNavDestination(
+        code: 'FD',
+        label: AppStrings.tabFolders,
+        icon: Icons.folder_outlined,
+        selectedIcon: Icons.folder,
+        index: 2,
+      ),
+      _VaultNavDestination(
         code: 'FV',
         label: AppStrings.tabNotes,
         icon: Icons.star_outline,
         selectedIcon: Icons.star,
-        index: 2,
+        index: 3,
       ),
       _VaultNavDestination(
         code: 'ST',
         label: AppStrings.tabSettings,
         icon: Icons.settings_outlined,
         selectedIcon: Icons.settings,
-        index: 3,
+        index: 4,
       ),
       if (debugTabVisible)
         const _VaultNavDestination(
@@ -4839,7 +5179,7 @@ class _VaultSideNavigation extends StatelessWidget {
           label: 'Debug',
           icon: Icons.bug_report_outlined,
           selectedIcon: Icons.bug_report,
-          index: 4,
+          index: 5,
         ),
     ];
 

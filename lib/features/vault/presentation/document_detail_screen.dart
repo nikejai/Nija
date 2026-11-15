@@ -83,10 +83,6 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   void initState() {
     super.initState();
     _isFavorite = widget.item['pinned'] == true;
-    if (widget.readOnly) {
-      _isLoadingDocument = false;
-      return;
-    }
     unawaited(_loadSelectedDocument());
   }
 
@@ -120,6 +116,16 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     Map<String, dynamic> document, {
     VaultDocumentLoadProgress? onProgress,
   }) async {
+    final directBytes = document['__documentBytes__'] ??
+        document['documentBytes'] ??
+        widget.item['__documentBytes__'] ??
+        widget.item['documentBytes'];
+    if (directBytes is List<int> && directBytes.isNotEmpty) {
+      return directBytes;
+    }
+    if (document['demo'] == true || widget.item['demo'] == true) {
+      return VaultHomeDemoData.demoPdfBytes;
+    }
     final sectionName = document['documentSection']?.toString().trim() ?? '';
     if (sectionName.isEmpty) {
       throw StateError('Document section is missing.');
@@ -257,9 +263,39 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                               extension: extension,
                               size: size,
                             ),
-                            const SizedBox(height: 10),
-                            _EntryMetadataPanel(entry: widget.item),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 6),
+                            Theme(
+                              data: Theme.of(context).copyWith(
+                                dividerColor: Colors.transparent,
+                              ),
+                              child: ExpansionTile(
+                                key: const ValueKey('document-metadata-expansion'),
+                                dense: true,
+                                visualDensity: VisualDensity.compact,
+                                tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+                                childrenPadding: EdgeInsets.zero,
+                                leading: Icon(
+                                  Icons.info_outline,
+                                  size: 16,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                                title: Text(
+                                  'Info & Metadata',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: _EntryMetadataPanel(entry: widget.item),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 6),
                             _DocumentFilesSection(
                               documents: _documents,
                               selectedDocumentId: _documentId(selectedDocument),
@@ -424,41 +460,138 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     required Map<String, dynamic> selectedDocument,
     required bool compact,
   }) {
-    final openButton = FilledButton.icon(
-      onPressed: bytes == null
-          ? null
-          : () => _openDocument(bytes, selectedDocument),
-      icon: const Icon(Icons.open_in_new_outlined),
-      label: const Text('Open with app'),
+    final hasBytes = bytes != null && bytes.isNotEmpty;
+
+    final openButton = OutlinedButton(
+      key: const ValueKey('document-detail-open'),
+      onPressed: hasBytes ? () => _openDocument(bytes, selectedDocument) : null,
+      style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      ),
+      child: const FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.open_in_new_outlined, size: 16),
+            SizedBox(width: 4),
+            Text('Open'),
+          ],
+        ),
+      ),
     );
-    final saveButton = OutlinedButton.icon(
+
+    final saveMenuButton = PopupMenuButton<String>(
       key: const ValueKey('document-detail-save-copy'),
-      onPressed: bytes == null
-          ? null
-          : () => _saveDocumentCopy(bytes, selectedDocument),
-      icon: const Icon(Icons.download_for_offline_outlined),
-      label: const Text('Save copy'),
+      enabled: hasBytes,
+      tooltip: 'Save / Download options',
+      onSelected: (value) {
+        if (value == 'plain') {
+          _saveDocumentCopy(bytes!, selectedDocument);
+        } else if (value == 'encrypted') {
+          widget.onExportEncryptedDocument(selectedDocument, bytes!);
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'plain',
+          child: Row(
+            children: [
+              Icon(Icons.download_for_offline_outlined, size: 18),
+              SizedBox(width: 8),
+              Text('Save copy (decrypted)'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'encrypted',
+          child: Row(
+            children: [
+              Icon(Icons.enhanced_encryption_outlined, size: 18),
+              SizedBox(width: 8),
+              Text('Export encrypted (.nija)'),
+            ],
+          ),
+        ),
+      ],
+      child: IgnorePointer(
+        child: OutlinedButton(
+          onPressed: hasBytes ? () {} : null,
+          style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          ),
+          child: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.download_outlined, size: 16),
+                SizedBox(width: 4),
+                Text('Save copy'),
+                Icon(Icons.arrow_drop_down, size: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
-    final shareDecryptedButton = OutlinedButton.icon(
-      onPressed: bytes == null
-          ? null
-          : () => _shareDecryptedDocument(bytes, selectedDocument),
-      icon: const Icon(Icons.share_outlined),
-      label: const Text('Share decrypted file'),
-    );
-    final shareEncryptedButton = OutlinedButton.icon(
-      onPressed: bytes == null
-          ? null
-          : () => widget.onShareEncryptedDocument(selectedDocument, bytes),
-      icon: const Icon(Icons.enhanced_encryption_outlined),
-      label: const Text('Share encrypted'),
-    );
-    final exportEncryptedButton = OutlinedButton.icon(
-      onPressed: bytes == null
-          ? null
-          : () => widget.onExportEncryptedDocument(selectedDocument, bytes),
-      icon: const Icon(Icons.file_download_outlined),
-      label: const Text('Export encrypted'),
+
+    final shareMenuButton = PopupMenuButton<String>(
+      key: const ValueKey('document-detail-share-actions'),
+      enabled: hasBytes,
+      tooltip: 'Share options',
+      onSelected: (value) {
+        if (value == 'plain') {
+          _shareDecryptedDocument(bytes!, selectedDocument);
+        } else if (value == 'encrypted') {
+          widget.onShareEncryptedDocument(selectedDocument, bytes!);
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'plain',
+          child: Row(
+            children: [
+              Icon(Icons.share_outlined, size: 18),
+              SizedBox(width: 8),
+              Text('Share decrypted file'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'encrypted',
+          child: Row(
+            children: [
+              Icon(Icons.lock_outline, size: 18),
+              SizedBox(width: 8),
+              Text('Share encrypted (.nija)'),
+            ],
+          ),
+        ),
+      ],
+      child: IgnorePointer(
+        child: OutlinedButton(
+          onPressed: hasBytes ? () {} : null,
+          style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          ),
+          child: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.share_outlined, size: 16),
+                SizedBox(width: 4),
+                Text('Share'),
+                Icon(Icons.arrow_drop_down, size: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
 
     if (compact) {
@@ -467,37 +600,20 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         children: [
           openButton,
           const SizedBox(height: 8),
-          saveButton,
+          saveMenuButton,
           const SizedBox(height: 8),
-          shareDecryptedButton,
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: shareEncryptedButton),
-              const SizedBox(width: 8),
-              Expanded(child: exportEncryptedButton),
-            ],
-          ),
+          shareMenuButton,
         ],
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
       children: [
-        SizedBox(width: double.infinity, child: openButton),
-        const SizedBox(height: 8),
-        SizedBox(width: double.infinity, child: saveButton),
-        const SizedBox(height: 8),
-        SizedBox(width: double.infinity, child: shareDecryptedButton),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(child: shareEncryptedButton),
-            const SizedBox(width: 8),
-            Expanded(child: exportEncryptedButton),
-          ],
-        ),
+        Expanded(child: openButton),
+        const SizedBox(width: 6),
+        Expanded(child: saveMenuButton),
+        const SizedBox(width: 6),
+        Expanded(child: shareMenuButton),
       ],
     );
   }
@@ -1296,7 +1412,7 @@ class _DocumentFilesSection extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(10),
@@ -1304,62 +1420,120 @@ class _DocumentFilesSection extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Documents',
-                  style: TextStyle(
-                    color: colorScheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
+              Icon(Icons.folder_open_outlined, size: 15, color: colorScheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                'Documents',
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
                 ),
               ),
+              const Spacer(),
               IconButton(
                 key: const ValueKey('document-detail-add-document'),
                 onPressed: onAdd,
                 tooltip: 'Add document',
-                icon: const Icon(Icons.attach_file),
+                icon: const Icon(Icons.attach_file, size: 18),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
               ),
             ],
           ),
           const SizedBox(height: 4),
-          ...documents.map((document) {
-            final documentId = _documentId(document);
-            final selected = documentId == selectedDocumentId;
-            final isPrimary = document['__primaryDocument__'] == true;
-            return Material(
-              color: Colors.transparent,
-              child: ListTile(
-                key: ValueKey('document-file-$documentId'),
-                selected: selected,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  selected
-                      ? Icons.radio_button_checked
-                      : Icons.insert_drive_file_outlined,
-                ),
-                title: Text(
-                  _documentFileName(document),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  isPrimary
-                      ? 'Primary document · ${_formatDocumentSize(document)}'
-                      : _formatDocumentSize(document),
-                ),
-                trailing: isPrimary
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.more_horiz),
-                        onPressed: () => onAction(context, document),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: documents.map((document) {
+              final documentId = _documentId(document);
+              final selected = documentId == selectedDocumentId;
+              final isPrimary = document['__primaryDocument__'] == true;
+              return Material(
+                color: selected
+                    ? colorScheme.primary.withValues(alpha: 0.15)
+                    : colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(8),
+                child: InkWell(
+                  key: ValueKey('document-file-$documentId'),
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () => onSelect(document),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: selected
+                            ? colorScheme.primary
+                            : colorScheme.outlineVariant,
+                        width: selected ? 1.5 : 1,
                       ),
-                onTap: () => onSelect(document),
-              ),
-            );
-          }),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          selected
+                              ? Icons.radio_button_checked
+                              : Icons.insert_drive_file_outlined,
+                          size: 14,
+                          color: selected
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            _documentFileName(document),
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: selected
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurface,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '· ${_formatDocumentSize(document)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (!isPrimary) ...[
+                          const SizedBox(width: 2),
+                          InkWell(
+                            onTap: () => onAction(context, document),
+                            child: Padding(
+                              padding: const EdgeInsets.all(2),
+                              child: Icon(
+                                Icons.more_horiz,
+                                size: 14,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
         ],
       ),
     );

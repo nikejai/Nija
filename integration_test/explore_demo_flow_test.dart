@@ -61,7 +61,7 @@ void main() {
     await tester.pumpAndSettle();
 
     _assertNoPointerFrameworkErrors(frameworkErrors);
-    expect(find.text('nitesh@example.com'), findsWidgets);
+    expect(find.text('alex@example.com'), findsWidgets);
 
     await tester.pageBack();
     await _pumpAndCollect(tester, frameworkErrors);
