@@ -201,7 +201,6 @@ class VaultFoldersView extends StatefulWidget {
     required this.onDeleteItem,
     this.isDemoPreview = false,
     this.onExitDemoPreview,
-    this.onOpenDemoPreview,
     this.onFolderChanged,
     this.iconForType,
     this.colorForType,
@@ -224,7 +223,6 @@ class VaultFoldersView extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>> onDeleteItem;
   final bool isDemoPreview;
   final VoidCallback? onExitDemoPreview;
-  final VoidCallback? onOpenDemoPreview;
   final ValueChanged<String?>? onFolderChanged;
   final IconData Function(String type)? iconForType;
   final Color Function(String type)? colorForType;
@@ -1386,19 +1384,6 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
             ),
-            if (widget.onOpenDemoPreview != null && !widget.isDemoPreview) ...[
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                key: const ValueKey('explorer-empty-demo-preview-button'),
-                icon: const Icon(Icons.visibility_outlined, size: 16),
-                label: const Text('Preview Demo Folders & Files'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 36),
-                  visualDensity: VisualDensity.compact,
-                ),
-                onPressed: widget.onOpenDemoPreview,
-              ),
-            ],
           ],
         ),
       ),
