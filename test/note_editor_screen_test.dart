@@ -18,15 +18,14 @@ void main() {
     );
   }
 
-  testWidgets('note editor keeps title/tags collapsed by default', (
+  testWidgets('note editor displays title in top header with edit button', (
     tester,
   ) async {
     await tester.pumpWidget(testApp(const NoteEditorScreen()));
     await tester.pumpAndSettle();
 
-    expect(find.text('Untitled note'), findsOneWidget);
-
-    expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('New note'), findsOneWidget);
+    expect(find.byKey(const ValueKey('note-title-header-button')), findsOneWidget);
   });
 
   testWidgets('note editor autosaves every second through callback', (
@@ -51,7 +50,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField), 'Updated Draft');
+    await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'Updated Draft');
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+
     await tester.pump(const Duration(milliseconds: 1200));
     expect(latest, isNotNull);
     expect(latest!['title'], 'Updated Draft');
@@ -60,6 +65,13 @@ void main() {
   testWidgets('note editor delays autosave while edits are still active', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1000, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
     var saveCount = 0;
     await tester.pumpWidget(
       testApp(
@@ -79,9 +91,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField), 'A');
+    await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'A');
     await tester.pump(const Duration(milliseconds: 700));
-    await tester.enterText(find.byType(TextField), 'AB');
+
+    await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'AB');
     await tester.pump(const Duration(milliseconds: 700));
     expect(saveCount, 0);
 

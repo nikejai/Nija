@@ -56,7 +56,7 @@ class AddVaultItemScreen extends StatefulWidget {
   final ValueChanged<bool>? onLifecycleLockSuppressed;
   final List<VaultFolder> folders;
   final String? initialFolderId;
-  final Future<VaultFolder?> Function(String name)? onCreateFolder;
+  final Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder;
 
   static const _documentEditTemplate = VaultItemTemplate(
     type: 'Documents',
@@ -1298,7 +1298,7 @@ class NewItemCategoryScreen extends StatefulWidget {
   final Future<Map<String, dynamic>?> Function()? onCreateDocument;
   final List<VaultFolder> folders;
   final String? initialFolderId;
-  final Future<VaultFolder?> Function(String name)? onCreateFolder;
+  final Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder;
 
   @override
   State<NewItemCategoryScreen> createState() => _NewItemCategoryScreenState();

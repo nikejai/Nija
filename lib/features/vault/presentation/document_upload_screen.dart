@@ -26,7 +26,7 @@ class DocumentUploadScreen extends StatefulWidget {
   final ValueChanged<bool>? onLifecycleLockSuppressed;
   final List<VaultFolder> folders;
   final String? initialFolderId;
-  final Future<VaultFolder?> Function(String name)? onCreateFolder;
+  final Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder;
 
   @override
   State<DocumentUploadScreen> createState() => _DocumentUploadScreenState();

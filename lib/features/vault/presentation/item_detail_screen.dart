@@ -58,7 +58,7 @@ class _ItemDetailScreen extends StatefulWidget {
   final bool readOnly;
   final VoidCallback? onShareMenu;
   final List<VaultFolder> folders;
-  final Future<VaultFolder?> Function(String name)? onCreateFolder;
+  final Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder;
 
   @override
   State<_ItemDetailScreen> createState() => _ItemDetailScreenState();

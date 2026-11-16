@@ -3,11 +3,14 @@ import '../../../../domain/models/vault_folder.dart';
 
 Future<VaultFolder?> showCreateVaultFolderDialog(
   BuildContext context, {
-  Future<VaultFolder?> Function(String name)? onCreateFolder,
+  Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder,
+  String? parentFolderId,
+  String? parentFolderName,
 }) async {
   final controller = TextEditingController();
   final theme = Theme.of(context);
   final colorScheme = theme.colorScheme;
+  final isSubfolder = parentFolderId != null && parentFolderId.isNotEmpty;
 
   return showDialog<VaultFolder>(
     context: context,
@@ -20,9 +23,14 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
             size: 24,
           ),
           const SizedBox(width: 10),
-          const Text(
-            'New Folder',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          Expanded(
+            child: Text(
+              isSubfolder
+                  ? 'New Subfolder in ${parentFolderName ?? "Folder"}'
+                  : 'New Folder',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
@@ -32,8 +40,8 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
         autofocus: true,
         textCapitalization: TextCapitalization.words,
         decoration: InputDecoration(
-          labelText: 'Folder Name',
-          hintText: 'e.g. Work, Taxes, Identity',
+          labelText: isSubfolder ? 'Subfolder Name' : 'Folder Name',
+          hintText: isSubfolder ? 'e.g. Q1, Receipts, Invoices' : 'e.g. Work, Taxes, Identity',
           prefixIcon: const Icon(Icons.folder_outlined),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         ),
@@ -41,7 +49,7 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
           final name = value.trim();
           if (name.isEmpty) return;
           if (onCreateFolder != null) {
-            final folder = await onCreateFolder(name);
+            final folder = await onCreateFolder(name, parentId: parentFolderId);
             if (ctx.mounted) {
               Navigator.of(ctx).pop(folder);
             }
@@ -49,6 +57,7 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
             final folder = VaultFolder(
               id: 'folder-${DateTime.now().millisecondsSinceEpoch}',
               name: name,
+              parentId: parentFolderId,
               createdAt: DateTime.now().toUtc().toIso8601String(),
               updatedAt: DateTime.now().toUtc().toIso8601String(),
             );
@@ -73,7 +82,7 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
             final name = controller.text.trim();
             if (name.isEmpty) return;
             if (onCreateFolder != null) {
-              final folder = await onCreateFolder(name);
+              final folder = await onCreateFolder(name, parentId: parentFolderId);
               if (ctx.mounted) {
                 Navigator.of(ctx).pop(folder);
               }
@@ -81,6 +90,7 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
               final folder = VaultFolder(
                 id: 'folder-${DateTime.now().millisecondsSinceEpoch}',
                 name: name,
+                parentId: parentFolderId,
                 createdAt: DateTime.now().toUtc().toIso8601String(),
                 updatedAt: DateTime.now().toUtc().toIso8601String(),
               );
