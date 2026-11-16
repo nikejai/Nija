@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import '../../../core/localization/app_strings.dart';
 import '../../../domain/models/vault_folder.dart';
+import 'widgets/vault_create_folder_dialog.dart';
 
 class NoteEditorScreen extends StatefulWidget {
   const NoteEditorScreen({
@@ -13,12 +14,14 @@ class NoteEditorScreen extends StatefulWidget {
     this.onAutoSave,
     this.folders = const <VaultFolder>[],
     this.initialFolderId,
+    this.onCreateFolder,
   });
 
   final Map<String, dynamic>? initialNote;
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
   final List<VaultFolder> folders;
   final String? initialFolderId;
+  final Future<VaultFolder?> Function(String name)? onCreateFolder;
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
@@ -34,6 +37,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   late final List<String> _tags;
   late final String _noteId;
   late String _selectedFolderId;
+  late final List<VaultFolder> _customFolders;
   Timer? _autosaveTimer;
   late final String _initialFingerprint;
   String _lastAutoSavedFingerprint = '';
@@ -56,6 +60,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _noteId =
         widget.initialNote?['id']?.toString() ??
         DateTime.now().millisecondsSinceEpoch.toString();
+    _customFolders = widget.folders.where((f) => f.id != 'default').toList();
     final initialFid = widget.initialNote?['folderId']?.toString().trim() ??
         widget.initialFolderId?.trim();
     _selectedFolderId =
@@ -67,7 +72,6 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   }
 
   List<VaultFolder> get _effectiveFolders {
-    final custom = widget.folders.where((f) => f.id != 'default').toList();
     return [
       VaultFolder(
         id: 'default',
@@ -76,7 +80,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         createdAt: '',
         updatedAt: '',
       ),
-      ...custom,
+      ..._customFolders,
     ];
   }
 
@@ -102,7 +106,48 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         ),
       );
     }
+
+    items.add(
+      DropdownMenuItem<String>(
+        value: '__create_new_folder__',
+        child: Row(
+          children: [
+            Icon(
+              Icons.create_new_folder_outlined,
+              size: 16,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Create new folder...',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
     return items;
+  }
+
+  Future<void> _promptCreateFolder() async {
+    final newFolder = await showCreateVaultFolderDialog(
+      context,
+      onCreateFolder: widget.onCreateFolder,
+    );
+    if (newFolder != null && mounted) {
+      setState(() {
+        if (!_customFolders.any((f) => f.id == newFolder.id)) {
+          _customFolders.add(newFolder);
+        }
+        _selectedFolderId = newFolder.id;
+      });
+      _markDirty();
+    }
   }
 
   @override
@@ -284,44 +329,65 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                                   horizontal: 14,
                                   vertical: 4,
                                 ),
-                                child: DropdownButtonFormField<String>(
-                                  key: const ValueKey('note-folder-selector'),
-                                  initialValue: _selectedFolderId,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.normal,
-                                    color: colorScheme.onSurface,
-                                  ),
-                                  items: _folderDropdownItems,
-                                  onChanged: (value) {
-                                    if (value == null || value == _selectedFolderId) return;
-                                    setState(() {
-                                      _selectedFolderId = value;
-                                    });
-                                    _markDirty();
-                                  },
-                                  decoration: InputDecoration(
-                                    border: InputBorder.none,
-                                    enabledBorder: InputBorder.none,
-                                    focusedBorder: InputBorder.none,
-                                    filled: false,
-                                    isDense: true,
-                                    contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                                    labelText: 'Folder',
-                                    labelStyle: TextStyle(
-                                      fontSize: 12,
-                                      color: colorScheme.onSurfaceVariant,
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: KeyedSubtree(
+                                        key: const ValueKey('note-folder-selector'),
+                                        child: DropdownButtonFormField<String>(
+                                          key: ValueKey('note-folder-dropdown-$_selectedFolderId'),
+                                          initialValue: _selectedFolderId,
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.normal,
+                                            color: colorScheme.onSurface,
+                                          ),
+                                          items: _folderDropdownItems,
+                                          onChanged: (value) async {
+                                            if (value == null) return;
+                                            if (value == '__create_new_folder__') {
+                                              await _promptCreateFolder();
+                                              return;
+                                            }
+                                            if (value == _selectedFolderId) return;
+                                            setState(() {
+                                              _selectedFolderId = value;
+                                            });
+                                            _markDirty();
+                                          },
+                                          decoration: InputDecoration(
+                                            border: InputBorder.none,
+                                            enabledBorder: InputBorder.none,
+                                            focusedBorder: InputBorder.none,
+                                            filled: false,
+                                            isDense: true,
+                                            contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                                            labelText: 'Folder',
+                                            labelStyle: TextStyle(
+                                              fontSize: 12,
+                                              color: colorScheme.onSurfaceVariant,
+                                            ),
+                                            prefixIcon: Icon(
+                                              _selectedFolderId == 'default'
+                                                  ? Icons.folder_special
+                                                  : Icons.folder,
+                                              size: 20,
+                                              color: _selectedFolderId == 'default'
+                                                  ? const Color(0xFFF59E0B)
+                                                  : const Color(0xFFEAB308),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     ),
-                                    prefixIcon: Icon(
-                                      _selectedFolderId == 'default'
-                                          ? Icons.folder_special
-                                          : Icons.folder,
-                                      size: 20,
-                                      color: _selectedFolderId == 'default'
-                                          ? const Color(0xFFF59E0B)
-                                          : const Color(0xFFEAB308),
+                                    const SizedBox(width: 8),
+                                    IconButton.outlined(
+                                      key: const ValueKey('note-create-folder-button'),
+                                      tooltip: 'Create new folder',
+                                      icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+                                      onPressed: _promptCreateFolder,
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ),
                               const SizedBox(height: 10),
@@ -574,6 +640,7 @@ class NoteViewScreen extends StatefulWidget {
     this.onAutoSave,
     this.onShareMenu,
     this.folders = const <VaultFolder>[],
+    this.onCreateFolder,
   });
 
   final Map<String, dynamic> note;
@@ -582,6 +649,7 @@ class NoteViewScreen extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
   final VoidCallback? onShareMenu;
   final List<VaultFolder> folders;
+  final Future<VaultFolder?> Function(String name)? onCreateFolder;
 
   @override
   State<NoteViewScreen> createState() => _NoteViewScreenState();
@@ -709,6 +777,7 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
                           initialNote: widget.note,
                           onAutoSave: widget.onAutoSave,
                           folders: widget.folders,
+                          onCreateFolder: widget.onCreateFolder,
                         ),
                       ),
                     );

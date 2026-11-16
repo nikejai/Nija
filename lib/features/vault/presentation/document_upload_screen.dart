@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/config/vault_limits.dart';
 import '../../../domain/models/vault_folder.dart';
+import 'widgets/vault_create_folder_dialog.dart';
 import 'widgets/vault_page_heading.dart';
 
 class DocumentUploadScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class DocumentUploadScreen extends StatefulWidget {
     this.onLifecycleLockSuppressed,
     this.folders = const <VaultFolder>[],
     this.initialFolderId,
+    this.onCreateFolder,
   });
 
   final int currentVaultSizeBytes;
@@ -24,6 +26,7 @@ class DocumentUploadScreen extends StatefulWidget {
   final ValueChanged<bool>? onLifecycleLockSuppressed;
   final List<VaultFolder> folders;
   final String? initialFolderId;
+  final Future<VaultFolder?> Function(String name)? onCreateFolder;
 
   @override
   State<DocumentUploadScreen> createState() => _DocumentUploadScreenState();
@@ -37,6 +40,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
   late final TextEditingController _descriptionController;
   final List<PlatformFile> _selectedFiles = <PlatformFile>[];
   late String _selectedFolderId;
+  late final List<VaultFolder> _customFolders;
   String? _errorText;
   bool _uploading = false;
   double _progress = 0;
@@ -48,12 +52,12 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     _titleController = TextEditingController();
     _tagsController = TextEditingController();
     _descriptionController = TextEditingController();
+    _customFolders = widget.folders.where((f) => f.id != 'default').toList();
     final initialFid = widget.initialFolderId?.trim();
     _selectedFolderId = (initialFid != null && initialFid.isNotEmpty) ? initialFid : 'default';
   }
 
   List<VaultFolder> get _effectiveFolders {
-    final custom = widget.folders.where((f) => f.id != 'default').toList();
     return [
       VaultFolder(
         id: 'default',
@@ -62,7 +66,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
         createdAt: '',
         updatedAt: '',
       ),
-      ...custom,
+      ..._customFolders,
     ];
   }
 
@@ -88,7 +92,47 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
         ),
       );
     }
+
+    items.add(
+      DropdownMenuItem<String>(
+        value: '__create_new_folder__',
+        child: Row(
+          children: [
+            Icon(
+              Icons.create_new_folder_outlined,
+              size: 16,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Create new folder...',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
     return items;
+  }
+
+  Future<void> _promptCreateFolder() async {
+    final newFolder = await showCreateVaultFolderDialog(
+      context,
+      onCreateFolder: widget.onCreateFolder,
+    );
+    if (newFolder != null && mounted) {
+      setState(() {
+        if (!_customFolders.any((f) => f.id == newFolder.id)) {
+          _customFolders.add(newFolder);
+        }
+        _selectedFolderId = newFolder.id;
+      });
+    }
   }
 
   @override
@@ -244,35 +288,56 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              DropdownButtonFormField<String>(
-                                key: const ValueKey('document-folder-selector'),
-                                initialValue: _selectedFolderId,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.normal,
-                                  color: colorScheme.onSurface,
-                                ),
-                                items: _folderDropdownItems,
-                                onChanged: _uploading
-                                    ? null
-                                    : (value) {
-                                        if (value == null || value == _selectedFolderId) return;
-                                        setState(() {
-                                          _selectedFolderId = value;
-                                        });
-                                      },
-                                decoration: InputDecoration(
-                                  labelText: 'Folder',
-                                  prefixIcon: Icon(
-                                    _selectedFolderId == 'default'
-                                        ? Icons.folder_special
-                                        : Icons.folder,
-                                    size: 20,
-                                    color: _selectedFolderId == 'default'
-                                        ? const Color(0xFFF59E0B)
-                                        : const Color(0xFFEAB308),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: KeyedSubtree(
+                                      key: const ValueKey('document-folder-selector'),
+                                      child: DropdownButtonFormField<String>(
+                                        key: ValueKey('document-folder-dropdown-$_selectedFolderId'),
+                                        initialValue: _selectedFolderId,
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.normal,
+                                          color: colorScheme.onSurface,
+                                        ),
+                                        items: _folderDropdownItems,
+                                        onChanged: _uploading
+                                            ? null
+                                            : (value) async {
+                                                if (value == null) return;
+                                                if (value == '__create_new_folder__') {
+                                                  await _promptCreateFolder();
+                                                  return;
+                                                }
+                                                if (value == _selectedFolderId) return;
+                                                setState(() {
+                                                  _selectedFolderId = value;
+                                                });
+                                              },
+                                        decoration: InputDecoration(
+                                          labelText: 'Folder',
+                                          prefixIcon: Icon(
+                                            _selectedFolderId == 'default'
+                                                ? Icons.folder_special
+                                                : Icons.folder,
+                                            size: 20,
+                                            color: _selectedFolderId == 'default'
+                                                ? const Color(0xFFF59E0B)
+                                                : const Color(0xFFEAB308),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                  const SizedBox(width: 8),
+                                  IconButton.outlined(
+                                    key: const ValueKey('document-create-folder-button'),
+                                    tooltip: 'Create new folder',
+                                    icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+                                    onPressed: _uploading ? null : _promptCreateFolder,
+                                  ),
+                                ],
                               ),
                             ],
                           ),

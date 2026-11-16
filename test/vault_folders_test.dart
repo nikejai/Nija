@@ -1192,5 +1192,216 @@ void main() {
       expect(find.text('Choose documents'), findsOneWidget);
       expect(find.textContaining('per document'), findsOneWidget);
     });
+
+    testWidgets('AddVaultItemScreen allows creating new folder inline via [+] button without dropping operation', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedItem;
+      final createdFolders = <VaultFolder>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedItem = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => AddVaultItemScreen(
+                          fixedType: 'Login',
+                          folders: testFolders,
+                          onCreateFolder: (name) async {
+                            final folder = VaultFolder(
+                              id: 'folder-finances',
+                              name: name,
+                              createdAt: '2026-11-16T12:00:00Z',
+                              updatedAt: '2026-11-16T12:00:00Z',
+                            );
+                            createdFolders.add(folder);
+                            return folder;
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      // Enter Title
+      await tester.enterText(find.widgetWithText(TextField, 'Title'), 'My Bank Login');
+      await tester.pumpAndSettle();
+
+      // Tap [+] create folder button next to folder dropdown
+      expect(find.byKey(const ValueKey('item-create-folder-button')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('item-create-folder-button')));
+      await tester.pumpAndSettle();
+
+      // Folder create dialog appears
+      expect(find.text('New Folder'), findsOneWidget);
+      expect(find.byKey(const ValueKey('create-folder-name-input')), findsOneWidget);
+
+      await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Finances');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+      await tester.pumpAndSettle();
+
+      // Dialog closed, folder was created via callback
+      expect(createdFolders.length, 1);
+      expect(createdFolders.first.name, 'Finances');
+
+      // The dropdown now automatically displays 'Finances' as selected!
+      expect(find.text('Finances'), findsOneWidget);
+
+      // Title is still intact (operation was NOT dropped)
+      expect(find.text('My Bank Login'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['title'], 'My Bank Login');
+      expect(savedItem!['folderId'], 'folder-finances');
+    });
+
+    testWidgets('DocumentUploadScreen allows creating new folder inline via [+] button', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final createdFolders = <VaultFolder>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DocumentUploadScreen(
+            currentVaultSizeBytes: 0,
+            maxVaultBytes: 100 * 1024 * 1024,
+            folders: testFolders,
+            onCreateFolder: (name) async {
+              final folder = VaultFolder(
+                id: 'folder-legal',
+                name: name,
+                createdAt: '2026-11-16T12:00:00Z',
+                updatedAt: '2026-11-16T12:00:00Z',
+              );
+              createdFolders.add(folder);
+              return folder;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('document-create-folder-button')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('document-create-folder-button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Legal');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(createdFolders.length, 1);
+      expect(createdFolders.first.name, 'Legal');
+      expect(find.text('Legal'), findsOneWidget);
+    });
+
+    testWidgets('NoteEditorScreen allows creating new folder inline via [+] button and dropdown item', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedNote;
+      final createdFolders = <VaultFolder>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            FlutterQuillLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('en')],
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedNote = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => NoteEditorScreen(
+                          folders: testFolders,
+                          onCreateFolder: (name) async {
+                            final folder = VaultFolder(
+                              id: 'folder-journal',
+                              name: name,
+                              createdAt: '2026-11-16T12:00:00Z',
+                              updatedAt: '2026-11-16T12:00:00Z',
+                            );
+                            createdFolders.add(folder);
+                            return folder;
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open Note'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Note'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.widgetWithText(TextField, 'Untitled note'), 'Daily Journal');
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('note-create-folder-button')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('note-create-folder-button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Journal');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(createdFolders.length, 1);
+      expect(createdFolders.first.name, 'Journal');
+      expect(find.text('Journal'), findsOneWidget);
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedNote, isNotNull);
+      expect(savedNote!['title'], 'Daily Journal');
+      expect(savedNote!['folderId'], 'folder-journal');
+    });
   });
 }

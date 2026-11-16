@@ -937,6 +937,22 @@ class _VaultAppShellState extends State<VaultAppShell> {
     _persistVaultDataUnchecked();
   }
 
+  Future<VaultFolder?> _handleCreateFolder(String name) async {
+    final clean = name.trim();
+    if (clean.isEmpty) return null;
+    late final VaultFolder createdFolder;
+    _updateState(() {
+      final updated = _folderManager.createFolder(
+        folders: _folders,
+        name: clean,
+      );
+      createdFolder = updated.last;
+      _folders = updated;
+    });
+    await _persistVaultData();
+    return createdFolder;
+  }
+
   void _renameFolder(String folderId, String newName) {
     _updateState(() {
       _folders = _folderManager.renameFolder(
@@ -1037,6 +1053,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
           folders: _folders,
           initialFolderId: folderId,
+          onCreateFolder: _handleCreateFolder,
         ),
       ),
     );
@@ -1397,6 +1414,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         builder: (_) => _DocumentDetailScreen(
           item: accessedItem,
           folders: _folders,
+          onCreateFolder: _handleCreateFolder,
           onReadDocument: isDemoItem
               ? ({required sectionName, onProgress}) async =>
                   VaultHomeDemoData.demoPdfBytes
@@ -2101,6 +2119,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         builder: (_) => _ItemDetailScreen(
           item: accessedItem,
           folders: _folders,
+          onCreateFolder: _handleCreateFolder,
           readOnly: _isExploreDemoReadOnly,
           customTypeDefinitions: _customTypeDefinitions,
           currentVaultSizeBytes: _effectiveVaultSizeBytes,
@@ -2489,6 +2508,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
               ? null
               : () => _showNoteQuickActions(context, accessedNote),
           folders: _folders,
+          onCreateFolder: _handleCreateFolder,
         ),
       ),
     );
@@ -2567,12 +2587,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
           folders: _folders,
           initialFolderId: initialFolderId,
+          onCreateFolder: _handleCreateFolder,
           onCreateNote: () async {
             return Navigator.of(context).push<Map<String, dynamic>>(
               MaterialPageRoute(
                 builder: (_) => NoteEditorScreen(
                   folders: _folders,
                   initialFolderId: initialFolderId,
+                  onCreateFolder: _handleCreateFolder,
                 ),
               ),
             );
@@ -2587,6 +2609,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
                   folders: _folders,
                   initialFolderId: initialFolderId,
+                  onCreateFolder: _handleCreateFolder,
                 ),
               ),
             );

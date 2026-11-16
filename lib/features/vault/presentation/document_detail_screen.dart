@@ -23,6 +23,7 @@ class _DocumentDetailScreen extends StatefulWidget {
     this.readOnly = false,
     this.onShareMenu,
     this.folders = const <VaultFolder>[],
+    this.onCreateFolder,
   });
 
   final Map<String, dynamic> item;
@@ -61,6 +62,7 @@ class _DocumentDetailScreen extends StatefulWidget {
   final bool readOnly;
   final VoidCallback? onShareMenu;
   final List<VaultFolder> folders;
+  final Future<VaultFolder?> Function(String name)? onCreateFolder;
 
   @override
   State<_DocumentDetailScreen> createState() => _DocumentDetailScreenState();
@@ -797,6 +799,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
           maxVaultBytes: widget.maxVaultBytes,
           maxDocumentBytes: widget.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+          onCreateFolder: widget.onCreateFolder,
         ),
       ),
     );

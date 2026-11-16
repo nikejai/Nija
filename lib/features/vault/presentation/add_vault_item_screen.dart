@@ -8,6 +8,7 @@ import '../../../core/config/vault_limits.dart';
 import '../../../core/localization/app_strings.dart';
 import '../../../domain/models/vault_folder.dart';
 import 'widgets/password_generator_sheet.dart';
+import 'widgets/vault_create_folder_dialog.dart';
 import 'widgets/vault_page_heading.dart';
 
 class VaultFieldTemplate {
@@ -43,6 +44,7 @@ class AddVaultItemScreen extends StatefulWidget {
     this.onLifecycleLockSuppressed,
     this.folders = const <VaultFolder>[],
     this.initialFolderId,
+    this.onCreateFolder,
   });
 
   final List<Map<String, dynamic>> customTypeDefinitions;
@@ -54,6 +56,7 @@ class AddVaultItemScreen extends StatefulWidget {
   final ValueChanged<bool>? onLifecycleLockSuppressed;
   final List<VaultFolder> folders;
   final String? initialFolderId;
+  final Future<VaultFolder?> Function(String name)? onCreateFolder;
 
   static const _documentEditTemplate = VaultItemTemplate(
     type: 'Documents',
@@ -205,6 +208,7 @@ class AddVaultItemScreen extends StatefulWidget {
 class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
   late String _type;
   late String _selectedFolderId;
+  late final List<VaultFolder> _customFolders;
   final Map<String, TextEditingController> _controllers =
       <String, TextEditingController>{};
   final Set<String> _revealedSensitiveFields = <String>{};
@@ -218,6 +222,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
   void initState() {
     super.initState();
     _tagDraftController = TextEditingController();
+    _customFolders = widget.folders.where((f) => f.id != 'default').toList();
     _type =
         widget.initialItem?['type']?.toString() ??
         widget.fixedType ??
@@ -236,7 +241,6 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
   }
 
   List<VaultFolder> get _effectiveFolders {
-    final custom = widget.folders.where((f) => f.id != 'default').toList();
     return [
       VaultFolder(
         id: 'default',
@@ -245,7 +249,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
         createdAt: '',
         updatedAt: '',
       ),
-      ...custom,
+      ..._customFolders,
     ];
   }
 
@@ -271,7 +275,47 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
         ),
       );
     }
+
+    items.add(
+      DropdownMenuItem<String>(
+        value: '__create_new_folder__',
+        child: Row(
+          children: [
+            Icon(
+              Icons.create_new_folder_outlined,
+              size: 16,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Create new folder...',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
     return items;
+  }
+
+  Future<void> _promptCreateFolder() async {
+    final newFolder = await showCreateVaultFolderDialog(
+      context,
+      onCreateFolder: widget.onCreateFolder,
+    );
+    if (newFolder != null && mounted) {
+      setState(() {
+        if (!_customFolders.any((f) => f.id == newFolder.id)) {
+          _customFolders.add(newFolder);
+        }
+        _selectedFolderId = newFolder.id;
+      });
+    }
   }
 
   @override
@@ -571,33 +615,54 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                               ),
                               const SizedBox(height: 10),
                             ],
-                            DropdownButtonFormField<String>(
-                              key: const ValueKey('item-folder-selector'),
-                              initialValue: _selectedFolderId,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.normal,
-                                color: colorScheme.onSurface,
-                              ),
-                              items: _folderDropdownItems,
-                              onChanged: (value) {
-                                if (value == null || value == _selectedFolderId) return;
-                                setState(() {
-                                  _selectedFolderId = value;
-                                });
-                              },
-                              decoration: InputDecoration(
-                                labelText: 'Folder',
-                                prefixIcon: Icon(
-                                  _selectedFolderId == 'default'
-                                      ? Icons.folder_special
-                                      : Icons.folder,
-                                  size: 20,
-                                  color: _selectedFolderId == 'default'
-                                      ? const Color(0xFFF59E0B)
-                                      : const Color(0xFFEAB308),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: KeyedSubtree(
+                                    key: const ValueKey('item-folder-selector'),
+                                    child: DropdownButtonFormField<String>(
+                                      key: ValueKey('item-folder-dropdown-$_selectedFolderId'),
+                                      initialValue: _selectedFolderId,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.normal,
+                                        color: colorScheme.onSurface,
+                                      ),
+                                      items: _folderDropdownItems,
+                                      onChanged: (value) async {
+                                        if (value == null) return;
+                                        if (value == '__create_new_folder__') {
+                                          await _promptCreateFolder();
+                                          return;
+                                        }
+                                        if (value == _selectedFolderId) return;
+                                        setState(() {
+                                          _selectedFolderId = value;
+                                        });
+                                      },
+                                      decoration: InputDecoration(
+                                        labelText: 'Folder',
+                                        prefixIcon: Icon(
+                                          _selectedFolderId == 'default'
+                                              ? Icons.folder_special
+                                              : Icons.folder,
+                                          size: 20,
+                                          color: _selectedFolderId == 'default'
+                                              ? const Color(0xFFF59E0B)
+                                              : const Color(0xFFEAB308),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(width: 8),
+                                IconButton.outlined(
+                                  key: const ValueKey('item-create-folder-button'),
+                                  tooltip: 'Create new folder',
+                                  icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+                                  onPressed: _promptCreateFolder,
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 10),
                             ..._template.fields.map((field) {
@@ -1221,6 +1286,7 @@ class NewItemCategoryScreen extends StatefulWidget {
     this.onCreateDocument,
     this.folders = const <VaultFolder>[],
     this.initialFolderId,
+    this.onCreateFolder,
   });
 
   final List<Map<String, dynamic>> customTypeDefinitions;
@@ -1232,6 +1298,7 @@ class NewItemCategoryScreen extends StatefulWidget {
   final Future<Map<String, dynamic>?> Function()? onCreateDocument;
   final List<VaultFolder> folders;
   final String? initialFolderId;
+  final Future<VaultFolder?> Function(String name)? onCreateFolder;
 
   @override
   State<NewItemCategoryScreen> createState() => _NewItemCategoryScreenState();
@@ -1384,6 +1451,7 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                                             widget.onLifecycleLockSuppressed,
                                         folders: widget.folders,
                                         initialFolderId: widget.initialFolderId,
+                                        onCreateFolder: widget.onCreateFolder,
                                       ),
                                     ),
                                   );
