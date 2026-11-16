@@ -3501,7 +3501,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('document-fullscreen-close')));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.tap(
+      find.byKey(const ValueKey('document-file-action-attachment-1')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Open document'), findsOneWidget);
@@ -3525,6 +3527,257 @@ void main() {
     expect(find.text('passport.txt'), findsOneWidget);
     expect(find.textContaining('Current document'), findsOneWidget);
   });
+
+  testWidgets(
+    'AddVaultItemScreen allows deleting primary document and promotes next attachment on save',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      Map<String, dynamic>? savedItem;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  savedItem = await Navigator.of(context)
+                      .push<Map<String, dynamic>>(
+                        MaterialPageRoute(
+                          builder: (_) => AddVaultItemScreen(
+                            customTypeDefinitions: const [],
+                            initialItem: {
+                              'id': 'doc-1',
+                              'type': 'Documents',
+                              'title': 'My Document',
+                              'documentFileName': 'passport.txt',
+                              'documentSection': 'sec-1',
+                              'documentExtension': 'txt',
+                              'documentSizeBytes': 100,
+                              'attachments': [
+                                {
+                                  'id': 'att-1',
+                                  'documentFileName': 'visa.txt',
+                                  'documentSection': 'sec-2',
+                                  'documentExtension': 'txt',
+                                  'documentSizeBytes': 200,
+                                },
+                              ],
+                            },
+                          ),
+                        ),
+                      );
+                },
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('passport.txt'), findsOneWidget);
+      expect(find.text('visa.txt'), findsOneWidget);
+
+      final removeButtons = find.byTooltip('Remove document');
+      expect(removeButtons, findsNWidgets(2));
+      await tester.tap(removeButtons.first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('passport.txt'), findsNothing);
+      expect(find.text('visa.txt'), findsOneWidget);
+
+      final saveButton = find.widgetWithText(FilledButton, 'Save');
+      await tester.ensureVisible(saveButton);
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['documentFileName'], 'visa.txt');
+      expect(savedItem!['documentSection'], 'sec-2');
+      expect(savedItem!['attachments'], isNull);
+    },
+  );
+
+  testWidgets(
+    'AddVaultItemScreen allows deleting primary document and clears document fields when no other attachments remain',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      Map<String, dynamic>? savedItem;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () async {
+                  savedItem = await Navigator.of(context)
+                      .push<Map<String, dynamic>>(
+                        MaterialPageRoute(
+                          builder: (_) => AddVaultItemScreen(
+                            customTypeDefinitions: const [],
+                            initialItem: {
+                              'id': 'doc-1',
+                              'type': 'Documents',
+                              'title': 'My Document',
+                              'documentFileName': 'passport.txt',
+                              'documentSection': 'sec-1',
+                              'documentExtension': 'txt',
+                              'documentSizeBytes': 100,
+                            },
+                          ),
+                        ),
+                      );
+                },
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('passport.txt'), findsOneWidget);
+
+      final removeButtons = find.byTooltip('Remove document');
+      expect(removeButtons, findsOneWidget);
+      await tester.tap(removeButtons.first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('passport.txt'), findsNothing);
+
+      final saveButton = find.widgetWithText(FilledButton, 'Save');
+      await tester.ensureVisible(saveButton);
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!.containsKey('documentFileName'), isFalse);
+      expect(savedItem!.containsKey('documentSection'), isFalse);
+      expect(savedItem!.containsKey('documentExtension'), isFalse);
+      expect(savedItem!.containsKey('documentSizeBytes'), isFalse);
+    },
+  );
+
+  testWidgets(
+    'document detail screen allows deleting primary document and promotes next attachment',
+    (tester) async {
+      List<Map<String, dynamic>> persistedItems = [];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: VaultAppShell(
+            recoveryWords: const ['anchor', 'apple', 'arrow'],
+            initialItems: [
+              {
+                'id': 'doc-1',
+                'type': 'Documents',
+                'title': 'Travel Docs',
+                'documentSection': 'document_primary',
+                'documentFileName': 'passport.txt',
+                'documentExtension': 'txt',
+                'documentSizeBytes': 12,
+                'attachments': [
+                  {
+                    'id': 'attachment-1',
+                    'documentSection': 'document_attachment_1',
+                    'documentFileName': 'visa.txt',
+                    'documentExtension': 'txt',
+                    'documentSizeBytes': 13,
+                  },
+                ],
+              },
+            ],
+            initialNotes: const [],
+            initialCustomTypeDefinitions: const [],
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            biometricEnabled: false,
+            onBiometricChanged: (_) {},
+            onPersistVaultData: ({
+              required items,
+              required notes,
+              required customTypeDefinitions,
+            }) async {
+              persistedItems = items;
+            },
+            onRotateMasterPassword:
+                ({required currentPassword, required newPassword}) async {},
+            onRotateRecoveryPhrase:
+                ({
+                  required currentRecoveryPhrase,
+                  required newRecoveryPhrase,
+                }) async {},
+            onExportVault: () async {},
+            onImportVault: () async {},
+            onBackupToCloud: () async {},
+            onRestoreFromCloud: () async {},
+            onReadCloudBackupAccount: () async => null,
+            onChangeCloudBackupAccount: () async => false,
+            onLockNow: () {},
+            onReadVaultDocument: ({required sectionName, onProgress}) async =>
+                sectionName == 'document_attachment_1'
+                    ? 'visa document\n'.codeUnits
+                    : 'passport document\n'.codeUnits,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tapAllItemsTab(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('vault-entry-actions-item:doc-1')).last,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('document-action-open')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('passport.txt'), findsOneWidget);
+      expect(find.text('visa.txt'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('document-file-action-__primary_document__')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete'), findsOneWidget);
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('passport.txt'), findsNothing);
+      expect(find.text('visa.txt'), findsWidgets);
+      expect(find.textContaining('visa document'), findsOneWidget);
+
+      expect(persistedItems, isNotEmpty);
+      final saved = persistedItems.firstWhere((it) => it['id'] == 'doc-1');
+      expect(saved['documentFileName'], 'visa.txt');
+      expect(saved['attachments'], isNull);
+
+      await tester.tap(
+        find.byKey(const ValueKey('document-file-action-__primary_document__')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('visa.txt'), findsNothing);
+      expect(find.text('No documents attached'), findsOneWidget);
+      expect(find.text('No file attached'), findsOneWidget);
+
+      final cleared = persistedItems.firstWhere((it) => it['id'] == 'doc-1');
+      expect(cleared.containsKey('documentFileName'), isFalse);
+      expect(cleared.containsKey('documentSection'), isFalse);
+      expect(cleared['attachments'], isNull);
+    },
+  );
 
   testWidgets('settings shows encrypted secret import entry point', (
     tester,

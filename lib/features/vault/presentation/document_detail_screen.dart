@@ -87,6 +87,9 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   void initState() {
     super.initState();
     _isFavorite = widget.item['pinned'] == true;
+    if (!_hasPrimaryDocument && _documents.isNotEmpty) {
+      _selectedDocumentId = _documentId(_documents.first);
+    }
     unawaited(_loadSelectedDocument());
   }
 
@@ -95,6 +98,15 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     _textPreviewScrollController.dispose();
     _textPreviewHorizontalScrollController.dispose();
     super.dispose();
+  }
+
+  bool get _hasPrimaryDocument {
+    final fileName = widget.item['documentFileName']?.toString().trim() ?? '';
+    final section = widget.item['documentSection']?.toString().trim() ?? '';
+    final bytes = widget.item['__documentBytes__'] ?? widget.item['documentBytes'];
+    return fileName.isNotEmpty ||
+        section.isNotEmpty ||
+        (bytes is List<int> && bytes.isNotEmpty);
   }
 
   Map<String, dynamic> get _primaryDocument {
@@ -106,14 +118,17 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   }
 
   List<Map<String, dynamic>> get _documents {
-    return [_primaryDocument, ..._itemAttachments(widget.item)];
+    return [
+      if (_hasPrimaryDocument) _primaryDocument,
+      ..._itemAttachments(widget.item),
+    ];
   }
 
   Map<String, dynamic> get _selectedDocument {
     for (final document in _documents) {
       if (_documentId(document) == _selectedDocumentId) return document;
     }
-    return _primaryDocument;
+    return _documents.isNotEmpty ? _documents.first : const <String, dynamic>{};
   }
 
   Future<List<int>> _loadDocument(
@@ -146,6 +161,17 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
   Future<void> _loadSelectedDocument() async {
     final loadToken = ++_documentLoadToken;
     final document = _selectedDocument;
+    if (document.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isLoadingDocument = false;
+          _documentLoadError = null;
+          _documentBytes = null;
+          _loadProgress = 0;
+        });
+      }
+      return;
+    }
     widget.onLifecycleLockSuppressed?.call(true);
     if (mounted) {
       setState(() {
@@ -266,6 +292,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                               fileName: fileName,
                               extension: extension,
                               size: size,
+                              hasFile: _documents.isNotEmpty,
                             ),
                             const SizedBox(height: 6),
                             Theme(
@@ -834,7 +861,6 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     Map<String, dynamic> document,
   ) async {
     _selectDocument(document);
-    if (document['__primaryDocument__'] == true) return;
     await _showAttachmentActions(context, document);
   }
 
@@ -927,18 +953,42 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         () => widget.onDeleteAttachment(widget.item, attachment),
       );
       if (!mounted) return;
-      final attachmentId = attachment['id']?.toString();
-      final attachments = _itemAttachments(widget.item)
-        ..removeWhere((entry) => entry['id']?.toString() == attachmentId);
+      final isPrimary = attachment['__primaryDocument__'] == true ||
+          attachment['id']?.toString() == _primaryDocumentId;
+      if (isPrimary) {
+        final attachments = _itemAttachments(widget.item);
+        if (attachments.isNotEmpty) {
+          final firstAtt = attachments.removeAt(0);
+          _promoteAttachmentToPrimary(widget.item, firstAtt);
+          if (attachments.isNotEmpty) {
+            widget.item['attachments'] = attachments;
+          } else {
+            widget.item.remove('attachments');
+          }
+        } else {
+          _clearPrimaryDocumentFields(widget.item);
+          widget.item.remove('attachments');
+        }
+      } else {
+        final attachmentId = attachment['id']?.toString();
+        final attachments = _itemAttachments(widget.item)
+          ..removeWhere((entry) => entry['id']?.toString() == attachmentId);
+        if (attachments.isNotEmpty) {
+          widget.item['attachments'] = attachments;
+        } else {
+          widget.item.remove('attachments');
+        }
+      }
       setState(() {
-        widget.item['attachments'] = attachments;
-        if (_selectedDocumentId == _documentId(attachment)) {
-          _selectedDocumentId = _primaryDocumentId;
+        if (_documents.isNotEmpty) {
+          if (_selectedDocumentId == _documentId(attachment) || isPrimary) {
+            _selectedDocumentId = _documentId(_documents.first);
+          }
+        } else {
+          _selectedDocumentId = '';
         }
       });
-      if (_selectedDocumentId == _primaryDocumentId) {
-        unawaited(_loadSelectedDocument());
-      }
+      unawaited(_loadSelectedDocument());
       ScaffoldMessenger.of(
         this.context,
       ).showSnackBar(const SnackBar(content: Text('Attachment removed.')));
@@ -995,12 +1045,14 @@ class _DocumentHeader extends StatelessWidget {
     required this.fileName,
     required this.extension,
     required this.size,
+    this.hasFile = true,
   });
 
   final String title;
   final String fileName;
   final String extension;
   final String size;
+  final bool hasFile;
 
   @override
   Widget build(BuildContext context) {
@@ -1035,7 +1087,7 @@ class _DocumentHeader extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '$extension · $size · $fileName',
+                !hasFile ? 'No file attached' : '$extension · $size · $fileName',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -1456,75 +1508,86 @@ class _DocumentFilesSection extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: documents.map((document) {
-              final documentId = _documentId(document);
-              final selected = documentId == selectedDocumentId;
-              final isPrimary = document['__primaryDocument__'] == true;
-              return Material(
-                color: selected
-                    ? colorScheme.primary.withValues(alpha: 0.15)
-                    : colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(8),
-                child: InkWell(
-                  key: ValueKey('document-file-$documentId'),
+          if (documents.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'No documents attached',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            )
+          else
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: documents.map((document) {
+                final documentId = _documentId(document);
+                final selected = documentId == selectedDocumentId;
+                return Material(
+                  color: selected
+                      ? colorScheme.primary.withValues(alpha: 0.15)
+                      : colorScheme.surfaceContainerHigh,
                   borderRadius: BorderRadius.circular(8),
-                  onTap: () => onSelect(document),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: selected
-                            ? colorScheme.primary
-                            : colorScheme.outlineVariant,
-                        width: selected ? 1.5 : 1,
+                  child: InkWell(
+                    key: ValueKey('document-file-$documentId'),
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => onSelect(document),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
                       ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          selected
-                              ? Icons.radio_button_checked
-                              : Icons.insert_drive_file_outlined,
-                          size: 14,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
                           color: selected
                               ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
+                              : colorScheme.outlineVariant,
+                          width: selected ? 1.5 : 1,
                         ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            _documentFileName(document),
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: selected
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                              color: selected
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurface,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            selected
+                                ? Icons.radio_button_checked
+                                : Icons.insert_drive_file_outlined,
+                            size: 14,
+                            color: selected
+                                ? colorScheme.primary
+                                : colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _documentFileName(document),
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                                color: selected
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurface,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '· ${_formatDocumentSize(document)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: colorScheme.onSurfaceVariant,
+                          const SizedBox(width: 4),
+                          Text(
+                            '· ${_formatDocumentSize(document)}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                        if (!isPrimary) ...[
                           const SizedBox(width: 2),
                           InkWell(
+                            key: ValueKey('document-file-action-$documentId'),
                             onTap: () => onAction(context, document),
                             child: Padding(
                               padding: const EdgeInsets.all(2),
@@ -1536,13 +1599,12 @@ class _DocumentFilesSection extends StatelessWidget {
                             ),
                           ),
                         ],
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              );
-            }).toList(),
-          ),
+                );
+              }).toList(),
+            ),
         ],
       ),
     );
