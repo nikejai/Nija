@@ -315,6 +315,24 @@ void main() {
       expect(renamed.first.name, 'Banking & Taxes');
     });
 
+    test('updates folder color', () {
+      final folder = VaultFolder(
+        id: 'f1',
+        name: 'Work',
+        color: '#0381FE',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      final updated = manager.updateFolderColor(
+        folders: [folder],
+        folderId: 'f1',
+        color: '#1FA968',
+      );
+
+      expect(updated.first.color, '#1FA968');
+    });
+
     test('moves folder and blocks circular move', () {
       final f1 = VaultFolder(
         id: 'f1',
@@ -437,6 +455,7 @@ void main() {
       void Function(String? folderId)? onUploadDocumentToFolder,
       void Function(String name, String? parentId, String? color)? onCreateFolder,
       void Function(String id, String newName)? onRenameFolder,
+      void Function(String id, String? color)? onUpdateFolderColor,
       void Function(String id, bool cascade)? onDeleteFolder,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onMoveItem,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onCopyItem,
@@ -462,6 +481,7 @@ void main() {
                   onUploadDocumentToFolder: uploadCb,
                   onCreateFolder: createFolderCb,
                   onRenameFolder: onRenameFolder ?? (_, _) {},
+                  onUpdateFolderColor: onUpdateFolderColor,
                   onMoveFolder: (_, _) {},
                   onDeleteFolder: onDeleteFolder ?? (_, _) {},
                   onMoveItem: onMoveItem ?? (_, _) {},
@@ -816,6 +836,65 @@ void main() {
 
       expect(movedItem?['id'], 'item-custom-1');
       expect(targetFolder, isNull);
+    });
+
+    testWidgets('long press folder on main view shows bottom sheet with horizontal menus: move, create subfolder, folder color, rename, delete', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Work',
+        color: '#0381FE',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      String? updatedColor;
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        onUpdateFolderColor: (id, color) => updatedColor = color,
+      ));
+      await tester.pumpAndSettle();
+
+      // Long press Work folder in list view
+      await tester.longPress(find.text('Work'));
+      await tester.pumpAndSettle();
+
+      // Horizontal menus are displayed in bottom sheet
+      expect(find.byKey(const ValueKey('folder-sheet-action-move')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-sheet-action-create-subfolder')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-sheet-action-color')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-sheet-action-rename')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-sheet-action-delete')), findsOneWidget);
+
+      // Tap Folder color action
+      await tester.tap(find.byKey(const ValueKey('folder-sheet-action-color')));
+      await tester.pumpAndSettle();
+
+      // Color picker dialog appears
+      expect(find.text('Folder Color'), findsOneWidget);
+      expect(find.byKey(const ValueKey('color-swatch-#1FA968')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('color-swatch-#1FA968')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('save-folder-color-button')));
+      await tester.pumpAndSettle();
+
+      expect(updatedColor, '#1FA968');
+
+      // Long press again to test rename action
+      await tester.longPress(find.text('Work'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('folder-sheet-action-rename')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rename Folder'), findsOneWidget);
     });
   });
 

@@ -74,6 +74,21 @@ class VaultFolderManager {
     }).toList();
   }
 
+  /// Updates the color of an existing folder and its `updatedAt` timestamp.
+  List<VaultFolder> updateFolderColor({
+    required List<VaultFolder> folders,
+    required String folderId,
+    required String? color,
+  }) {
+    final now = DateTime.now().toUtc().toIso8601String();
+    return folders.map((f) {
+      if (f.id == folderId) {
+        return f.copyWith(color: color, updatedAt: now);
+      }
+      return f;
+    }).toList();
+  }
+
   /// Moves [folderId] to [newParentId]. Throws [ArgumentError] if [newParentId] would cause a cycle.
   List<VaultFolder> moveFolder({
     required List<VaultFolder> folders,

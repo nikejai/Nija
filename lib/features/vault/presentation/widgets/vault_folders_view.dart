@@ -5,6 +5,8 @@ import '../../../../core/config/vault_limits.dart';
 import '../../../../domain/models/folder_tree_builder.dart';
 import '../../../../domain/models/folder_tree_node.dart';
 import '../../../../domain/models/vault_folder.dart';
+import 'vault_create_folder_dialog.dart';
+import 'vault_folder_hierarchy_sheet.dart';
 
 enum ExplorerViewMode { list, grid, tree }
 
@@ -103,6 +105,7 @@ class VaultFoldersView extends StatefulWidget {
     required this.onUploadDocumentToFolder,
     required this.onCreateFolder,
     required this.onRenameFolder,
+    this.onUpdateFolderColor,
     required this.onMoveFolder,
     required this.onDeleteFolder,
     required this.onMoveItem,
@@ -125,6 +128,7 @@ class VaultFoldersView extends StatefulWidget {
   final void Function(String? folderId) onUploadDocumentToFolder;
   final void Function(String name, String? parentId, String? color) onCreateFolder;
   final void Function(String folderId, String newName) onRenameFolder;
+  final void Function(String folderId, String? color)? onUpdateFolderColor;
   final void Function(String folderId, String? newParentId) onMoveFolder;
   final void Function(String folderId, bool cascade) onDeleteFolder;
   final void Function(Map<String, dynamic> item, String? targetFolderId) onMoveItem;
@@ -192,6 +196,14 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     if (_currentFolderId == null) return null;
     return _effectiveFolders.cast<VaultFolder?>().firstWhere(
           (f) => f?.id == _currentFolderId,
+          orElse: () => null,
+        );
+  }
+
+  VaultFolder? _folderById(String? folderId) {
+    if (folderId == null) return null;
+    return _effectiveFolders.cast<VaultFolder?>().firstWhere(
+          (f) => f?.id == folderId,
           orElse: () => null,
         );
   }
@@ -697,6 +709,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDefault = folder.id == VaultFoldersView.defaultFolderId;
+    final folderColor = resolveFolderColor(folder);
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 2),
@@ -708,6 +721,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: () => _navigateToFolder(folder.id),
+        onLongPress: () => _showFolderActionsBottomSheet(folder),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: widget.isWide
@@ -719,7 +733,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                         children: [
                           Icon(
                             isDefault ? Icons.folder_special : Icons.folder,
-                            color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
+                            color: folderColor,
                             size: 22,
                           ),
                           const SizedBox(width: 10),
@@ -762,7 +776,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   children: [
                     Icon(
                       isDefault ? Icons.folder_special : Icons.folder,
-                      color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
+                      color: folderColor,
                       size: 24,
                     ),
                     const SizedBox(width: 12),
@@ -961,6 +975,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   Widget _buildFolderGridTile(BuildContext context, VaultFolder folder) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDefault = folder.id == VaultFoldersView.defaultFolderId;
+    final folderColor = resolveFolderColor(folder);
 
     return Card(
       elevation: 1,
@@ -971,6 +986,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () => _navigateToFolder(folder.id),
+        onLongPress: () => _showFolderActionsBottomSheet(folder),
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: Column(
@@ -996,7 +1012,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               ),
               Icon(
                 isDefault ? Icons.folder_special : Icons.folder,
-                color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
+                color: folderColor,
                 size: 48,
               ),
               const SizedBox(height: 8),
@@ -1163,9 +1179,12 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     final isExpanded = folderId != null && _expandedTreeFolderIds.contains(folderId);
+    final folder = _folderById(folderId);
+    final folderColor = folder != null ? resolveFolderColor(folder) : const Color(0xFFEAB308);
 
     return InkWell(
       onTap: () => _navigateToFolder(folderId),
+      onLongPress: folder != null ? () => _showFolderActionsBottomSheet(folder) : null,
       borderRadius: BorderRadius.circular(6),
       child: Container(
         padding: EdgeInsets.only(left: 4.0 + (level * 14.0), right: 6, top: 6, bottom: 6),
@@ -1198,7 +1217,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             Icon(
               isSelected ? Icons.folder_open : Icons.folder,
               size: 18,
-              color: const Color(0xFFEAB308),
+              color: folderColor,
             ),
             const SizedBox(width: 6),
             Expanded(
@@ -1327,6 +1346,378 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           ),
         );
     }
+  }
+
+  void _showFolderActionsBottomSheet(VaultFolder folder) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDefault = folder.id == VaultFoldersView.defaultFolderId;
+    final folderColor = resolveFolderColor(folder);
+    final folderItems = FolderTreeBuilder.getItemsInFolder(
+      folderId: folder.id,
+      items: [...widget.items, ...widget.notes],
+      recursive: true,
+    );
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (bottomSheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Drag handle
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                // Folder Info Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: folderColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          isDefault ? Icons.folder_special : Icons.folder,
+                          color: folderColor,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              folder.name,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isDefault
+                                  ? 'Default folder · ${folderItems.length} items'
+                                  : 'File folder · ${folderItems.length} items',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.pop(bottomSheetContext),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+                ),
+                const SizedBox(height: 16),
+                // Horizontal Action Menus: Move, Create subfolder, Folder color, Rename, Delete
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 1. Move
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-move'),
+                        icon: Icons.drive_file_move_outlined,
+                        label: 'Move',
+                        enabled: !isDefault,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _showMoveFolderPicker(folder);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      // 2. Create subfolder
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-create-subfolder'),
+                        icon: Icons.create_new_folder_outlined,
+                        label: 'Create subfolder',
+                        enabled: true,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _showCreateSubfolderDialog(folder);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      // 3. Folder color
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-color'),
+                        icon: Icons.palette_outlined,
+                        label: 'Folder color',
+                        enabled: !isDefault,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _showColorPickerDialog(folder);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      // 4. Rename
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-rename'),
+                        icon: Icons.edit_outlined,
+                        label: 'Rename',
+                        enabled: !isDefault,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _handleFolderAction(folder, 'rename');
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      // 5. Delete
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-delete'),
+                        icon: Icons.delete_outline,
+                        label: 'Delete',
+                        color: Colors.red,
+                        enabled: !isDefault,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _handleFolderAction(folder, 'delete');
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHorizontalActionItem({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color? color,
+    bool enabled = true,
+  }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final itemColor = color ?? colorScheme.primary;
+    final effectiveColor = enabled ? itemColor : colorScheme.onSurfaceVariant.withValues(alpha: 0.38);
+
+    return SizedBox(
+      width: 78,
+      child: InkWell(
+        key: key,
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: effectiveColor.withValues(alpha: enabled ? 0.12 : 0.05),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  size: 22,
+                  color: effectiveColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: enabled
+                      ? (color ?? colorScheme.onSurface)
+                      : colorScheme.onSurfaceVariant.withValues(alpha: 0.38),
+                  height: 1.2,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCreateSubfolderDialog(VaultFolder folder) {
+    showCreateVaultFolderDialog(
+      context,
+      parentFolderId: folder.id,
+      parentFolderName: folder.name,
+      onCreateFolder: (name, {parentId, color}) async {
+        widget.onCreateFolder(name, parentId, color);
+        return VaultFolder(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: name,
+          parentId: parentId,
+          color: color,
+          createdAt: DateTime.now().toIso8601String(),
+          updatedAt: DateTime.now().toIso8601String(),
+        );
+      },
+    );
+  }
+
+  void _showColorPickerDialog(VaultFolder folder) {
+    var selectedHex = folder.color ?? '#0381FE';
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setStateDialog) {
+            final theme = Theme.of(dialogCtx);
+            final colorScheme = theme.colorScheme;
+            final activeColor = parseFolderHexColor(selectedHex);
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: activeColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.palette_outlined, color: activeColor, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Folder Color',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          folder.name,
+                          style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Select a color tag for this folder:',
+                    style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: kDefaultFolderColors.map((colorHex) {
+                      final dotColor = parseFolderHexColor(colorHex);
+                      final isSelected = selectedHex.toUpperCase() == colorHex.toUpperCase();
+
+                      return GestureDetector(
+                        key: ValueKey('color-swatch-$colorHex'),
+                        onTap: () {
+                          setStateDialog(() {
+                            selectedHex = colorHex;
+                          });
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: dotColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected ? colorScheme.onSurface : Colors.transparent,
+                              width: 3,
+                            ),
+                            boxShadow: [
+                              if (isSelected)
+                                BoxShadow(
+                                  color: dotColor.withValues(alpha: 0.4),
+                                  blurRadius: 6,
+                                  spreadRadius: 1,
+                                ),
+                            ],
+                          ),
+                          child: isSelected
+                              ? const Icon(Icons.check, size: 20, color: Colors.white)
+                              : null,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  key: const ValueKey('save-folder-color-button'),
+                  onPressed: () {
+                    widget.onUpdateFolderColor?.call(folder.id, selectedHex);
+                    setState(() {});
+                    Navigator.pop(dialogCtx);
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showMoveFolderPicker(VaultFolder folder) {

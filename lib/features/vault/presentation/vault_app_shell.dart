@@ -808,6 +808,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           _openUploadDocumentToFolder(folderId),
       onCreateFolder: _createFolder,
       onRenameFolder: _renameFolder,
+      onUpdateFolderColor: _updateFolderColor,
       onMoveFolder: _moveFolder,
       onDeleteFolder: _deleteFolder,
       onMoveItem: _moveItemToFolder,
@@ -961,6 +962,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
         folders: _folders,
         folderId: folderId,
         newName: newName,
+      );
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _updateFolderColor(String folderId, String? color) {
+    _updateState(() {
+      _folders = _folderManager.updateFolderColor(
+        folders: _folders,
+        folderId: folderId,
+        color: color,
       );
     });
     _persistVaultDataUnchecked();
