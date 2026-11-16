@@ -657,11 +657,21 @@ void main() {
       expect(find.text('Invoices'), findsOneWidget);
       expect(find.text('Personal'), findsOneWidget);
 
+      await tester.tap(find.byKey(const ValueKey('explorer-search-toggle')));
+      await tester.pumpAndSettle();
+
       await tester.enterText(find.byKey(const ValueKey('explorer-search-input')), 'Invo');
       await tester.pumpAndSettle();
 
       expect(find.text('Invoices'), findsOneWidget);
       expect(find.text('Personal'), findsNothing);
+
+      // Collapse search resets filter
+      await tester.tap(find.byKey(const ValueKey('explorer-search-collapse')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Invoices'), findsOneWidget);
+      expect(find.text('Personal'), findsOneWidget);
     });
 
     testWidgets('renames a folder via popup menu', (tester) async {

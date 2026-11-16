@@ -238,6 +238,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   FolderSortOption _sortOption = FolderSortOption.nameAsc;
   final Set<String> _expandedTreeFolderIds = {};
   String _searchFilter = '';
+  bool _isSearchExpanded = false;
 
   late final TextEditingController _searchController;
   late final FocusNode _searchFocusNode;
@@ -248,6 +249,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     _searchController = TextEditingController(text: _searchFilter);
     _searchFocusNode = FocusNode();
     _searchController.addListener(_onSearchChanged);
+    if (_searchFilter.isNotEmpty) {
+      _isSearchExpanded = true;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.onFolderChanged?.call(_currentFolderId);
     });
@@ -266,6 +270,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     if (_searchFilter != text) {
       setState(() {
         _searchFilter = text;
+        if (text.isNotEmpty) {
+          _isSearchExpanded = true;
+        }
       });
     }
   }
@@ -550,47 +557,132 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       ),
     );
 
-    final searchField = SizedBox(
-      height: 36,
-      child: TextField(
-        key: const ValueKey('explorer-search-input'),
-        controller: _searchController,
-        focusNode: _searchFocusNode,
-        style: const TextStyle(fontSize: 13),
-        decoration: InputDecoration(
-          hintText: _currentFolderId == null
-              ? 'Search all folders & items...'
-              : 'Search in this folder...',
-          hintStyle: TextStyle(
-            fontSize: 13,
-            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-          prefixIcon: const Icon(Icons.search, size: 16),
-          prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: colorScheme.outlineVariant),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
-          ),
-          suffixIcon: _searchFilter.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear, size: 14),
-                  onPressed: () {
-                    _searchController.clear();
-                    setState(() => _searchFilter = '');
-                  },
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                )
-              : null,
+    final searchToggleButton = IconButton(
+      key: const ValueKey('explorer-search-toggle'),
+      tooltip: _isSearchExpanded ? 'Close search' : 'Search folders and items',
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      icon: AnimatedRotation(
+        turns: _isSearchExpanded ? 0.25 : 0.0,
+        duration: const Duration(milliseconds: 200),
+        child: Icon(
+          _isSearchExpanded ? Icons.close : Icons.search,
+          size: 20,
+          color: _isSearchExpanded || _searchFilter.isNotEmpty
+              ? colorScheme.primary
+              : colorScheme.onSurfaceVariant,
         ),
       ),
+      onPressed: () {
+        setState(() {
+          _isSearchExpanded = !_isSearchExpanded;
+          if (_isSearchExpanded) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _searchFocusNode.requestFocus();
+            });
+          } else {
+            _searchController.clear();
+            _searchFilter = '';
+            _searchFocusNode.unfocus();
+          }
+        });
+      },
+    );
+
+    final animatedSearchBar = AnimatedSize(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeInOutCubic,
+      child: _isSearchExpanded
+          ? Container(
+              margin: const EdgeInsets.only(top: 6, bottom: 2),
+              height: 38,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: colorScheme.primary.withValues(alpha: 0.5),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(width: 10),
+                  Icon(
+                    Icons.search,
+                    size: 16,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('explorer-search-input'),
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: _currentFolderId == null
+                            ? 'Search all folders & items...'
+                            : 'Search in this folder...',
+                        hintStyle: TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                    ),
+                  ),
+                  if (_searchFilter.isNotEmpty)
+                    IconButton(
+                      key: const ValueKey('explorer-search-clear'),
+                      icon: Icon(
+                        Icons.cancel,
+                        size: 16,
+                        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                      ),
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _searchFilter = '');
+                      },
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    ),
+                  IconButton(
+                    key: const ValueKey('explorer-search-collapse'),
+                    icon: Icon(
+                      Icons.keyboard_arrow_up,
+                      size: 18,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    tooltip: 'Collapse search',
+                    onPressed: () {
+                      setState(() {
+                        _isSearchExpanded = false;
+                        _searchController.clear();
+                        _searchFilter = '';
+                        _searchFocusNode.unfocus();
+                      });
+                    },
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              ),
+            )
+          : const SizedBox.shrink(),
     );
 
     final breadcrumbsWidget = SingleChildScrollView(
@@ -697,39 +789,23 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       color: theme.scaffoldBackgroundColor,
-      child: widget.isWide
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    SizedBox(width: 240, child: searchField),
-                    const Spacer(),
-                    sortButton,
-                    const SizedBox(width: 8),
-                    viewSegmented,
-                  ],
-                ),
-                const SizedBox(height: 6),
-                breadcrumbsWidget,
-              ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: searchField),
-                    const SizedBox(width: 6),
-                    sortButton,
-                    const SizedBox(width: 6),
-                    viewSegmented,
-                  ],
-                ),
-                const SizedBox(height: 8),
-                breadcrumbsWidget,
-              ],
-            ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: breadcrumbsWidget),
+              const SizedBox(width: 8),
+              searchToggleButton,
+              const SizedBox(width: 4),
+              sortButton,
+              const SizedBox(width: 6),
+              viewSegmented,
+            ],
+          ),
+          animatedSearchBar,
+        ],
+      ),
     );
   }
 
