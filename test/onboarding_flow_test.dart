@@ -77,7 +77,7 @@ void main() {
     final createVault = find.byKey(const ValueKey('entry-create-vault'));
     await tester.ensureVisible(createVault);
     await tester.tap(createVault);
-    await pumpUntilFound(tester, find.text('Choose Guardian'));
+    await pumpUntilFound(tester, find.text('Create your vault'));
     await tester.enterText(
       find.widgetWithText(TextField, 'Master password'),
       'StrongPass123',
@@ -102,16 +102,13 @@ void main() {
     );
     await tester.tap(createEncryptedVaultButton);
     await pumpUntilFound(tester, find.text('Recovery phrase'));
-    await tester.scrollUntilVisible(
-      find.text('I saved my phrase'),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.text('I saved my phrase'));
+    final savedButton = find.widgetWithText(ElevatedButton, 'I saved my phrase');
+    await tester.ensureVisible(savedButton);
     await tester.pumpAndSettle();
+    await tester.tap(savedButton);
+    await pumpUntilFound(tester, find.text('Open vault'));
     await tester.tap(find.text('Open vault'));
-    await tester.pumpAndSettle();
-    expect(find.text('Unlock vault'), findsOneWidget);
+    await pumpUntilFound(tester, find.text('Unlock vault'));
   }
 
   testWidgets('first install walkthrough shows pages and continues to welcome', (
@@ -315,7 +312,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Choose Guardian'), findsOneWidget);
+    expect(find.text('Create your vault'), findsOneWidget);
   });
 
   testWidgets('entry page uses the same grouped vault flow on wide screens', (
@@ -351,10 +348,8 @@ void main() {
       find.byKey(const ValueKey('vault-entry-product-story')),
       findsOneWidget,
     );
-    expect(find.byKey(const ValueKey('entry-select-vault')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-open-vault-file')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-create-vault')), findsOneWidget);
-    expect(find.byKey(const ValueKey('entry-import-data')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-restore-cloud')), findsOneWidget);
     expect(find.byKey(const ValueKey('entry-theme-toggle')), findsOneWidget);
     expect(
@@ -378,44 +373,6 @@ void main() {
       AppStrings.webStorageNoticeBody,
       contains('not updated automatically'),
     );
-  });
-
-  testWidgets('selecting a known vault uses the full selection page', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 820);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: OnboardingFlow(
-          languageMode: 'en',
-          onLanguageModeChanged: (_) {},
-          vaultService: DefaultVaultService(
-            storageAdapter: InMemoryVaultStorageAdapter(),
-            cryptoAdapter: _FastTestCryptoAdapter(),
-          ),
-          vaultFilePath: 'test.nija',
-          firstInstallWalkthroughCompletedOverride: true,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('entry-select-vault')));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.byKey(const ValueKey('known-vault-selection-screen')),
-      findsOneWidget,
-    );
-    expect(find.text('KNOWN VAULTS'), findsOneWidget);
-    expect(find.text('Choose what to open'), findsOneWidget);
-    expect(find.text('Select different vault file'), findsOneWidget);
-    expect(find.byType(Dialog), findsNothing);
-    expect(find.byType(BottomSheet), findsNothing);
   });
 
   testWidgets('known-vault page renders saved references as cards', (
@@ -655,10 +612,8 @@ void main() {
     );
 
     for (final action in [
-      ('entry-select-vault', 'select'),
-      ('entry-open-vault-file', 'open-file'),
       ('entry-create-vault', 'create'),
-      ('entry-import-data', 'import'),
+      ('entry-open-vault-file', 'open-file'),
       ('entry-explore-demo', 'explore'),
       ('entry-restore-cloud', 'cloud'),
     ]) {
@@ -734,7 +689,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Choose Guardian'), findsOneWidget);
+    expect(find.text('Create your vault'), findsOneWidget);
     expect(
       tester
           .widget<TextField>(
@@ -820,7 +775,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Choose Guardian'), findsOneWidget);
+    expect(find.text('Create your vault'), findsOneWidget);
 
     await tester.enterText(
       find.widgetWithText(TextField, 'Master password'),
@@ -924,7 +879,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
-    await pumpUntilFound(tester, find.text('Choose Guardian'));
+    await pumpUntilFound(tester, find.text('Create your vault'));
     await tester.enterText(
       find.widgetWithText(TextField, 'Master password'),
       'StrongPass123',
@@ -1210,7 +1165,7 @@ void main() {
     await goToUnlockScreen(tester);
     await tester.tap(find.text('Create vault').last);
     await tester.pumpAndSettle();
-    expect(find.text('Choose Guardian'), findsOneWidget);
+    expect(find.text('Create your vault'), findsOneWidget);
   });
 
   testWidgets(
@@ -1238,7 +1193,7 @@ void main() {
       await goToUnlockScreen(tester);
       await tester.tap(find.text('Create vault').last);
       await tester.pumpAndSettle();
-      expect(find.text('Choose Guardian'), findsOneWidget);
+      expect(find.text('Create your vault'), findsOneWidget);
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();

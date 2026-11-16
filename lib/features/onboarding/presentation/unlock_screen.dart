@@ -19,7 +19,7 @@ class UnlockScreen extends StatefulWidget {
     required this.biometricUnlockLabel,
     required this.biometricUnlockIcon,
     this.showRecoveryAction = true,
-    this.themeMode = ThemeMode.system,
+    this.themeMode = ThemeMode.dark,
     this.onThemeModeChanged,
     required this.onBack,
     required this.onUnlock,

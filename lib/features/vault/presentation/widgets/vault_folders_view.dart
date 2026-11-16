@@ -700,15 +700,20 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       color: theme.scaffoldBackgroundColor,
       child: widget.isWide
-          ? Row(
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(child: breadcrumbsWidget),
-                const SizedBox(width: 12),
-                SizedBox(width: 220, child: searchField),
-                const SizedBox(width: 8),
-                sortButton,
-                const SizedBox(width: 8),
-                viewSegmented,
+                Row(
+                  children: [
+                    SizedBox(width: 240, child: searchField),
+                    const Spacer(),
+                    sortButton,
+                    const SizedBox(width: 8),
+                    viewSegmented,
+                  ],
+                ),
+                const SizedBox(height: 6),
+                breadcrumbsWidget,
               ],
             )
           : Column(
@@ -716,15 +721,15 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               children: [
                 Row(
                   children: [
-                    Expanded(child: breadcrumbsWidget),
-                    const SizedBox(width: 4),
+                    Expanded(child: searchField),
+                    const SizedBox(width: 6),
                     sortButton,
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 6),
                     viewSegmented,
                   ],
                 ),
-                const SizedBox(height: 6),
-                searchField,
+                const SizedBox(height: 8),
+                breadcrumbsWidget,
               ],
             ),
     );
@@ -1229,27 +1234,31 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Left Pane: Folder Tree
-        SizedBox(
-          width: widget.isWide ? 260 : 160,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border(right: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
-            ),
-            child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-              children: [
-                // Root Tree Entry
-                _buildTreeFolderTile(
-                  title: 'Root',
-                  folderId: null,
-                  isSelected: _currentFolderId == null,
-                  hasChildren: tree.isNotEmpty,
-                  level: 0,
-                ),
-                for (final node in tree)
-                  ..._renderTreeNode(node, 1),
-              ],
+        // Left Pane: Folder Tree (Scrollable horizontally and vertically for deep nesting)
+        Container(
+          width: widget.isWide ? 280 : 180,
+          decoration: BoxDecoration(
+            border: Border(right: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: 320,
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                children: [
+                  // Root Tree Entry
+                  _buildTreeFolderTile(
+                    title: 'Root',
+                    folderId: null,
+                    isSelected: _currentFolderId == null,
+                    hasChildren: tree.isNotEmpty,
+                    level: 0,
+                  ),
+                  for (final node in tree)
+                    ..._renderTreeNode(node, 1),
+                ],
+              ),
             ),
           ),
         ),

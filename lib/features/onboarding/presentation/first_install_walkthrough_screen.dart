@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../../app/widgets/nija_brand_lockup.dart';
@@ -138,7 +140,7 @@ class _FirstInstallWalkthroughScreenState
                     child: ConstrainedBox(
                       constraints: BoxConstraints(
                         maxWidth: 760,
-                        minHeight: constraints.maxHeight - 60,
+                        minHeight: max(0.0, constraints.maxHeight - 60),
                       ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
