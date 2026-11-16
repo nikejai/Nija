@@ -1117,6 +1117,10 @@ void main() {
       await tester.tap(find.text('Open Note'));
       await tester.pumpAndSettle();
 
+      // Tap title header button to open animated drawer
+      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+      await tester.pumpAndSettle();
+
       expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
       expect(find.text('Work'), findsWidgets);
 
@@ -1380,6 +1384,10 @@ void main() {
       await tester.tap(find.text('Open Note'));
       await tester.pumpAndSettle();
 
+      // Tap title header button to open animated drawer
+      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+      await tester.pumpAndSettle();
+
       await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'Daily Journal');
       await tester.pumpAndSettle();
 
@@ -1450,7 +1458,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Open folder hierarchy directly from canvas folder pill
+      // Tap title header button to open animated drawer
+      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+      await tester.pumpAndSettle();
+
+      // Open folder hierarchy directly from expanded folder pill
       expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('note-folder-selector')));
       await tester.pumpAndSettle();

@@ -43,6 +43,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   late final String _initialFingerprint;
   String _lastAutoSavedFingerprint = '';
   bool _dirty = false;
+  bool _isHeaderExpanded = false;
 
   @override
   void initState() {
@@ -172,129 +173,150 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     return quill.Document()..insert(0, '$fallbackText\n');
   }
 
-  Widget _buildNotesCanvasHeader(ColorScheme colorScheme, ThemeData theme) {
+  Widget _buildExtendedHeader(ColorScheme colorScheme, ThemeData theme) {
     final selectedFolder = _resolveFolder(_selectedFolderId);
     final folderColor = resolveFolderColor(selectedFolder);
     final folderName = selectedFolder.name;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Folder Pill and Favorite Row (One UI Samsung Notes style)
-        Row(
-          children: [
-            Material(
-              color: folderColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(20),
-              child: InkWell(
-                key: const ValueKey('note-folder-selector'),
-                borderRadius: BorderRadius.circular(20),
-                onTap: _openFolderPicker,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        selectedFolder.id == 'default' ? Icons.folder_special : Icons.folder,
-                        size: 15,
-                        color: folderColor,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        folderName,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: folderColor,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.keyboard_arrow_down,
-                        size: 16,
-                        color: folderColor,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const Spacer(),
-            IconButton(
-              key: const ValueKey('note-favorite-button'),
-              tooltip: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
-              icon: Icon(
-                _isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                color: _isFavorite ? const Color(0xFFF59E0B) : colorScheme.onSurfaceVariant,
-                size: 22,
-              ),
-              onPressed: () {
-                setState(() => _isFavorite = !_isFavorite);
-                _markDirty();
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        // Large Title Input Row + Clear ('X') Button
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: TextField(
-                key: const ValueKey('note-details-title-input'),
-                controller: _titleController,
-                textCapitalization: TextCapitalization.sentences,
-                style: TextStyle(
-                  color: colorScheme.onSurface,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  height: 1.2,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Title',
-                  hintStyle: TextStyle(
-                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                  ),
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  filled: false,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                ),
-                onChanged: (_) {
-                  setState(() {});
-                  _markDirty();
-                },
-              ),
-            ),
-            if (_titleController.text.isNotEmpty)
-              IconButton(
-                key: const ValueKey('note-title-clear-button'),
-                icon: Icon(Icons.cancel, size: 20, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7)),
-                tooltip: 'Clear title',
-                onPressed: () {
-                  _titleController.clear();
-                  setState(() {});
-                  _markDirty();
-                },
-              ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Container(
-          height: 2,
-          margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
-            color: colorScheme.primary.withValues(alpha: 0.8),
-            borderRadius: BorderRadius.circular(1),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.35),
           ),
         ),
-      ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Material(
+                color: folderColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                child: InkWell(
+                  key: const ValueKey('note-folder-selector'),
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: _openFolderPicker,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          selectedFolder.id == 'default' ? Icons.folder_special : Icons.folder,
+                          size: 15,
+                          color: folderColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          folderName,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: folderColor,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 16,
+                          color: folderColor,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                key: const ValueKey('note-favorite-button'),
+                tooltip: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
+                icon: Icon(
+                  _isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: _isFavorite ? const Color(0xFFF59E0B) : colorScheme.onSurfaceVariant,
+                  size: 22,
+                ),
+                onPressed: () {
+                  setState(() => _isFavorite = !_isFavorite);
+                  _markDirty();
+                },
+              ),
+              IconButton(
+                tooltip: 'Collapse',
+                icon: Icon(
+                  Icons.keyboard_arrow_up,
+                  size: 20,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                onPressed: () {
+                  setState(() => _isHeaderExpanded = false);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('note-details-title-input'),
+                  controller: _titleController,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Title',
+                    hintStyle: TextStyle(
+                      color: colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                  ),
+                  onChanged: (_) {
+                    setState(() {});
+                    _markDirty();
+                  },
+                ),
+              ),
+              if (_titleController.text.isNotEmpty)
+                IconButton(
+                  key: const ValueKey('note-title-clear-button'),
+                  icon: Icon(Icons.cancel, size: 20, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7)),
+                  tooltip: 'Clear title',
+                  onPressed: () {
+                    _titleController.clear();
+                    setState(() {});
+                    _markDirty();
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Container(
+            height: 2,
+            margin: const EdgeInsets.only(bottom: 4),
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -340,7 +362,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       child: InkWell(
                         key: const ValueKey('note-title-header-button'),
                         borderRadius: BorderRadius.circular(8),
-                        onTap: _openFolderPicker,
+                        onTap: () {
+                          setState(() {
+                            _isHeaderExpanded = !_isHeaderExpanded;
+                          });
+                        },
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                           child: Column(
@@ -360,6 +386,22 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                                         fontSize: 16,
                                         fontWeight: FontWeight.w700,
                                       ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Icon(
+                                    Icons.edit_outlined,
+                                    size: 15,
+                                    color: colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  AnimatedRotation(
+                                    turns: _isHeaderExpanded ? 0.5 : 0.0,
+                                    duration: const Duration(milliseconds: 200),
+                                    child: Icon(
+                                      Icons.keyboard_arrow_down,
+                                      size: 16,
+                                      color: colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                   if (_isFavorite) ...[
@@ -414,6 +456,13 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                   ],
                 ),
               ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeInOutCubic,
+                child: _isHeaderExpanded
+                    ? _buildExtendedHeader(colorScheme, theme)
+                    : const SizedBox.shrink(),
+              ),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
@@ -436,7 +485,6 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _buildNotesCanvasHeader(colorScheme, theme),
                               quill.QuillSimpleToolbar(
                                 controller: _quillController,
                                 config: const quill.QuillSimpleToolbarConfig(

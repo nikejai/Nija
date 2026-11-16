@@ -26,6 +26,15 @@ void main() {
 
     expect(find.text('New note'), findsOneWidget);
     expect(find.byKey(const ValueKey('note-title-header-button')), findsOneWidget);
+    expect(find.byIcon(Icons.edit_outlined), findsOneWidget);
+
+    // Tap header to expand animated drawer
+    await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('note-details-title-input')), findsOneWidget);
+    expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
+    expect(find.byKey(const ValueKey('note-favorite-button')), findsOneWidget);
   });
 
   testWidgets('note editor autosaves every second through callback', (
@@ -48,6 +57,9 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'Updated Draft');
@@ -83,6 +95,9 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'A');
