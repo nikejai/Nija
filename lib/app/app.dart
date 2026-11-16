@@ -20,7 +20,7 @@ class _NijaAppState extends State<NijaApp> {
   static const _defaultAutoLockSeconds = 300;
 
   String _languageMode = 'system';
-  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode _themeMode = ThemeMode.dark;
   int _autoLockSeconds = _defaultAutoLockSeconds;
 
   Locale? get _forcedLocale => switch (_languageMode) {
@@ -66,8 +66,8 @@ class _NijaAppState extends State<NijaApp> {
 
   ThemeMode _themeModeFromName(String? name) => switch (name) {
     'light' => ThemeMode.light,
-    'dark' => ThemeMode.dark,
-    _ => ThemeMode.system,
+    'system' => ThemeMode.system,
+    _ => ThemeMode.dark,
   };
 
   @override

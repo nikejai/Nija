@@ -9,12 +9,10 @@ import 'dart:io';
 import 'dart:math';
 
 import '../../../application/services/default_vault_service.dart';
-import '../../../app/theme/entry_typography.dart';
 import '../../../application/services/vault_service.dart';
 import '../../vault/presentation/widgets/encrypted_secret_viewer.dart';
 import '../../vault/presentation/widgets/nija_pin_dialogs.dart';
 import '../../vault/presentation/widgets/vault_merge_screen.dart';
-import 'widgets/origami_guardian_icon.dart';
 import '../../../application/services/vault_merge_helper.dart';
 import '../../../core/config/app_features.dart';
 import '../../../core/config/guardian_profiles.dart';
@@ -97,7 +95,7 @@ class OnboardingFlow extends StatefulWidget {
     super.key,
     required this.languageMode,
     required this.onLanguageModeChanged,
-    this.themeMode = ThemeMode.system,
+    this.themeMode = ThemeMode.dark,
     this.onThemeModeChanged,
     this.vaultService,
     this.vaultFilePath,
@@ -5553,65 +5551,24 @@ class _SetupScreenState extends State<SetupScreen> {
 
     return OnboardingScaffold(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
         child: ListView(
           children: [
-            Text(AppStrings.step1Of2, style: theme.textTheme.bodyMedium),
-            const SizedBox(height: 6),
-            Text(AppStrings.chooseGuardian, style: theme.textTheme.titleLarge),
-            const SizedBox(height: 6),
-            Text(AppStrings.guardianHelper, style: theme.textTheme.bodyMedium),
-            const SizedBox(height: 14),
-            ...GuardianProfiles.all.map(
-              (guardian) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _GuardianCard(
-                  guardian: guardian,
-                  selected: guardian.id == widget.selectedGuardian.id,
-                  onTap: () => widget.onSelectGuardian(guardian),
-                ),
+            Text(
+              'Create your vault',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                fontSize: 26,
               ),
             ),
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${widget.selectedGuardian.displayName} details',
-                    style: theme.textTheme.titleMedium?.copyWith(fontSize: 16),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.selectedGuardian.detail,
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surface,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: colorScheme.outlineVariant),
-                    ),
-                    child: Text(
-                      'Argon2id + XChaCha20-Poly1305\nProfile: ${widget.selectedGuardian.id}',
-                      style: EntryTypography.technicalMonospace(
-                        fontSize: 11,
-                        color: colorScheme.onSurfaceVariant,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
+            const SizedBox(height: 6),
+            Text(
+              'Set a master password to encrypt your vault.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
             ),
+            const SizedBox(height: 20),
             TextField(
               key: const ValueKey('setup-vault-name-field'),
               controller: widget.vaultNameController,
@@ -5623,7 +5580,7 @@ class _SetupScreenState extends State<SetupScreen> {
                     : 'Used to identify this vault later',
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             TextField(
               controller: widget.passwordController,
               onChanged: (_) => setState(() {}),
@@ -5643,7 +5600,7 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             TextField(
               controller: _confirmPasswordController,
               onChanged: (_) => setState(() {}),
@@ -5670,7 +5627,7 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 14),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -5752,15 +5709,18 @@ class RecoveryScreen extends StatelessWidget {
 
     return OnboardingScaffold(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
         child: ListView(
           children: [
-            Text(AppStrings.step2Of2, style: theme.textTheme.bodyMedium),
+            Text(AppStrings.recoveryPhrase, style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: 26,
+            )),
             const SizedBox(height: 6),
-            Text(AppStrings.recoveryPhrase, style: theme.textTheme.titleLarge),
-            const SizedBox(height: 6),
-            Text(AppStrings.recoveryOffline, style: theme.textTheme.bodyMedium),
-            const SizedBox(height: 14),
+            Text(AppStrings.recoveryOffline, style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            )),
+            const SizedBox(height: 18),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
@@ -5906,68 +5866,6 @@ class VaultCreatedScreen extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GuardianCard extends StatelessWidget {
-  const _GuardianCard({
-    required this.guardian,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final GuardianProfile guardian;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected
-              ? colorScheme.primaryContainer
-              : colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: selected ? colorScheme.primary : colorScheme.outlineVariant,
-          ),
-        ),
-        child: Row(
-          children: [
-            OrigamiGuardianIcon(guardianId: guardian.id, size: 28),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    guardian.displayName,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    guardian.tagline,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ],
-              ),
-            ),
-            if (selected)
-              Icon(
-                Icons.check_circle,
-                color: colorScheme.onPrimaryContainer,
-                size: 20,
-              ),
-          ],
         ),
       ),
     );

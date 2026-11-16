@@ -214,6 +214,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
   final Set<String> _revealedSensitiveFields = <String>{};
   final List<Map<String, dynamic>> _idPhotos = <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> _attachments = <Map<String, dynamic>>[];
+  bool _primaryDocumentRemoved = false;
   late final TextEditingController _tagDraftController;
   final List<String> _tags = <String>[];
   String? _attachmentErrorText;
@@ -483,6 +484,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
   }
 
   Map<String, dynamic>? get _primaryDocumentSelection {
+    if (_primaryDocumentRemoved) return null;
     final item = widget.initialItem;
     if (item == null) return null;
     if ((item['type']?.toString() ?? '') != 'Documents') return null;
@@ -993,19 +995,19 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                   ),
                   trailing: IconButton(
                     key: ValueKey('item-form-remove-attachment-$index'),
-                    onPressed: isPrimary
-                        ? null
-                        : () => setState(() {
-                            final attachmentIndex = primaryDocument == null
-                                ? index
-                                : index - 1;
-                            _attachments.removeAt(attachmentIndex);
-                            _attachmentErrorText = null;
-                          }),
+                    onPressed: () => setState(() {
+                      if (isPrimary) {
+                        _primaryDocumentRemoved = true;
+                      } else {
+                        final attachmentIndex = primaryDocument == null
+                            ? index
+                            : index - 1;
+                        _attachments.removeAt(attachmentIndex);
+                      }
+                      _attachmentErrorText = null;
+                    }),
                     icon: const Icon(Icons.close),
-                    tooltip: isPrimary
-                        ? 'Current document cannot be removed here'
-                        : 'Remove document',
+                    tooltip: 'Remove document',
                   ),
                 ),
               );
@@ -1132,6 +1134,54 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       'fields': fields,
       'folderId': _selectedFolderId,
     };
+    if (_type == 'Documents' &&
+        (_primaryDocumentRemoved || item['documentFileName'] == null)) {
+      if (_attachments.isNotEmpty) {
+        final firstAttachment = _attachments.removeAt(0);
+        item['documentFileName'] = firstAttachment['documentFileName'];
+        item['documentExtension'] = firstAttachment['documentExtension'];
+        item['documentSizeBytes'] = firstAttachment['documentSizeBytes'];
+        if (firstAttachment['documentSection'] != null) {
+          item['documentSection'] = firstAttachment['documentSection'];
+        } else {
+          item.remove('documentSection');
+        }
+        if (firstAttachment['documentStorage'] != null) {
+          item['documentStorage'] = firstAttachment['documentStorage'];
+        } else {
+          item.remove('documentStorage');
+        }
+        if (firstAttachment['documentUploadedAt'] != null) {
+          item['documentUploadedAt'] = firstAttachment['documentUploadedAt'];
+        }
+        if (firstAttachment['__documentBytes__'] != null) {
+          item['__documentBytes__'] = firstAttachment['__documentBytes__'];
+        } else {
+          item.remove('__documentBytes__');
+        }
+        if (firstAttachment['__documentReadStream__'] != null) {
+          item['__documentReadStream__'] =
+              firstAttachment['__documentReadStream__'];
+        } else {
+          item.remove('__documentReadStream__');
+        }
+        if (firstAttachment['documentBytes'] != null) {
+          item['documentBytes'] = firstAttachment['documentBytes'];
+        } else {
+          item.remove('documentBytes');
+        }
+      } else if (_primaryDocumentRemoved) {
+        item.remove('documentFileName');
+        item.remove('documentSection');
+        item.remove('documentExtension');
+        item.remove('documentSizeBytes');
+        item.remove('documentStorage');
+        item.remove('documentUploadedAt');
+        item.remove('__documentBytes__');
+        item.remove('__documentReadStream__');
+        item.remove('documentBytes');
+      }
+    }
     if (_idPhotos.isNotEmpty) {
       item['idPhotos'] = _idPhotos
           .map((entry) => Map<String, dynamic>.from(entry))

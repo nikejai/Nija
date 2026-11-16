@@ -136,7 +136,7 @@ class VaultAppShell extends StatefulWidget {
     this.initialFolders = const <Map<String, dynamic>>[],
     required this.languageMode,
     required this.onLanguageModeChanged,
-    this.themeMode = ThemeMode.system,
+    this.themeMode = ThemeMode.dark,
     this.onThemeModeChanged,
     this.autoLockSeconds = 300,
     this.onAutoLockSecondsChanged,
@@ -2396,13 +2396,33 @@ class _VaultAppShellState extends State<VaultAppShell> {
     Map<String, dynamic> attachment,
   ) async {
     await _runWithBusy('Removing attached document...', () async {
-      final attachmentId = attachment['id']?.toString();
-      final attachments = _itemAttachments(item)
-        ..removeWhere((entry) => entry['id']?.toString() == attachmentId);
-      final updatedItem = {
-        ...Map<String, dynamic>.from(item),
-        'attachments': attachments,
-      };
+      final updatedItem = Map<String, dynamic>.from(item);
+      final isPrimary = attachment['__primaryDocument__'] == true ||
+          attachment['id']?.toString() == _primaryDocumentId;
+      if (isPrimary) {
+        final attachments = _itemAttachments(item);
+        if (attachments.isNotEmpty) {
+          final firstAtt = attachments.removeAt(0);
+          _promoteAttachmentToPrimary(updatedItem, firstAtt);
+          if (attachments.isNotEmpty) {
+            updatedItem['attachments'] = attachments;
+          } else {
+            updatedItem.remove('attachments');
+          }
+        } else {
+          _clearPrimaryDocumentFields(updatedItem);
+          updatedItem.remove('attachments');
+        }
+      } else {
+        final attachmentId = attachment['id']?.toString();
+        final attachments = _itemAttachments(item)
+          ..removeWhere((entry) => entry['id']?.toString() == attachmentId);
+        if (attachments.isNotEmpty) {
+          updatedItem['attachments'] = attachments;
+        } else {
+          updatedItem.remove('attachments');
+        }
+      }
       await _replaceItemAndPersist(updatedItem);
     });
   }
@@ -5907,4 +5927,53 @@ class _DashboardRecentCandidate {
   final String kind;
   final Map<String, dynamic> entry;
   final DateTime activityAt;
+}
+
+void _promoteAttachmentToPrimary(
+  Map<String, dynamic> item,
+  Map<String, dynamic> attachment,
+) {
+  item['documentFileName'] = attachment['documentFileName'];
+  item['documentExtension'] = attachment['documentExtension'];
+  item['documentSizeBytes'] = attachment['documentSizeBytes'];
+  if (attachment['documentSection'] != null) {
+    item['documentSection'] = attachment['documentSection'];
+  } else {
+    item.remove('documentSection');
+  }
+  if (attachment['documentStorage'] != null) {
+    item['documentStorage'] = attachment['documentStorage'];
+  } else {
+    item.remove('documentStorage');
+  }
+  if (attachment['documentUploadedAt'] != null) {
+    item['documentUploadedAt'] = attachment['documentUploadedAt'];
+  }
+  if (attachment['__documentBytes__'] != null) {
+    item['__documentBytes__'] = attachment['__documentBytes__'];
+  } else {
+    item.remove('__documentBytes__');
+  }
+  if (attachment['__documentReadStream__'] != null) {
+    item['__documentReadStream__'] = attachment['__documentReadStream__'];
+  } else {
+    item.remove('__documentReadStream__');
+  }
+  if (attachment['documentBytes'] != null) {
+    item['documentBytes'] = attachment['documentBytes'];
+  } else {
+    item.remove('documentBytes');
+  }
+}
+
+void _clearPrimaryDocumentFields(Map<String, dynamic> item) {
+  item.remove('documentFileName');
+  item.remove('documentSection');
+  item.remove('documentExtension');
+  item.remove('documentSizeBytes');
+  item.remove('documentStorage');
+  item.remove('documentUploadedAt');
+  item.remove('__documentBytes__');
+  item.remove('__documentReadStream__');
+  item.remove('documentBytes');
 }

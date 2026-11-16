@@ -19,7 +19,7 @@ class WelcomeScreen extends StatelessWidget {
     required this.onExploreDemo,
     this.recentVaults = const <VaultReference>[],
     this.onRecentVaultSelected,
-    this.themeMode = ThemeMode.system,
+    this.themeMode = ThemeMode.dark,
     this.onThemeModeChanged,
   });
 
@@ -100,6 +100,10 @@ class _VaultEntrySurface extends StatelessWidget {
           ),
           child: Row(
             children: [
+              const NijaBrandLockup(
+                layout: NijaBrandLayout.horizontal,
+                markSize: 28,
+              ),
               const Spacer(),
               const PwaInstallOfferButton(),
               IconButton(
@@ -529,14 +533,13 @@ class _EntryActionsPanel extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const NijaBrandLockup(layout: NijaBrandLayout.vertical, markSize: 56),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           Text(
             AppStrings.entryTitle,
             textAlign: TextAlign.center,
             style: EntryTypography.heroTitle(colorScheme.onSurface),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 360),
             child: Text(
@@ -548,58 +551,9 @@ class _EntryActionsPanel extends StatelessWidget {
             ),
           ),
           if (kIsWeb) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             const _WebStorageNotice(),
           ],
-          const SizedBox(height: 26),
-          _EntryActionGroup(
-            children: [
-              _EntryAction(
-                key: const ValueKey('entry-select-vault'),
-                code: '01',
-                title: AppStrings.selectKnownVault,
-                subtitle: AppStrings.selectKnownVaultHint,
-                icon: Icons.chevron_right,
-                onTap: onSelectKnownVault,
-                showDivider: true,
-              ),
-              _EntryAction(
-                key: const ValueKey('entry-open-vault-file'),
-                code: '02',
-                title: AppStrings.openVaultFile,
-                subtitle: AppStrings.openVaultFileHint,
-                icon: Icons.open_in_new_outlined,
-                onTap: onOpenVaultFile,
-                showDivider: true,
-              ),
-              _EntryAction(
-                key: const ValueKey('entry-create-vault'),
-                code: '03',
-                title: AppStrings.createVault,
-                subtitle: AppStrings.createVaultHint,
-                icon: Icons.add,
-                onTap: onCreateVault,
-                showDivider: true,
-              ),
-              _EntryAction(
-                key: const ValueKey('entry-import-data'),
-                code: '04',
-                title: AppStrings.importData,
-                subtitle: AppStrings.importDataHint,
-                icon: Icons.south_east,
-                onTap: onImportVault,
-                showDivider: true,
-              ),
-              _EntryAction(
-                key: const ValueKey('entry-explore-demo'),
-                code: '05',
-                title: AppStrings.exploreDemo,
-                subtitle: AppStrings.exploreDemoHint,
-                icon: Icons.visibility_outlined,
-                onTap: onExploreDemo,
-              ),
-            ],
-          ),
           if (recentVaults.isNotEmpty && onRecentVaultSelected != null) ...[
             const SizedBox(height: 16),
             _EntryRecentVaultsSection(
@@ -610,6 +564,44 @@ class _EntryActionsPanel extends StatelessWidget {
                   : null,
             ),
           ],
+          const SizedBox(height: 16),
+          if (recentVaults.isNotEmpty) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'VAULT ACTIONS',
+                style: EntryTypography.sectionLabel(colorScheme.onSurfaceVariant),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          _EntryActionGroup(
+            children: [
+              _EntryAction(
+                key: const ValueKey('entry-create-vault'),
+                leadingIcon: Icons.add_circle_outline,
+                title: AppStrings.createVault,
+                subtitle: AppStrings.createVaultHint,
+                onTap: onCreateVault,
+                showDivider: true,
+              ),
+              _EntryAction(
+                key: const ValueKey('entry-open-vault-file'),
+                leadingIcon: Icons.folder_open_outlined,
+                title: 'Open vault file',
+                subtitle: 'Choose an encrypted .nija file from this device.',
+                onTap: onOpenVaultFile,
+                showDivider: true,
+              ),
+              _EntryAction(
+                key: const ValueKey('entry-explore-demo'),
+                leadingIcon: Icons.auto_awesome_outlined,
+                title: AppStrings.exploreDemo,
+                subtitle: AppStrings.exploreDemoHint,
+                onTap: onExploreDemo,
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
           Align(
             alignment: Alignment.centerLeft,
@@ -890,18 +882,16 @@ class _EntryActionGroup extends StatelessWidget {
 class _EntryAction extends StatelessWidget {
   const _EntryAction({
     super.key,
-    required this.code,
+    required this.leadingIcon,
     required this.title,
     required this.subtitle,
-    required this.icon,
     required this.onTap,
     this.showDivider = false,
   });
 
-  final String code;
+  final IconData leadingIcon;
   final String title;
   final String subtitle;
-  final IconData icon;
   final VoidCallback onTap;
   final bool showDivider;
 
@@ -914,8 +904,8 @@ class _EntryAction extends StatelessWidget {
         onTap: onTap,
         hoverColor: colorScheme.surfaceContainerHighest,
         child: Container(
-          constraints: const BoxConstraints(minHeight: 76),
-          padding: const EdgeInsets.fromLTRB(15, 13, 15, 13),
+          constraints: const BoxConstraints(minHeight: 72),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: showDivider
               ? BoxDecoration(
                   border: Border(
@@ -925,13 +915,20 @@ class _EntryAction extends StatelessWidget {
               : null,
           child: Row(
             children: [
-              SizedBox(
-                width: 36,
-                child: Text(
-                  code,
-                  style: EntryTypography.actionCode(colorScheme.primary),
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: colorScheme.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  leadingIcon,
+                  color: colorScheme.primary,
+                  size: 20,
                 ),
               ),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -941,7 +938,7 @@ class _EntryAction extends StatelessWidget {
                       title,
                       style: EntryTypography.actionTitle(colorScheme.onSurface),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       subtitle,
                       style: EntryTypography.actionSubtitle(
@@ -951,7 +948,7 @@ class _EntryAction extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(icon, color: colorScheme.onSurfaceVariant, size: 20),
+              Icon(Icons.chevron_right, color: colorScheme.onSurfaceVariant, size: 20),
             ],
           ),
         ),

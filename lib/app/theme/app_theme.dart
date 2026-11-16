@@ -22,8 +22,8 @@ class AppTheme {
           secondaryContainer: const Color(0xFFF4F4F5),
           onSecondaryContainer: AppColors.textPrimary,
           surfaceContainerHighest: const Color(0xFFF4F4F5),
-          outline: const Color(0xFFD4D4D8),
-          outlineVariant: const Color(0xFFE4E4E7),
+          outline: const Color(0xFF333333),
+          outlineVariant: const Color(0xFF333333),
         );
 
     return _withInterFont(
@@ -38,7 +38,7 @@ class AppTheme {
           margin: EdgeInsets.zero,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0x0F000000), width: 1),
+            side: const BorderSide(color: Color(0xFF333333), width: 1),
           ),
           shadowColor: const Color(0x0A000000),
         ),
@@ -140,7 +140,7 @@ class AppTheme {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(6),
             ),
-            side: const BorderSide(color: Color(0xFFE4E4E7)),
+            side: const BorderSide(color: Color(0xFF333333)),
             foregroundColor: AppColors.textPrimary,
             elevation: 0,
           ),
@@ -182,7 +182,7 @@ class AppTheme {
           shape: WidgetStatePropertyAll(
             RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
-              side: const BorderSide(color: Color(0xFFEBEBEB)),
+              side: const BorderSide(color: Color(0xFF333333)),
             ),
           ),
           textStyle: const WidgetStatePropertyAll(
@@ -225,7 +225,7 @@ class AppTheme {
           ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFFE4E4E7)),
+            side: const BorderSide(color: Color(0xFF333333)),
           ),
           titleTextStyle: const TextStyle(
             color: AppColors.textPrimary,
@@ -257,7 +257,7 @@ class AppTheme {
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0xFFE4E4E7)),
+            side: const BorderSide(color: Color(0xFF333333)),
           ),
           textStyle: const TextStyle(
             color: AppColors.textPrimary,
@@ -273,7 +273,7 @@ class AppTheme {
             shape: WidgetStatePropertyAll(
               RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Color(0xFFE4E4E7)),
+                side: const BorderSide(color: Color(0xFF333333)),
               ),
             ),
           ),
@@ -285,7 +285,7 @@ class AppTheme {
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFEBEBEB)),
+            borderSide: const BorderSide(color: Color(0xFF333333)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
