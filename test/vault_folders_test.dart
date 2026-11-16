@@ -896,6 +896,64 @@ void main() {
 
       expect(find.text('Rename Folder'), findsOneWidget);
     });
+
+    testWidgets('item row differentiates item type (Note vs Card) and (i) icon shows details sheet', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final noteItem = {
+        'id': 'note-hello',
+        'title': 'Hello',
+        'delta': [
+          {'insert': 'hello world\n'}
+        ],
+        'preview': 'hello world',
+        'updatedAt': '2026-11-16T10:00:00Z',
+      };
+      final cardItem = {
+        'id': 'card-chase',
+        'title': 'Chase Sapphire',
+        'type': 'Credit Card',
+        'size': 1024,
+        'updatedAt': '2026-11-16T10:00:00Z',
+      };
+
+      await tester.pumpWidget(buildTestFoldersView(
+        items: [cardItem],
+        notes: [noteItem],
+      ));
+      await tester.pumpAndSettle();
+
+      // Open Default folder where unassigned items live
+      await tester.tap(find.text('Default'));
+      await tester.pumpAndSettle();
+
+      // Note item is differentiated as Note
+      expect(find.text('Hello'), findsOneWidget);
+      expect(find.textContaining('Note'), findsWidgets);
+
+      // Card item is differentiated as Credit Card
+      expect(find.text('Chase Sapphire'), findsOneWidget);
+      expect(find.textContaining('Credit Card'), findsWidgets);
+
+      // Tap (i) info button on Chase Sapphire
+      await tester.tap(find.byKey(const ValueKey('item-info-btn-card-chase')));
+      await tester.pumpAndSettle();
+
+      // Bottom sheet displays item details
+      expect(find.text('Chase Sapphire'), findsWidgets);
+      expect(find.text('Item Type'), findsOneWidget);
+      expect(find.text('Credit Card'), findsWidgets);
+      expect(find.text('Size'), findsOneWidget);
+      expect(find.text('1.00 KB'), findsOneWidget);
+      expect(find.text('Date'), findsOneWidget);
+      expect(find.text('Folder'), findsOneWidget);
+      expect(find.text('Default'), findsWidgets);
+    });
   });
 
   group('Demo PDF and Attachments', () {

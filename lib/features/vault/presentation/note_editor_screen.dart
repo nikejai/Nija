@@ -606,6 +606,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       isEmptyDraft: normalizedTitle.isEmpty && plainText.isEmpty,
       payload: {
         'id': _noteId,
+        'type': 'Note',
         'title': title,
         'preview': preview,
         'updated': 'Now',

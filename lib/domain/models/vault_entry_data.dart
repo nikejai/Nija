@@ -115,6 +115,7 @@ class VaultNoteData {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
+    'type': 'Note',
     'title': title,
     'preview': preview,
     'pinned': pinned,
