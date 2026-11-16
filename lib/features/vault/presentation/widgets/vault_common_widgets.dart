@@ -1,13 +1,27 @@
 part of '../vault_app_shell.dart';
 
+String _resolveFolderName(String? folderId, List<VaultFolder> folders) {
+  final cleanId = folderId?.trim();
+  if (cleanId == null || cleanId.isEmpty || cleanId == 'default') {
+    return 'Default';
+  }
+  final match = folders.cast<VaultFolder?>().firstWhere(
+    (f) => f?.id == cleanId,
+    orElse: () => null,
+  );
+  return match?.name ?? 'Default';
+}
+
 class _EntryMetadataPanel extends StatelessWidget {
-  const _EntryMetadataPanel({required this.entry});
+  const _EntryMetadataPanel({required this.entry, this.folders});
 
   final Map<String, dynamic> entry;
+  final List<VaultFolder>? folders;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final folderList = folders;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -18,6 +32,13 @@ class _EntryMetadataPanel extends StatelessWidget {
       ),
       child: Column(
         children: [
+          if (folderList != null) ...[
+            _EntryMetadataLine(
+              label: 'Folder',
+              value: _resolveFolderName(entry['folderId']?.toString(), folderList),
+            ),
+            const SizedBox(height: 6),
+          ],
           _EntryMetadataLine(
             label: 'Created',
             value: _entryCreatedLabel(entry),

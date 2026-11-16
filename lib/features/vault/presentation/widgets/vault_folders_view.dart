@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../../../app/theme/entry_typography.dart';
@@ -5,6 +7,8 @@ import '../../../../core/config/vault_limits.dart';
 import '../../../../domain/models/folder_tree_builder.dart';
 import '../../../../domain/models/folder_tree_node.dart';
 import '../../../../domain/models/vault_folder.dart';
+import 'vault_create_folder_dialog.dart';
+import 'vault_folder_hierarchy_sheet.dart';
 
 enum ExplorerViewMode { list, grid, tree }
 
@@ -20,7 +24,7 @@ enum FolderSortOption {
 IconData defaultIconForType(String type) {
   final normalized = type.toLowerCase();
   if (normalized.contains('note')) return Icons.description_outlined;
-  if (normalized.contains('password') || normalized.contains('login')) {
+  if (normalized.contains('password') || normalized.contains('login') || normalized.contains('credential')) {
     return Icons.lock_outline;
   }
   if (normalized.contains('card')) return Icons.credit_card_outlined;
@@ -45,9 +49,12 @@ IconData defaultIconForType(String type) {
   if (normalized.contains('bank')) return Icons.account_balance_outlined;
   if (normalized.contains('finan')) return Icons.account_balance_wallet_outlined;
   if (normalized.contains('ident')) return Icons.perm_identity_outlined;
-  if (normalized.contains('document')) return Icons.folder_outlined;
+  if (normalized.contains('document') || normalized.contains('file') || normalized.contains('pdf')) {
+    return Icons.insert_drive_file_outlined;
+  }
   if (normalized.contains('health')) return Icons.favorite_outline;
-  return Icons.shield_outlined;
+  if (normalized.contains('secure note')) return Icons.sticky_note_2_outlined;
+  return Icons.description_outlined;
 }
 
 Color defaultColorForType(String type) {
@@ -77,7 +84,90 @@ Color defaultColorForType(String type) {
   if (normalized.contains('ident')) return const Color(0xFF34D399);
   if (normalized.contains('document')) return const Color(0xFFFB923C);
   if (normalized.contains('health')) return const Color(0xFFF472B6);
-  return const Color(0xFF93C5FD);
+  return const Color(0xFFA78BFA);
+}
+
+String resolveItemType(Map<String, dynamic> item) {
+  final explicitType = item['type']?.toString().trim();
+  if (explicitType != null &&
+      explicitType.isNotEmpty &&
+      explicitType.toLowerCase() != 'item') {
+    return explicitType;
+  }
+  if (item['delta'] != null || item.containsKey('preview')) {
+    return 'Note';
+  }
+  final tags = item['tags'];
+  if (tags is List && tags.map((t) => t.toString().toLowerCase()).contains('note')) {
+    return 'Note';
+  }
+  final fields = item['fields'];
+  if (fields is List && fields.isNotEmpty) {
+    final fieldLabels = fields.map((f) => (f['label'] ?? f['name'] ?? '').toString().toLowerCase()).toList();
+    if (fieldLabels.any((l) => l.contains('card') || l.contains('cvv') || l.contains('expiry') || l.contains('holder'))) {
+      return 'Credit Card';
+    }
+    if (fieldLabels.any((l) => l.contains('password') || l.contains('username') || l.contains('login') || l.contains('email'))) {
+      return 'Password';
+    }
+  }
+  return (explicitType != null && explicitType.isNotEmpty && explicitType != 'Item') ? explicitType : 'Note';
+}
+
+int resolveItemSizeBytes(Map<String, dynamic> item) {
+  final s = item['size'] ?? item['sizeBytes'];
+  if (s is num && s > 0) return s.toInt();
+  if (item['delta'] != null) {
+    try {
+      return utf8.encode(jsonEncode(item['delta'])).length;
+    } catch (_) {}
+  }
+  if (item['preview'] != null) {
+    return utf8.encode(item['preview'].toString()).length;
+  }
+  return 0;
+}
+
+String resolveItemSizeLabel(Map<String, dynamic> item) {
+  final sizeBytes = resolveItemSizeBytes(item);
+  if (sizeBytes > 0) {
+    return VaultLimits.formatBytes(sizeBytes);
+  }
+  final sub = (item['subtitle'] ?? '').toString().trim();
+  if (sub.isNotEmpty && sub != '--') {
+    return sub;
+  }
+  return '--';
+}
+
+String resolveItemDateLabel(Map<String, dynamic> item) {
+  final raw = item['updatedAt'] ?? item['updated'] ?? item['createdAt'] ?? item['date'];
+  if (raw == null) return '';
+  final str = raw.toString().trim();
+  if (str.isEmpty || str == '--') return '';
+  if (str == 'Now' ||
+      str.toLowerCase().contains('ago') ||
+      str.toLowerCase().contains('today') ||
+      str.toLowerCase().contains('yesterday')) {
+    return str;
+  }
+  try {
+    final dt = DateTime.parse(str);
+    final local = dt.toLocal();
+    final now = DateTime.now();
+    final isToday = local.year == now.year && local.month == now.month && local.day == now.day;
+    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final ampm = local.hour >= 12 ? 'PM' : 'AM';
+    final minute = local.minute.toString().padLeft(2, '0');
+    final timeStr = '$hour:$minute $ampm';
+    if (isToday) {
+      return 'Today, $timeStr';
+    }
+    return '${months[local.month - 1]} ${local.day}, ${local.year}';
+  } catch (_) {
+    return str;
+  }
 }
 
 class VaultFoldersView extends StatefulWidget {
@@ -103,6 +193,7 @@ class VaultFoldersView extends StatefulWidget {
     required this.onUploadDocumentToFolder,
     required this.onCreateFolder,
     required this.onRenameFolder,
+    this.onUpdateFolderColor,
     required this.onMoveFolder,
     required this.onDeleteFolder,
     required this.onMoveItem,
@@ -125,6 +216,7 @@ class VaultFoldersView extends StatefulWidget {
   final void Function(String? folderId) onUploadDocumentToFolder;
   final void Function(String name, String? parentId, String? color) onCreateFolder;
   final void Function(String folderId, String newName) onRenameFolder;
+  final void Function(String folderId, String? color)? onUpdateFolderColor;
   final void Function(String folderId, String? newParentId) onMoveFolder;
   final void Function(String folderId, bool cascade) onDeleteFolder;
   final void Function(Map<String, dynamic> item, String? targetFolderId) onMoveItem;
@@ -192,6 +284,14 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     if (_currentFolderId == null) return null;
     return _effectiveFolders.cast<VaultFolder?>().firstWhere(
           (f) => f?.id == _currentFolderId,
+          orElse: () => null,
+        );
+  }
+
+  VaultFolder? _folderById(String? folderId) {
+    if (folderId == null) return null;
+    return _effectiveFolders.cast<VaultFolder?>().firstWhere(
+          (f) => f?.id == folderId,
           orElse: () => null,
         );
   }
@@ -697,6 +797,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDefault = folder.id == VaultFoldersView.defaultFolderId;
+    final folderColor = resolveFolderColor(folder);
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 2),
@@ -708,6 +809,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: () => _navigateToFolder(folder.id),
+        onLongPress: () => _showFolderActionsBottomSheet(folder),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: widget.isWide
@@ -719,7 +821,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                         children: [
                           Icon(
                             isDefault ? Icons.folder_special : Icons.folder,
-                            color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
+                            color: folderColor,
                             size: 22,
                           ),
                           const SizedBox(width: 10),
@@ -762,7 +864,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   children: [
                     Icon(
                       isDefault ? Icons.folder_special : Icons.folder,
-                      color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
+                      color: folderColor,
                       size: 24,
                     ),
                     const SizedBox(width: 12),
@@ -806,14 +908,17 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   Widget _buildItemListRow(BuildContext context, Map<String, dynamic> item) {
     final colorScheme = Theme.of(context).colorScheme;
     final title = (item['title'] ?? 'Untitled').toString();
-    final type = (item['type'] ?? 'Item').toString();
-    final sizeBytes = item['size'] ?? item['sizeBytes'];
-    final sizeLabel = (sizeBytes is num && sizeBytes > 0)
-        ? VaultLimits.formatBytes(sizeBytes.toInt())
-        : (item['subtitle'] ?? '--').toString();
+    final type = resolveItemType(item);
+    final sizeLabel = resolveItemSizeLabel(item);
+    final dateLabel = resolveItemDateLabel(item);
 
     final itemIcon = widget.iconForType?.call(type) ?? defaultIconForType(type);
     final itemColor = widget.colorForType?.call(type) ?? defaultColorForType(type);
+
+    final subtitleParts = <String>[type];
+    if (sizeLabel.isNotEmpty && sizeLabel != '--') subtitleParts.add(sizeLabel);
+    if (dateLabel.isNotEmpty) subtitleParts.add(dateLabel);
+    final subtitle = subtitleParts.join(' · ');
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 2),
@@ -835,10 +940,10 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       child: Row(
                         children: [
                           Container(
-                            width: 26,
-                            height: 26,
+                            width: 28,
+                            height: 28,
                             decoration: BoxDecoration(
-                              color: itemColor.withValues(alpha: 0.08),
+                              color: itemColor.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Icon(itemIcon, color: itemColor, size: 16),
@@ -847,7 +952,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                           Expanded(
                             child: Text(
                               title,
-                              style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -866,11 +971,17 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    IconButton(
+                      icon: Icon(Icons.info_outline, size: 18, color: colorScheme.onSurfaceVariant),
+                      tooltip: 'Item details',
+                      onPressed: () => _showItemInfoBottomSheet(item),
+                    ),
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, size: 18),
                       onSelected: (val) => _handleItemAction(item, val),
                       itemBuilder: (ctx) => [
                         const PopupMenuItem(value: 'open', child: Text('Open Details')),
+                        const PopupMenuItem(value: 'info', child: Text('Item Info')),
                         const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
                         const PopupMenuItem(value: 'move', child: Text('Move to...')),
                         const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
@@ -881,11 +992,11 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               : Row(
                   children: [
                     Container(
-                      width: 28,
-                      height: 28,
+                      width: 32,
+                      height: 32,
                       decoration: BoxDecoration(
-                        color: itemColor.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(6),
+                        color: itemColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(itemIcon, color: itemColor, size: 18),
                     ),
@@ -897,23 +1008,30 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                         children: [
                           Text(
                             title,
-                            style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            sizeLabel.isNotEmpty && sizeLabel != '--' ? '$type · $sizeLabel' : type,
+                            subtitle,
                             style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ),
                     ),
+                    IconButton(
+                      key: ValueKey('item-info-btn-${item['id'] ?? title}'),
+                      icon: Icon(Icons.info_outline, size: 18, color: colorScheme.onSurfaceVariant),
+                      tooltip: 'Item details',
+                      onPressed: () => _showItemInfoBottomSheet(item),
+                    ),
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_vert, size: 18),
                       onSelected: (val) => _handleItemAction(item, val),
                       itemBuilder: (ctx) => [
                         const PopupMenuItem(value: 'open', child: Text('Open Details')),
+                        const PopupMenuItem(value: 'info', child: Text('Item Info')),
                         const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
                         const PopupMenuItem(value: 'move', child: Text('Move to...')),
                         const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
@@ -961,6 +1079,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   Widget _buildFolderGridTile(BuildContext context, VaultFolder folder) {
     final colorScheme = Theme.of(context).colorScheme;
     final isDefault = folder.id == VaultFoldersView.defaultFolderId;
+    final folderColor = resolveFolderColor(folder);
 
     return Card(
       elevation: 1,
@@ -971,6 +1090,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () => _navigateToFolder(folder.id),
+        onLongPress: () => _showFolderActionsBottomSheet(folder),
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: Column(
@@ -996,7 +1116,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               ),
               Icon(
                 isDefault ? Icons.folder_special : Icons.folder,
-                color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
+                color: folderColor,
                 size: 48,
               ),
               const SizedBox(height: 8),
@@ -1022,7 +1142,8 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   Widget _buildItemGridTile(BuildContext context, Map<String, dynamic> item) {
     final colorScheme = Theme.of(context).colorScheme;
     final title = (item['title'] ?? 'Untitled').toString();
-    final type = (item['type'] ?? 'Item').toString();
+    final type = resolveItemType(item);
+    final sizeLabel = resolveItemSizeLabel(item);
     final itemIcon = widget.iconForType?.call(type) ?? defaultIconForType(type);
     final itemColor = widget.colorForType?.call(type) ?? defaultColorForType(type);
 
@@ -1043,12 +1164,21 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: Icon(Icons.info_outline, size: 16, color: colorScheme.onSurfaceVariant),
+                    tooltip: 'Item info',
+                    onPressed: () => _showItemInfoBottomSheet(item),
+                  ),
+                  const SizedBox(width: 4),
                   PopupMenuButton<String>(
                     padding: EdgeInsets.zero,
                     icon: const Icon(Icons.more_horiz, size: 16),
                     onSelected: (val) => _handleItemAction(item, val),
                     itemBuilder: (ctx) => const [
                       PopupMenuItem(value: 'open', child: Text('Open Details')),
+                      PopupMenuItem(value: 'info', child: Text('Item Info')),
                       PopupMenuItem(value: 'copy', child: Text('Copy to...')),
                       PopupMenuItem(value: 'move', child: Text('Move to...')),
                       PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
@@ -1060,7 +1190,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: itemColor.withValues(alpha: 0.08),
+                  color: itemColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(itemIcon, color: itemColor, size: 24),
@@ -1075,8 +1205,11 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               ),
               const SizedBox(height: 2),
               Text(
-                type,
+                sizeLabel.isNotEmpty && sizeLabel != '--' ? '$type · $sizeLabel' : type,
                 style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
               ),
             ],
           ),
@@ -1163,9 +1296,12 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     final isExpanded = folderId != null && _expandedTreeFolderIds.contains(folderId);
+    final folder = _folderById(folderId);
+    final folderColor = folder != null ? resolveFolderColor(folder) : const Color(0xFFEAB308);
 
     return InkWell(
       onTap: () => _navigateToFolder(folderId),
+      onLongPress: folder != null ? () => _showFolderActionsBottomSheet(folder) : null,
       borderRadius: BorderRadius.circular(6),
       child: Container(
         padding: EdgeInsets.only(left: 4.0 + (level * 14.0), right: 6, top: 6, bottom: 6),
@@ -1198,7 +1334,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             Icon(
               isSelected ? Icons.folder_open : Icons.folder,
               size: 18,
-              color: const Color(0xFFEAB308),
+              color: folderColor,
             ),
             const SizedBox(width: 6),
             Expanded(
@@ -1329,6 +1465,378 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     }
   }
 
+  void _showFolderActionsBottomSheet(VaultFolder folder) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDefault = folder.id == VaultFoldersView.defaultFolderId;
+    final folderColor = resolveFolderColor(folder);
+    final folderItems = FolderTreeBuilder.getItemsInFolder(
+      folderId: folder.id,
+      items: [...widget.items, ...widget.notes],
+      recursive: true,
+    );
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (bottomSheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Drag handle
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                // Folder Info Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: folderColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          isDefault ? Icons.folder_special : Icons.folder,
+                          color: folderColor,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              folder.name,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isDefault
+                                  ? 'Default folder · ${folderItems.length} items'
+                                  : 'File folder · ${folderItems.length} items',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.pop(bottomSheetContext),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+                ),
+                const SizedBox(height: 16),
+                // Horizontal Action Menus: Move, Create subfolder, Folder color, Rename, Delete
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 1. Move
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-move'),
+                        icon: Icons.drive_file_move_outlined,
+                        label: 'Move',
+                        enabled: !isDefault,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _showMoveFolderPicker(folder);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      // 2. Create subfolder
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-create-subfolder'),
+                        icon: Icons.create_new_folder_outlined,
+                        label: 'Create subfolder',
+                        enabled: true,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _showCreateSubfolderDialog(folder);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      // 3. Folder color
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-color'),
+                        icon: Icons.palette_outlined,
+                        label: 'Folder color',
+                        enabled: !isDefault,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _showColorPickerDialog(folder);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      // 4. Rename
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-rename'),
+                        icon: Icons.edit_outlined,
+                        label: 'Rename',
+                        enabled: !isDefault,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _handleFolderAction(folder, 'rename');
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      // 5. Delete
+                      _buildHorizontalActionItem(
+                        key: const ValueKey('folder-sheet-action-delete'),
+                        icon: Icons.delete_outline,
+                        label: 'Delete',
+                        color: Colors.red,
+                        enabled: !isDefault,
+                        onTap: () {
+                          Navigator.pop(bottomSheetContext);
+                          _handleFolderAction(folder, 'delete');
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHorizontalActionItem({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color? color,
+    bool enabled = true,
+  }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final itemColor = color ?? colorScheme.primary;
+    final effectiveColor = enabled ? itemColor : colorScheme.onSurfaceVariant.withValues(alpha: 0.38);
+
+    return SizedBox(
+      width: 78,
+      child: InkWell(
+        key: key,
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: effectiveColor.withValues(alpha: enabled ? 0.12 : 0.05),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  size: 22,
+                  color: effectiveColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: enabled
+                      ? (color ?? colorScheme.onSurface)
+                      : colorScheme.onSurfaceVariant.withValues(alpha: 0.38),
+                  height: 1.2,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCreateSubfolderDialog(VaultFolder folder) {
+    showCreateVaultFolderDialog(
+      context,
+      parentFolderId: folder.id,
+      parentFolderName: folder.name,
+      onCreateFolder: (name, {parentId, color}) async {
+        widget.onCreateFolder(name, parentId, color);
+        return VaultFolder(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: name,
+          parentId: parentId,
+          color: color,
+          createdAt: DateTime.now().toIso8601String(),
+          updatedAt: DateTime.now().toIso8601String(),
+        );
+      },
+    );
+  }
+
+  void _showColorPickerDialog(VaultFolder folder) {
+    var selectedHex = folder.color ?? '#0381FE';
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setStateDialog) {
+            final theme = Theme.of(dialogCtx);
+            final colorScheme = theme.colorScheme;
+            final activeColor = parseFolderHexColor(selectedHex);
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: activeColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.palette_outlined, color: activeColor, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Folder Color',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          folder.name,
+                          style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Select a color tag for this folder:',
+                    style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: kDefaultFolderColors.map((colorHex) {
+                      final dotColor = parseFolderHexColor(colorHex);
+                      final isSelected = selectedHex.toUpperCase() == colorHex.toUpperCase();
+
+                      return GestureDetector(
+                        key: ValueKey('color-swatch-$colorHex'),
+                        onTap: () {
+                          setStateDialog(() {
+                            selectedHex = colorHex;
+                          });
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: dotColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected ? colorScheme.onSurface : Colors.transparent,
+                              width: 3,
+                            ),
+                            boxShadow: [
+                              if (isSelected)
+                                BoxShadow(
+                                  color: dotColor.withValues(alpha: 0.4),
+                                  blurRadius: 6,
+                                  spreadRadius: 1,
+                                ),
+                            ],
+                          ),
+                          child: isSelected
+                              ? const Icon(Icons.check, size: 20, color: Colors.white)
+                              : null,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  key: const ValueKey('save-folder-color-button'),
+                  onPressed: () {
+                    widget.onUpdateFolderColor?.call(folder.id, selectedHex);
+                    setState(() {});
+                    Navigator.pop(dialogCtx);
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _showMoveFolderPicker(VaultFolder folder) {
     // Collect potential parent folders (excluding itself and its descendants)
     final descendants = FolderTreeBuilder.getDescendantFolderIds(folderId: folder.id, folders: widget.folders);
@@ -1374,6 +1882,8 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     switch (action) {
       case 'open':
         widget.onOpenItem(item);
+      case 'info':
+        _showItemInfoBottomSheet(item);
       case 'move':
         showDialog<void>(
           context: context,
@@ -1469,5 +1979,240 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           ),
         );
     }
+  }
+
+  void _showItemInfoBottomSheet(Map<String, dynamic> item) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final title = (item['title'] ?? 'Untitled').toString();
+    final type = resolveItemType(item);
+    final sizeLabel = resolveItemSizeLabel(item);
+    final dateLabel = resolveItemDateLabel(item);
+    final itemIcon = widget.iconForType?.call(type) ?? defaultIconForType(type);
+    final itemColor = widget.colorForType?.call(type) ?? defaultColorForType(type);
+
+    final folderId = item['folderId']?.toString();
+    final folder = _folderById(folderId);
+    final folderName = folder?.name ??
+        (folderId == null || folderId.isEmpty || folderId == VaultFoldersView.defaultFolderId
+            ? VaultFoldersView.defaultFolderName
+            : folderId);
+    final folderColor = folder != null ? resolveFolderColor(folder) : const Color(0xFFEAB308);
+
+    final tags = (item['tags'] as List<dynamic>? ?? const <dynamic>[])
+        .map((t) => t.toString().trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 38,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: itemColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(itemIcon, color: itemColor, size: 22),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              type,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: itemColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Divider(height: 1, color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      _buildInfoRow(
+                        icon: Icons.category_outlined,
+                        label: 'Item Type',
+                        value: type,
+                        color: itemColor,
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow(
+                        icon: Icons.data_usage_outlined,
+                        label: 'Size',
+                        value: sizeLabel.isNotEmpty && sizeLabel != '--' ? sizeLabel : 'Text entry',
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow(
+                        icon: Icons.calendar_today_outlined,
+                        label: 'Date',
+                        value: dateLabel.isNotEmpty ? dateLabel : 'Recent',
+                      ),
+                      const SizedBox(height: 12),
+                      _buildInfoRow(
+                        icon: Icons.folder_outlined,
+                        label: 'Folder',
+                        value: folderName,
+                        color: folderColor,
+                      ),
+                      if (tags.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.label_outline, size: 20, color: colorScheme.onSurfaceVariant),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: tags.map((tag) => Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.primary.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '#$tag',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: colorScheme.primary),
+                                  ),
+                                )).toList(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.drive_file_move_outlined, size: 18),
+                          label: const Text('Move'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            _handleItemAction(item, 'move');
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          icon: const Icon(Icons.open_in_new, size: 18),
+                          label: const Text('Open'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            widget.onOpenItem(item);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    Color? color,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: color ?? colorScheme.onSurfaceVariant),
+        const SizedBox(width: 14),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            color: colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const Spacer(),
+        Flexible(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: color ?? colorScheme.onSurface,
+            ),
+            textAlign: TextAlign.end,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
   }
 }

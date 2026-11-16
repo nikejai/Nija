@@ -35,6 +35,8 @@ import 'widgets/pwa_install_dialog.dart';
 import 'widgets/vault_page_heading.dart';
 import 'widgets/vault_surface_menu.dart';
 import 'widgets/vault_folders_view.dart';
+import '../../../application/services/automated_backup_service.dart';
+import '../../../domain/models/local_vault_snapshot.dart';
 
 part 'widgets/encrypted_import_widgets.dart';
 part 'custom_template_manager_screen.dart';
@@ -168,6 +170,8 @@ class VaultAppShell extends StatefulWidget {
     this.isExploreDemoSession = false,
     this.onExitExploreDemo,
     this.secretSharePortability,
+    this.onReadRawVaultContent,
+    this.onRestoreRawVaultContent,
   });
 
   final List<String> recoveryWords;
@@ -216,6 +220,8 @@ class VaultAppShell extends StatefulWidget {
   final bool isExploreDemoSession;
   final VoidCallback? onExitExploreDemo;
   final SecretSharePortabilityAdapter? secretSharePortability;
+  final Future<String> Function()? onReadRawVaultContent;
+  final Future<bool> Function(String content)? onRestoreRawVaultContent;
 
   @override
   State<VaultAppShell> createState() => _VaultAppShellState();
@@ -228,6 +234,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
   static const String _encryptedShareExtension = '.nijas';
   static const String _prefsKeyCloudBackupEnabled =
       'nija_pref_cloud_backup_enabled_v1';
+  static const String _prefsKeyAutomatedBackupEnabled =
+      'nija_pref_automated_backup_enabled_v1';
+  static const String _prefsKeyCloudBackupWifiOnly =
+      'nija_pref_cloud_backup_wifi_only_v1';
+  static const String _prefsKeyLocalBackupLastAt =
+      'nija_pref_local_backup_last_at_v1';
   static const String _prefsKeyCloudBackupLastAt =
       'nija_pref_cloud_backup_last_at_v1';
   static const String _prefsKeyCloudBackupRevision =
@@ -254,7 +266,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Set<String> _allItemsFilterTypes = <String>{};
   bool _allItemsFilterFavoritesOnly = false;
   String _allItemsFilterDateRange = 'any';
-  bool _cloudBackupEnabled = false;
+  bool _automatedBackupEnabled = true;
+  bool _cloudBackupWifiOnly = true;
+  int _localBackupLastAtEpochMs = 0;
+  List<LocalVaultSnapshot> _localSnapshots = <LocalVaultSnapshot>[];
+  final AutomatedBackupService _automatedBackupService =
+      AutomatedBackupService();
+  Timer? _midnightBackupTimer;
+  bool _cloudBackupEnabled = AppFeatures.isPaidBuild;
   bool _importingEncryptedSecret = false;
   String _importBusyMessage = 'Importing data...';
   int _backgroundBusyCount = 0;
@@ -395,7 +414,13 @@ class _VaultAppShellState extends State<VaultAppShell> {
       pwaInstallOfferIcon(status);
 
   void _startExploreDemoPreferences() {
-    _cloudBackupEnabled = false;
+    _automatedBackupEnabled = true;
+    _cloudBackupWifiOnly = true;
+    _cloudBackupEnabled = AppFeatures.isPaidBuild && _cloudBackupFeatureAvailable;
+    _cloudBackupLastAtEpochMs = 0;
+    _cloudBackupRevision = 0;
+    _cloudBackupVersionId = '';
+    _cloudBackupUpdatedAt = '';
     _debugInternalsUnlocked = false;
     _debugInternalsEnabled = false;
   }
@@ -459,6 +484,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   @override
   void dispose() {
     _persistDebounceTimer?.cancel();
+    _midnightBackupTimer?.cancel();
     _allItemsSearchController.dispose();
     _searchFocusNode.dispose();
     _clipboard.dispose();
@@ -782,6 +808,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           _openUploadDocumentToFolder(folderId),
       onCreateFolder: _createFolder,
       onRenameFolder: _renameFolder,
+      onUpdateFolderColor: _updateFolderColor,
       onMoveFolder: _moveFolder,
       onDeleteFolder: _deleteFolder,
       onMoveItem: _moveItemToFolder,
@@ -911,12 +938,41 @@ class _VaultAppShellState extends State<VaultAppShell> {
     _persistVaultDataUnchecked();
   }
 
+  Future<VaultFolder?> _handleCreateFolder(String name, {String? parentId, String? color}) async {
+    final clean = name.trim();
+    if (clean.isEmpty) return null;
+    late final VaultFolder createdFolder;
+    _updateState(() {
+      final updated = _folderManager.createFolder(
+        folders: _folders,
+        name: clean,
+        parentId: parentId,
+        color: color,
+      );
+      createdFolder = updated.last;
+      _folders = updated;
+    });
+    await _persistVaultData();
+    return createdFolder;
+  }
+
   void _renameFolder(String folderId, String newName) {
     _updateState(() {
       _folders = _folderManager.renameFolder(
         folders: _folders,
         folderId: folderId,
         newName: newName,
+      );
+    });
+    _persistVaultDataUnchecked();
+  }
+
+  void _updateFolderColor(String folderId, String? color) {
+    _updateState(() {
+      _folders = _folderManager.updateFolderColor(
+        folders: _folders,
+        folderId: folderId,
+        color: color,
       );
     });
     _persistVaultDataUnchecked();
@@ -1009,28 +1065,39 @@ class _VaultAppShellState extends State<VaultAppShell> {
           maxVaultBytes: _effectiveMaxVaultBytes,
           maxDocumentBytes: VaultLimits.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+          folders: _folders,
+          initialFolderId: folderId,
+          onCreateFolder: _handleCreateFolder,
         ),
       ),
     );
 
     if (created == null) return;
-    final item = Map<String, dynamic>.from(created);
-    if (folderId != null) {
-      item['folderId'] = folderId;
+    final docList = (created['documents'] as List<dynamic>?)
+        ?.whereType<Map<String, dynamic>>()
+        .toList();
+    final itemsToSave = (docList != null && docList.isNotEmpty)
+        ? docList
+        : <Map<String, dynamic>>[Map<String, dynamic>.from(created)];
+
+    for (final item in itemsToSave) {
+      if (item['folderId'] == null && folderId != null) {
+        item['folderId'] = folderId;
+      }
+      try {
+        if (!await _isPendingDocumentStored(item)) return;
+        if (!await _arePendingAttachmentsStored(item)) return;
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save document.')),
+        );
+        return;
+      }
+      _updateState(() {
+        _items.insert(0, item);
+      });
     }
-    try {
-      if (!await _isPendingDocumentStored(item)) return;
-      if (!await _arePendingAttachmentsStored(item)) return;
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to save document.')),
-      );
-      return;
-    }
-    _updateState(() {
-      _items.insert(0, item);
-    });
     await _persistVaultData();
   }
 
@@ -1360,6 +1427,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
       MaterialPageRoute(
         builder: (_) => _DocumentDetailScreen(
           item: accessedItem,
+          folders: _folders,
+          onCreateFolder: _handleCreateFolder,
           onReadDocument: isDemoItem
               ? ({required sectionName, onProgress}) async =>
                   VaultHomeDemoData.demoPdfBytes
@@ -1929,6 +1998,16 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
   Future<void> _handleCloudBackupLockedTap() async {
     if (!mounted) return;
+    if (widget.isExploreDemoSession) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cloud backup is disabled in demo mode. Create or unlock a vault to use cloud backup.',
+          ),
+        ),
+      );
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Cloud backup is currently unavailable.')),
     );
@@ -2053,6 +2132,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
       MaterialPageRoute(
         builder: (_) => _ItemDetailScreen(
           item: accessedItem,
+          folders: _folders,
+          onCreateFolder: _handleCreateFolder,
           readOnly: _isExploreDemoReadOnly,
           customTypeDefinitions: _customTypeDefinitions,
           currentVaultSizeBytes: _effectiveVaultSizeBytes,
@@ -2440,6 +2521,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
           onShareMenu: _isExploreDemoReadOnly
               ? null
               : () => _showNoteQuickActions(context, accessedNote),
+          folders: _folders,
+          onCreateFolder: _handleCreateFolder,
         ),
       ),
     );
@@ -2516,9 +2599,18 @@ class _VaultAppShellState extends State<VaultAppShell> {
           maxVaultBytes: _effectiveMaxVaultBytes,
           maxDocumentBytes: VaultLimits.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+          folders: _folders,
+          initialFolderId: initialFolderId,
+          onCreateFolder: _handleCreateFolder,
           onCreateNote: () async {
             return Navigator.of(context).push<Map<String, dynamic>>(
-              MaterialPageRoute(builder: (_) => const NoteEditorScreen()),
+              MaterialPageRoute(
+                builder: (_) => NoteEditorScreen(
+                  folders: _folders,
+                  initialFolderId: initialFolderId,
+                  onCreateFolder: _handleCreateFolder,
+                ),
+              ),
             );
           },
           onCreateDocument: () async {
@@ -2529,6 +2621,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   maxVaultBytes: _effectiveMaxVaultBytes,
                   maxDocumentBytes: VaultLimits.maxDocumentBytes,
                   onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+                  folders: _folders,
+                  initialFolderId: initialFolderId,
+                  onCreateFolder: _handleCreateFolder,
                 ),
               ),
             );
@@ -2541,7 +2636,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final kind = created['kind']?.toString() ?? 'item';
     final entry = created['entry'];
     if (entry is! Map<String, dynamic>) return;
-    if (initialFolderId != null) {
+    if (entry['folderId'] == null && initialFolderId != null) {
       entry['folderId'] = initialFolderId;
     }
     if (kind == 'note') {
@@ -2549,20 +2644,31 @@ class _VaultAppShellState extends State<VaultAppShell> {
       await _persistVaultData();
       return;
     }
-    final item = Map<String, dynamic>.from(entry);
-    try {
-      if (!await _isPendingDocumentStored(item)) return;
-      if (!await _arePendingAttachmentsStored(item)) return;
-    } catch (_) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to store document. Please retry.'),
-        ),
-      );
-      return;
+    final docList = (entry['documents'] as List<dynamic>?)
+        ?.whereType<Map<String, dynamic>>()
+        .toList();
+    final itemsToSave = (docList != null && docList.isNotEmpty)
+        ? docList
+        : <Map<String, dynamic>>[Map<String, dynamic>.from(entry)];
+
+    for (final item in itemsToSave) {
+      if (item['folderId'] == null && initialFolderId != null) {
+        item['folderId'] = initialFolderId;
+      }
+      try {
+        if (!await _isPendingDocumentStored(item)) return;
+        if (!await _arePendingAttachmentsStored(item)) return;
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to store document. Please retry.'),
+          ),
+        );
+        return;
+      }
+      setState(() => _items.insert(0, item));
     }
-    setState(() => _items.insert(0, item));
     await _persistVaultData();
   }
 
@@ -2784,15 +2890,24 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _restoreCloudBackupPreference() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final enabled = prefs.getBool(_prefsKeyCloudBackupEnabled) ?? false;
+      final automatedEnabled =
+          prefs.getBool(_prefsKeyAutomatedBackupEnabled) ?? true;
+      final wifiOnly =
+          prefs.getBool(_prefsKeyCloudBackupWifiOnly) ?? true;
+      final localLastAt = prefs.getInt(_prefsKeyLocalBackupLastAt) ?? 0;
+      final enabled = prefs.getBool(_prefsKeyCloudBackupEnabled) ?? AppFeatures.isPaidBuild;
       final lastAt = prefs.getInt(_prefsKeyCloudBackupLastAt) ?? 0;
       final revision = prefs.getInt(_prefsKeyCloudBackupRevision) ?? 0;
       final versionId = prefs.getString(_prefsKeyCloudBackupVersionId) ?? '';
       final updatedAt = prefs.getString(_prefsKeyCloudBackupUpdatedAt) ?? '';
+      final hasVerifiedBackup = revision > 0 || versionId.trim().isNotEmpty;
       if (!mounted) return;
       setState(() {
+        _automatedBackupEnabled = automatedEnabled;
+        _cloudBackupWifiOnly = wifiOnly;
+        _localBackupLastAtEpochMs = localLastAt;
         _cloudBackupEnabled = enabled && _cloudBackupFeatureAvailable;
-        _cloudBackupLastAtEpochMs = lastAt;
+        _cloudBackupLastAtEpochMs = hasVerifiedBackup ? lastAt : 0;
         _cloudBackupRevision = revision;
         _cloudBackupVersionId = versionId;
         _cloudBackupUpdatedAt = updatedAt;
@@ -2800,8 +2915,369 @@ class _VaultAppShellState extends State<VaultAppShell> {
       if (enabled && _cloudBackupFeatureAvailable) {
         unawaited(_refreshCloudBackupSummary());
       }
+      unawaited(_refreshLocalSnapshots());
+      if (_automatedBackupEnabled) {
+        _startMidnightBackupSchedule();
+        unawaited(_checkAndRunDueAutomatedBackup());
+      }
     } catch (_) {
       // Ignore preference read failures.
+    }
+  }
+
+  bool get _isTestEnvironment =>
+      WidgetsBinding.instance.runtimeType.toString().contains('Test');
+
+  void _startMidnightBackupSchedule() {
+    _midnightBackupTimer?.cancel();
+    if (_isTestEnvironment) {
+      return;
+    }
+    _midnightBackupTimer = _automatedBackupService.scheduleMidnightBackup(
+      onMidnightBackup: () async {
+        await _runAutomatedBackup();
+      },
+    );
+  }
+
+  Future<void> _checkAndRunDueAutomatedBackup() async {
+    if (_isTestEnvironment) {
+      return;
+    }
+    if (!_automatedBackupEnabled) return;
+    if (_localBackupLastAtEpochMs <= 0) return;
+    final lastBackup =
+        DateTime.fromMillisecondsSinceEpoch(_localBackupLastAtEpochMs);
+    if (AutomatedBackupService.isBackupDue(lastBackup)) {
+      await _runAutomatedBackup();
+    }
+  }
+
+  Future<void> _refreshLocalSnapshots() async {
+    final vaultId = widget.activeVaultVersionId.isNotEmpty
+        ? widget.activeVaultVersionId
+        : 'default_vault';
+    final snapshots = await _automatedBackupService.listLocalSnapshots(vaultId);
+    if (!mounted) return;
+    setState(() => _localSnapshots = snapshots);
+  }
+
+  Future<void> _setAutomatedBackupEnabled(bool enabled) async {
+    setState(() => _automatedBackupEnabled = enabled);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsKeyAutomatedBackupEnabled, enabled);
+    } catch (_) {}
+    if (enabled) {
+      _startMidnightBackupSchedule();
+      unawaited(_checkAndRunDueAutomatedBackup());
+    } else {
+      _midnightBackupTimer?.cancel();
+      _midnightBackupTimer = null;
+    }
+  }
+
+  Future<void> _setCloudBackupWifiOnly(bool wifiOnly) async {
+    setState(() => _cloudBackupWifiOnly = wifiOnly);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsKeyCloudBackupWifiOnly, wifiOnly);
+    } catch (_) {}
+  }
+
+  Future<void> _runAutomatedBackup({bool force = false}) async {
+    if (!force && !_automatedBackupEnabled) return;
+    final vaultId = widget.activeVaultVersionId.isNotEmpty
+        ? widget.activeVaultVersionId
+        : 'default_vault';
+
+    // 1. Local backup: keep 2 rolling snapshots daily at midnight
+    try {
+      String rawContent;
+      if (widget.onReadRawVaultContent != null) {
+        rawContent = await widget.onReadRawVaultContent!();
+      } else {
+        rawContent = jsonEncode({
+          'vaultId': vaultId,
+          'vaultName': _activeVaultName,
+          'revision': widget.activeVaultRevision,
+          'items': _items,
+          'notes': _notes,
+          'folders': _folders.map((VaultFolder f) => f.toJson()).toList(),
+        });
+      }
+
+      if (rawContent.isNotEmpty) {
+        final snapshot = await _automatedBackupService.createLocalSnapshot(
+          vaultId: vaultId,
+          rawVaultContent: rawContent,
+          timestamp: DateTime.now(),
+        );
+        if (snapshot != null) {
+          final nowEpoch = DateTime.now().millisecondsSinceEpoch;
+          _localBackupLastAtEpochMs = nowEpoch;
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setInt(_prefsKeyLocalBackupLastAt, nowEpoch);
+          } catch (_) {}
+          await _refreshLocalSnapshots();
+        }
+      }
+    } catch (e) {
+      debugPrint('Local automated snapshot error: $e');
+    }
+
+    // 2. Cloud / paid backup: single backup file daily at midnight
+    if (_cloudBackupFeatureAvailable && _cloudBackupEnabled) {
+      try {
+        await widget.onBackupToCloud();
+        final cloudBackup = await _readCloudBackupSummary();
+        if (cloudBackup != null) {
+          await _applyCloudBackupSummary(
+            cloudBackup,
+            fallbackLastAt: DateTime.now(),
+          );
+        }
+      } catch (e) {
+        debugPrint('Cloud automated backup error: $e');
+      }
+    }
+  }
+
+  Future<void> _handleBackupNow() async {
+    if (!_cloudBackupFeatureAvailable) return;
+    if (_isBusyOverlayVisible) return;
+    if (widget.isExploreDemoSession) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cloud backup is disabled in demo mode. Create or unlock a vault to use cloud backup.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!await _verifyWebTransferReady()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cloud backup unavailable.')),
+      );
+      return;
+    }
+    await _runWithBusy('Cloud backup in progress...', () async {
+      await widget.onBackupToCloud();
+      if (!mounted) return;
+      await _refreshCloudBackupAccountLabel();
+      if (!mounted) return;
+      final cloudBackup = await _readCloudBackupSummary();
+      if (!mounted) return;
+      if (cloudBackup != null) {
+        await _applyCloudBackupSummary(
+          cloudBackup,
+          fallbackLastAt: DateTime.now(),
+        );
+        return;
+      }
+      if (widget.onReadCloudBackupSummary == null &&
+          _cloudBackupAccountLabel != 'Not connected') {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final revision = widget.activeVaultRevision;
+        final versionId = widget.activeVaultVersionId.trim();
+        final updatedAt = widget.activeVaultUpdatedAt.trim();
+        await _persistCloudBackupDisplayState(
+          lastAtEpochMs: now,
+          revision: revision,
+          versionId: versionId,
+          updatedAt: updatedAt,
+        );
+      }
+    });
+  }
+
+  String _localSnapshotsSummary() {
+    if (_localSnapshots.isEmpty) {
+      return '2 rolling snapshots · Kept locally';
+    }
+    final latest = _localSnapshots.first;
+    final stamp =
+        '${latest.timestamp.year}-${latest.timestamp.month.toString().padLeft(2, '0')}-${latest.timestamp.day.toString().padLeft(2, '0')} ${latest.timestamp.hour.toString().padLeft(2, '0')}:${latest.timestamp.minute.toString().padLeft(2, '0')}';
+    return '${_localSnapshots.length}/2 snapshots · Last: $stamp';
+  }
+
+  Future<void> _showLocalSnapshotsDialog(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final colorScheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.save_outlined, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              const Text('Local Snapshots'),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Nija keeps the 2 latest daily rolling snapshots locally on this device.',
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (_localSnapshots.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: Text(
+                        'No local snapshots yet.\nNext snapshot scheduled at midnight.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: _localSnapshots.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (ctx, index) {
+                        final snapshot = _localSnapshots[index];
+                        final dateStr =
+                            '${snapshot.timestamp.year}-${snapshot.timestamp.month.toString().padLeft(2, '0')}-${snapshot.timestamp.day.toString().padLeft(2, '0')} ${snapshot.timestamp.hour.toString().padLeft(2, '0')}:${snapshot.timestamp.minute.toString().padLeft(2, '0')}';
+                        final sizeStr =
+                            VaultLimits.formatBytes(snapshot.sizeBytes);
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: CircleAvatar(
+                            backgroundColor: colorScheme.primaryContainer,
+                            child: Text(
+                              '${index + 1}',
+                              style: TextStyle(
+                                color: colorScheme.onPrimaryContainer,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            index == 0
+                                ? 'Latest Snapshot ($dateStr)'
+                                : 'Previous Snapshot ($dateStr)',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                            ),
+                          ),
+                          subtitle: Text('Size: $sizeStr · Local snapshot'),
+                          trailing: TextButton(
+                            child: const Text('Restore'),
+                            onPressed: () async {
+                              Navigator.of(dialogContext).pop();
+                              await _confirmRestoreSnapshot(snapshot);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmRestoreSnapshot(LocalVaultSnapshot snapshot) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Restore Snapshot?'),
+        content: Text(
+          'Restoring this snapshot will replace current changes with data from '
+          '${snapshot.timestamp.toLocal()}. Are you sure?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Restore Snapshot'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final content =
+          await _automatedBackupService.readSnapshotContent(snapshot.filePath);
+      if (content != null && widget.onRestoreRawVaultContent != null) {
+        final success = await widget.onRestoreRawVaultContent!(content);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                success
+                    ? 'Snapshot restored successfully.'
+                    : 'Failed to restore snapshot.',
+              ),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _showRestoreOptionsDialog(BuildContext context) async {
+    if (_localSnapshots.isNotEmpty && _cloudRestoreFeatureAvailable) {
+      await showModalBottomSheet<void>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.save_outlined),
+                title: const Text('Restore from local snapshot'),
+                subtitle:
+                    Text('${_localSnapshots.length} rolling snapshots available'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showLocalSnapshotsDialog(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.cloud_download_outlined),
+                title: const Text('Restore from Google Drive'),
+                subtitle: const Text('Download latest cloud backup'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  widget.onRestoreFromCloud();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    } else if (_localSnapshots.isNotEmpty) {
+      await _showLocalSnapshotsDialog(context);
+    } else {
+      await widget.onRestoreFromCloud();
     }
   }
 
@@ -2901,40 +3377,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
   }
 
-  Future<void> _handleCloudBackupNow() async {
-    if (!_cloudBackupFeatureAvailable) return;
-    if (_isBusyOverlayVisible) return;
-    if (!await _verifyWebTransferReady()) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cloud backup unavailable.')),
-      );
-      return;
-    }
-    await _runWithBusy('Cloud backup in progress...', () async {
-      await widget.onBackupToCloud();
-      if (!mounted) return;
-      final cloudBackup = await _readCloudBackupSummary();
-      if (!mounted) return;
-      if (cloudBackup != null) {
-        await _applyCloudBackupSummary(
-          cloudBackup,
-          fallbackLastAt: DateTime.now(),
-        );
-        return;
-      }
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final revision = widget.activeVaultRevision;
-      final versionId = widget.activeVaultVersionId.trim();
-      final updatedAt = widget.activeVaultUpdatedAt.trim();
-      await _persistCloudBackupDisplayState(
-        lastAtEpochMs: now,
-        revision: revision,
-        versionId: versionId,
-        updatedAt: updatedAt,
-      );
-    });
-  }
 
   Future<void> _refreshCloudBackupAccountLabel() async {
     if (!_cloudRestoreFeatureAvailable) return;
@@ -3097,7 +3539,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
         _cloudBackupLastAtEpochMs <= 0) {
       return 'Checking cloud backup...';
     }
-    if (_cloudBackupLastAtEpochMs <= 0) return 'Never';
+    if (_cloudBackupLastAtEpochMs <= 0 ||
+        _cloudBackupAccountLabel == 'Not connected') {
+      return 'Never';
+    }
     return _formatLocalDateTime(
       DateTime.fromMillisecondsSinceEpoch(_cloudBackupLastAtEpochMs),
     );
@@ -4796,6 +5241,12 @@ class _VaultDesktopHeader extends StatelessWidget {
         ),
         child: Row(
           children: [
+            Image.asset(
+              'assets/branding/nija_mark.png',
+              width: 32,
+              height: 32,
+            ),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

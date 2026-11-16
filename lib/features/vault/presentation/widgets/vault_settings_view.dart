@@ -22,7 +22,10 @@ extension _VaultSettingsTab on _VaultAppShellState {
     final vaultLimitBytes = _effectiveMaxVaultBytes;
     final vaultUsageLabel =
         '${VaultLimits.formatBytes(effectiveVaultSizeBytes)} of ${VaultLimits.formatBytes(vaultLimitBytes)}';
-    final backupSubtitle = _cloudBackupFeatureAvailable
+    final backupSubtitle = widget.isExploreDemoSession &&
+            !_cloudBackupFeatureAvailable
+        ? 'Disabled in demo session'
+        : _cloudBackupFeatureAvailable
         ? (_cloudBackupEnabled
               ? 'Automatic cloud backup is enabled'
               : 'Backup your data locally')
@@ -45,6 +48,9 @@ extension _VaultSettingsTab on _VaultAppShellState {
             _cloudBackupRevision <= 0 &&
             _cloudBackupVersionId.trim().isEmpty
         ? 'Checking'
+        : _cloudBackupAccountLabel == 'Not connected' ||
+            _cloudBackupLastAtEpochMs <= 0
+        ? 'None'
         : backedUpVaultVersionLabel;
     final theme = Theme.of(context);
 
@@ -86,7 +92,9 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         subtitle: currentVaultUpdatedLabel == 'Unknown'
                             ? 'Saved vault metadata'
                             : 'Updated $currentVaultUpdatedLabel',
-                        detail: currentVaultVersionLabel,
+                        value: currentVaultVersionLabel == 'Unknown'
+                            ? null
+                            : currentVaultVersionLabel,
                       ),
                     ],
                   ),
@@ -150,6 +158,37 @@ extension _VaultSettingsTab on _VaultAppShellState {
                     ],
                   ),
                   _SettingsSection(
+                    title: 'Backup',
+                    children: [
+                      _SettingsRow(
+                        key: const ValueKey(
+                          'settings-automated-backup-master-switch',
+                        ),
+                        icon: Icons.schedule_outlined,
+                        title: 'Automated backups',
+                        subtitle: 'Daily automated backup at midnight',
+                        trailing: Switch(
+                          key: const ValueKey(
+                            'settings-automated-backup-switch',
+                          ),
+                          value: _automatedBackupEnabled,
+                          onChanged: _setAutomatedBackupEnabled,
+                        ),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-local-backup-row'),
+                        icon: Icons.save_outlined,
+                        title: 'Local backup',
+                        subtitle: '2 rolling snapshots · Free version',
+                        detail: _localSnapshotsSummary(),
+                        value: _localSnapshots.isEmpty
+                            ? '0/2'
+                            : '${_localSnapshots.length}/2',
+                        onTap: () => _showLocalSnapshotsDialog(context),
+                      ),
+                    ],
+                  ),
+                  _SettingsSection(
                     title: 'Cloud Backup',
                     children: [
                       _SettingsRow(
@@ -177,6 +216,21 @@ extension _VaultSettingsTab on _VaultAppShellState {
                       if (_cloudBackupFeatureAvailable &&
                           _cloudBackupEnabled) ...[
                         _SettingsRow(
+                          key: const ValueKey(
+                            'settings-cloud-backup-wifi-only-switch',
+                          ),
+                          icon: Icons.wifi_outlined,
+                          title: 'Back up over Wi-Fi only',
+                          subtitle: 'Avoid mobile data usage',
+                          trailing: Switch(
+                            key: const ValueKey(
+                              'settings-cloud-backup-wifi-switch',
+                            ),
+                            value: _cloudBackupWifiOnly,
+                            onChanged: _setCloudBackupWifiOnly,
+                          ),
+                        ),
+                        _SettingsRow(
                           key: const ValueKey('settings-cloud-backup-last-at'),
                           icon: Icons.schedule_outlined,
                           title: 'Last backup',
@@ -190,10 +244,21 @@ extension _VaultSettingsTab on _VaultAppShellState {
                               _cloudBackupSummaryRefreshInProgress &&
                                   _cloudBackupUpdatedAt.trim().isEmpty
                               ? 'Vault updated: Checking cloud backup...'
-                              : _cloudBackupUpdatedAt.trim().isEmpty
-                              ? 'Vault updated: Unknown'
+                              : _cloudBackupAccountLabel == 'Not connected' ||
+                                  _cloudBackupLastAtEpochMs <= 0 ||
+                                  _cloudBackupUpdatedAt.trim().isEmpty
+                              ? 'Never backed up'
                               : 'Vault updated: ${_formatVaultIsoTimestamp(_cloudBackupUpdatedAt)}',
-                          detail: backedUpVaultVersionDisplay,
+                          value: _cloudBackupSummaryRefreshInProgress &&
+                                  _cloudBackupRevision <= 0 &&
+                                  _cloudBackupVersionId.trim().isEmpty
+                              ? 'Checking'
+                              : (_cloudBackupAccountLabel == 'Not connected' ||
+                                      _cloudBackupLastAtEpochMs <= 0 ||
+                                      backedUpVaultVersionDisplay == 'None' ||
+                                      backedUpVaultVersionDisplay == 'Unknown')
+                              ? null
+                              : backedUpVaultVersionDisplay,
                         ),
                       ],
                       if (_cloudRestoreFeatureAvailable ||
@@ -206,8 +271,8 @@ extension _VaultSettingsTab on _VaultAppShellState {
                                 key: const ValueKey(
                                   'settings-cloud-backup-now',
                                 ),
-                                onPressed: _handleCloudBackupNow,
-                                icon: Icon(_cloudBackupIcon()),
+                                onPressed: _handleBackupNow,
+                                icon: const Icon(Icons.backup_outlined),
                                 label: const Text('Backup now'),
                               ),
                             if (_cloudRestoreFeatureAvailable)
@@ -215,7 +280,8 @@ extension _VaultSettingsTab on _VaultAppShellState {
                                 key: const ValueKey(
                                   'settings-cloud-restore-now',
                                 ),
-                                onPressed: widget.onRestoreFromCloud,
+                                onPressed: () =>
+                                    _showRestoreOptionsDialog(context),
                                 icon: const Icon(Icons.restore_outlined),
                                 label: const Text('Restore'),
                               ),
@@ -230,10 +296,7 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         key: const ValueKey('settings-vault-storage-row'),
                         icon: Icons.storage_outlined,
                         title: 'Vault storage',
-                        subtitle: 'Local device storage is unlimited',
-                        detail:
-                            'Optional cloud backup allocation: $vaultUsageLabel. Local-first vault storage is bounded only by your device capacity.',
-                        value: vaultUsageLabel,
+                        subtitle: vaultUsageLabel,
                       ),
                     ],
                   ),

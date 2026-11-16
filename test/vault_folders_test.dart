@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/application/services/vault_folder_manager.dart';
 import 'package:nija/domain/models/folder_tree_builder.dart';
@@ -8,6 +10,9 @@ import 'package:nija/domain/models/vault_entry_data.dart';
 import 'package:nija/domain/models/vault_folder.dart';
 import 'package:nija/domain/models/vault_payload.dart';
 import 'package:nija/features/vault/application/vault_home_demo_data.dart';
+import 'package:nija/features/vault/presentation/add_vault_item_screen.dart';
+import 'package:nija/features/vault/presentation/document_upload_screen.dart';
+import 'package:nija/features/vault/presentation/note_editor_screen.dart';
 import 'package:nija/features/vault/presentation/widgets/vault_folders_view.dart';
 
 void main() {
@@ -310,6 +315,24 @@ void main() {
       expect(renamed.first.name, 'Banking & Taxes');
     });
 
+    test('updates folder color', () {
+      final folder = VaultFolder(
+        id: 'f1',
+        name: 'Work',
+        color: '#0381FE',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      final updated = manager.updateFolderColor(
+        folders: [folder],
+        folderId: 'f1',
+        color: '#1FA968',
+      );
+
+      expect(updated.first.color, '#1FA968');
+    });
+
     test('moves folder and blocks circular move', () {
       final f1 = VaultFolder(
         id: 'f1',
@@ -432,6 +455,7 @@ void main() {
       void Function(String? folderId)? onUploadDocumentToFolder,
       void Function(String name, String? parentId, String? color)? onCreateFolder,
       void Function(String id, String newName)? onRenameFolder,
+      void Function(String id, String? color)? onUpdateFolderColor,
       void Function(String id, bool cascade)? onDeleteFolder,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onMoveItem,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onCopyItem,
@@ -457,6 +481,7 @@ void main() {
                   onUploadDocumentToFolder: uploadCb,
                   onCreateFolder: createFolderCb,
                   onRenameFolder: onRenameFolder ?? (_, _) {},
+                  onUpdateFolderColor: onUpdateFolderColor,
                   onMoveFolder: (_, _) {},
                   onDeleteFolder: onDeleteFolder ?? (_, _) {},
                   onMoveItem: onMoveItem ?? (_, _) {},
@@ -812,6 +837,123 @@ void main() {
       expect(movedItem?['id'], 'item-custom-1');
       expect(targetFolder, isNull);
     });
+
+    testWidgets('long press folder on main view shows bottom sheet with horizontal menus: move, create subfolder, folder color, rename, delete', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Work',
+        color: '#0381FE',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      String? updatedColor;
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        onUpdateFolderColor: (id, color) => updatedColor = color,
+      ));
+      await tester.pumpAndSettle();
+
+      // Long press Work folder in list view
+      await tester.longPress(find.text('Work'));
+      await tester.pumpAndSettle();
+
+      // Horizontal menus are displayed in bottom sheet
+      expect(find.byKey(const ValueKey('folder-sheet-action-move')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-sheet-action-create-subfolder')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-sheet-action-color')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-sheet-action-rename')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-sheet-action-delete')), findsOneWidget);
+
+      // Tap Folder color action
+      await tester.tap(find.byKey(const ValueKey('folder-sheet-action-color')));
+      await tester.pumpAndSettle();
+
+      // Color picker dialog appears
+      expect(find.text('Folder Color'), findsOneWidget);
+      expect(find.byKey(const ValueKey('color-swatch-#1FA968')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('color-swatch-#1FA968')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('save-folder-color-button')));
+      await tester.pumpAndSettle();
+
+      expect(updatedColor, '#1FA968');
+
+      // Long press again to test rename action
+      await tester.longPress(find.text('Work'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('folder-sheet-action-rename')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rename Folder'), findsOneWidget);
+    });
+
+    testWidgets('item row differentiates item type (Note vs Card) and (i) icon shows details sheet', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final noteItem = {
+        'id': 'note-hello',
+        'title': 'Hello',
+        'delta': [
+          {'insert': 'hello world\n'}
+        ],
+        'preview': 'hello world',
+        'updatedAt': '2026-11-16T10:00:00Z',
+      };
+      final cardItem = {
+        'id': 'card-chase',
+        'title': 'Chase Sapphire',
+        'type': 'Credit Card',
+        'size': 1024,
+        'updatedAt': '2026-11-16T10:00:00Z',
+      };
+
+      await tester.pumpWidget(buildTestFoldersView(
+        items: [cardItem],
+        notes: [noteItem],
+      ));
+      await tester.pumpAndSettle();
+
+      // Open Default folder where unassigned items live
+      await tester.tap(find.text('Default'));
+      await tester.pumpAndSettle();
+
+      // Note item is differentiated as Note
+      expect(find.text('Hello'), findsOneWidget);
+      expect(find.textContaining('Note'), findsWidgets);
+
+      // Card item is differentiated as Credit Card
+      expect(find.text('Chase Sapphire'), findsOneWidget);
+      expect(find.textContaining('Credit Card'), findsWidgets);
+
+      // Tap (i) info button on Chase Sapphire
+      await tester.tap(find.byKey(const ValueKey('item-info-btn-card-chase')));
+      await tester.pumpAndSettle();
+
+      // Bottom sheet displays item details
+      expect(find.text('Chase Sapphire'), findsWidgets);
+      expect(find.text('Item Type'), findsOneWidget);
+      expect(find.text('Credit Card'), findsWidgets);
+      expect(find.text('Size'), findsOneWidget);
+      expect(find.text('1.00 KB'), findsOneWidget);
+      expect(find.text('Date'), findsOneWidget);
+      expect(find.text('Folder'), findsOneWidget);
+      expect(find.text('Default'), findsWidgets);
+    });
   });
 
   group('Demo PDF and Attachments', () {
@@ -860,6 +1002,628 @@ void main() {
           expect(att['__documentBytes__'], equals(VaultHomeDemoData.demoPdfBytes));
         }
       }
+    });
+  });
+
+  group('Item Folder Integration & Selection', () {
+    final testFolders = [
+      VaultFolder(
+        id: 'work',
+        name: 'Work',
+        createdAt: '2026-11-15T00:00:00Z',
+        updatedAt: '2026-11-15T00:00:00Z',
+      ),
+      VaultFolder(
+        id: 'personal',
+        name: 'Personal',
+        createdAt: '2026-11-15T00:00:00Z',
+        updatedAt: '2026-11-15T00:00:00Z',
+      ),
+    ];
+
+    testWidgets('AddVaultItemScreen defaults folder selection to default and saves folderId', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedItem;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedItem = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => AddVaultItemScreen(
+                          fixedType: 'Login',
+                          folders: testFolders,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('item-folder-selector')), findsOneWidget);
+      expect(find.text('Default'), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Title'), 'GitHub');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['title'], 'GitHub');
+      expect(savedItem!['folderId'], 'default');
+    });
+
+    testWidgets('AddVaultItemScreen pre-selects initialFolderId and allows changing folder', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedItem;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedItem = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => AddVaultItemScreen(
+                          fixedType: 'Login',
+                          folders: testFolders,
+                          initialFolderId: 'work',
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Work'), findsOneWidget);
+
+      // Change folder to Personal
+      await tester.tap(find.byKey(const ValueKey('item-folder-selector')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Personal').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.widgetWithText(TextField, 'Title'), 'Work Email');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['title'], 'Work Email');
+      expect(savedItem!['folderId'], 'personal');
+    });
+
+    testWidgets('AddVaultItemScreen editing preserves existing folder and defaults legacy item to default', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedItem;
+
+      final existingItem = {
+        'id': 'item-101',
+        'type': 'Login',
+        'title': 'AWS Console',
+        'folderId': 'work',
+        'fields': [
+          {'label': 'Username or email', 'value': 'admin@example.com', 'sensitive': false},
+        ],
+      };
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedItem = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => AddVaultItemScreen(
+                          initialItem: existingItem,
+                          folders: testFolders,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      // Pre-selected to 'work'
+      expect(find.text('Work'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['id'], 'item-101');
+      expect(savedItem!['folderId'], 'work');
+    });
+
+    test('FolderTreeBuilder categorizes legacy items without folderId under default folder', () {
+      final legacyItem = {'id': 'i1', 'title': 'Legacy Item'};
+      final explicitDefaultItem = {'id': 'i2', 'title': 'Default Item', 'folderId': 'default'};
+      final workItem = {'id': 'i3', 'title': 'Work Item', 'folderId': 'work'};
+
+      final allItems = [legacyItem, explicitDefaultItem, workItem];
+
+      final defaultItems = FolderTreeBuilder.getItemsInFolder(
+        folderId: 'default',
+        items: allItems,
+      );
+      expect(defaultItems.map((i) => i['id']), containsAll(['i1', 'i2']));
+      expect(defaultItems.map((i) => i['id']), isNot(contains('i3')));
+
+      final workItems = FolderTreeBuilder.getItemsInFolder(
+        folderId: 'work',
+        items: allItems,
+      );
+      expect(workItems.map((i) => i['id']), equals(['i3']));
+    });
+
+    testWidgets('NoteEditorScreen allows folder selection and saves folderId', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedNote;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            FlutterQuillLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('en')],
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedNote = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => NoteEditorScreen(
+                          folders: testFolders,
+                          initialFolderId: 'work',
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open Note'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Note'));
+      await tester.pumpAndSettle();
+
+      // Tap title header button to open animated drawer
+      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
+      expect(find.text('Work'), findsWidgets);
+
+      await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'Meeting notes');
+      await tester.pumpAndSettle();
+
+      // Change folder to Personal
+      await tester.tap(find.byKey(const ValueKey('note-folder-selector')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Personal').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedNote, isNotNull);
+      expect(savedNote!['title'], 'Meeting notes');
+      expect(savedNote!['folderId'], 'personal');
+    });
+
+    testWidgets('NoteViewScreen displays folder badge in AppBar', (tester) async {
+      final noteWithFolder = {
+        'id': 'note-1',
+        'title': 'Project Roadmap',
+        'preview': 'Q1 roadmap',
+        'folderId': 'work',
+      };
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            FlutterQuillLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('en')],
+          home: NoteViewScreen(
+            note: noteWithFolder,
+            folders: testFolders,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Project Roadmap'), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
+    });
+
+    testWidgets('DocumentUploadScreen has folder selector with regular styling', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DocumentUploadScreen(
+            currentVaultSizeBytes: 0,
+            maxVaultBytes: 100 * 1024 * 1024,
+            folders: testFolders,
+            initialFolderId: 'work',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('document-folder-selector')), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
+      expect(find.text('Choose documents'), findsOneWidget);
+      expect(find.textContaining('per document'), findsOneWidget);
+    });
+
+    testWidgets('AddVaultItemScreen allows creating new folder inline via [+] button without dropping operation', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedItem;
+      final createdFolders = <VaultFolder>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedItem = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => AddVaultItemScreen(
+                          fixedType: 'Login',
+                          folders: testFolders,
+                          onCreateFolder: (name, {parentId, color}) async {
+                            final folder = VaultFolder(
+                              id: 'folder-finances',
+                              name: name,
+                              createdAt: '2026-11-16T12:00:00Z',
+                              updatedAt: '2026-11-16T12:00:00Z',
+                            );
+                            createdFolders.add(folder);
+                            return folder;
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      // Enter Title
+      await tester.enterText(find.widgetWithText(TextField, 'Title'), 'My Bank Login');
+      await tester.pumpAndSettle();
+
+      // Tap [+] create folder button next to folder dropdown
+      expect(find.byKey(const ValueKey('item-create-folder-button')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('item-create-folder-button')));
+      await tester.pumpAndSettle();
+
+      // Folder create dialog appears
+      expect(find.text('New Folder'), findsOneWidget);
+      expect(find.byKey(const ValueKey('create-folder-name-input')), findsOneWidget);
+
+      await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Finances');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+      await tester.pumpAndSettle();
+
+      // Dialog closed, folder was created via callback
+      expect(createdFolders.length, 1);
+      expect(createdFolders.first.name, 'Finances');
+
+      // The dropdown now automatically displays 'Finances' as selected!
+      expect(find.text('Finances'), findsOneWidget);
+
+      // Title is still intact (operation was NOT dropped)
+      expect(find.text('My Bank Login'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['title'], 'My Bank Login');
+      expect(savedItem!['folderId'], 'folder-finances');
+    });
+
+    testWidgets('DocumentUploadScreen allows creating new folder inline via [+] button', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final createdFolders = <VaultFolder>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DocumentUploadScreen(
+            currentVaultSizeBytes: 0,
+            maxVaultBytes: 100 * 1024 * 1024,
+            folders: testFolders,
+            onCreateFolder: (name, {parentId, color}) async {
+              final folder = VaultFolder(
+                id: 'folder-legal',
+                name: name,
+                createdAt: '2026-11-16T12:00:00Z',
+                updatedAt: '2026-11-16T12:00:00Z',
+              );
+              createdFolders.add(folder);
+              return folder;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('document-create-folder-button')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('document-create-folder-button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Legal');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(createdFolders.length, 1);
+      expect(createdFolders.first.name, 'Legal');
+      expect(find.text('Legal'), findsOneWidget);
+    });
+
+    testWidgets('NoteEditorScreen allows creating new folder inline via [+] button in hierarchy sheet', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedNote;
+      final createdFolders = <VaultFolder>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            FlutterQuillLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('en')],
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedNote = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => NoteEditorScreen(
+                          folders: testFolders,
+                          onCreateFolder: (name, {parentId, color}) async {
+                            final folder = VaultFolder(
+                              id: 'folder-journal',
+                              name: name,
+                              parentId: parentId,
+                              createdAt: '2026-11-16T12:00:00Z',
+                              updatedAt: '2026-11-16T12:00:00Z',
+                            );
+                            createdFolders.add(folder);
+                            return folder;
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open Note'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Note'));
+      await tester.pumpAndSettle();
+
+      // Tap title header button to open animated drawer
+      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'Daily Journal');
+      await tester.pumpAndSettle();
+
+      // Open folder hierarchy sheet
+      expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('note-folder-selector')));
+      await tester.pumpAndSettle();
+
+      // Tap create new folder button in hierarchy sheet
+      expect(find.byKey(const ValueKey('hierarchy-create-folder-button')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('hierarchy-create-folder-button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Journal');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(createdFolders.length, 1);
+      expect(createdFolders.first.name, 'Journal');
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedNote, isNotNull);
+      expect(savedNote!['title'], 'Daily Journal');
+      expect(savedNote!['folderId'], 'folder-journal');
+    });
+
+    testWidgets('NoteEditorScreen allows creating subfolder via long-press in hierarchy sheet', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final createdFolders = <VaultFolder>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            FlutterQuillLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('en')],
+          home: Scaffold(
+            body: NoteEditorScreen(
+              folders: testFolders,
+              onCreateFolder: (name, {parentId, color}) async {
+                final folder = VaultFolder(
+                  id: 'folder-sub',
+                  name: name,
+                  parentId: parentId,
+                  color: color,
+                  createdAt: '2026-11-16T12:00:00Z',
+                  updatedAt: '2026-11-16T12:00:00Z',
+                );
+                createdFolders.add(folder);
+                return folder;
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Tap title header button to open animated drawer
+      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
+      await tester.pumpAndSettle();
+
+      // Open folder hierarchy directly from expanded folder pill
+      expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('note-folder-selector')));
+      await tester.pumpAndSettle();
+
+      // Long press on Work folder tile
+      await tester.longPress(find.text('Work'));
+      await tester.pumpAndSettle();
+
+      // Check option dialog / sheet appeared
+      expect(find.text('Create subfolder inside "Work"'), findsOneWidget);
+      await tester.tap(find.text('Create subfolder inside "Work"'));
+      await tester.pumpAndSettle();
+
+      // Dialog for subfolder
+      expect(find.byKey(const ValueKey('create-folder-name-input')), findsOneWidget);
+      await tester.enterText(find.byKey(const ValueKey('create-folder-name-input')), 'Projects');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('create-folder-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(createdFolders.length, 1);
+      expect(createdFolders.first.name, 'Projects');
+      expect(createdFolders.first.parentId, 'work');
     });
   });
 }

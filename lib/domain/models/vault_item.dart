@@ -5,6 +5,7 @@ class VaultItem {
     required this.title,
     required this.subtitle,
     required this.fields,
+    this.folderId,
   });
 
   final String id;
@@ -12,6 +13,7 @@ class VaultItem {
   final String title;
   final String subtitle;
   final List<VaultField> fields;
+  final String? folderId;
 }
 
 class VaultField {

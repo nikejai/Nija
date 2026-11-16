@@ -462,7 +462,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             ? () async {}
             : _restoreCurrentVaultFromCloud,
         onReadCloudBackupAccount: _isExploreDemoSession
-            ? () async => null
+            ? () async =>
+                AppFeatures.isPaidBuild ? 'demo.paid@example.com' : null
             : _readCloudBackupAccountLabel,
         onChangeCloudBackupAccount: _isExploreDemoSession
             ? () async => false
@@ -481,12 +482,18 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         isExploreDemoSession: _isExploreDemoSession,
         onExitExploreDemo: _exitExploreDemoSession,
         cloudBackupFeatureAvailableOverride: _isExploreDemoSession
-            ? false
+            ? (AppFeatures.isPaidBuild ? true : false)
             : null,
         debugInternalsFeatureAvailableOverride: _isExploreDemoSession
             ? false
             : null,
         expandedVaultStorageEntitled: !_isExploreDemoSession,
+        onReadRawVaultContent: _isExploreDemoSession
+            ? null
+            : () => _vaultService.readRawVaultFile(filePath: _vaultFilePath),
+        onRestoreRawVaultContent: _isExploreDemoSession
+            ? null
+            : (content) => _restoreVaultFromRawContent(content),
       ),
     };
 
@@ -4330,6 +4337,23 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
     } finally {
       stopCloudBusy();
+    }
+  }
+
+  Future<bool> _restoreVaultFromRawContent(String rawContent) async {
+    try {
+      await _importVaultFile(
+        imported: ImportedVaultFile(
+          storageId: _vaultFilePath,
+          label: _activeVaultName,
+          content: rawContent,
+        ),
+        continueToUnlock: false,
+        stageRawContent: true,
+      );
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 

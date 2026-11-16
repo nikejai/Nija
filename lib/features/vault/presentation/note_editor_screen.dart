@@ -4,12 +4,24 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import '../../../core/localization/app_strings.dart';
+import '../../../domain/models/vault_folder.dart';
+import 'widgets/vault_folder_hierarchy_sheet.dart';
 
 class NoteEditorScreen extends StatefulWidget {
-  const NoteEditorScreen({super.key, this.initialNote, this.onAutoSave});
+  const NoteEditorScreen({
+    super.key,
+    this.initialNote,
+    this.onAutoSave,
+    this.folders = const <VaultFolder>[],
+    this.initialFolderId,
+    this.onCreateFolder,
+  });
 
   final Map<String, dynamic>? initialNote;
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
+  final List<VaultFolder> folders;
+  final String? initialFolderId;
+  final VaultFolderCreateCallback? onCreateFolder;
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
@@ -24,10 +36,14 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   late final FocusNode _editorFocusNode;
   late final List<String> _tags;
   late final String _noteId;
+  late String _selectedFolderId;
+  late final List<VaultFolder> _customFolders;
+  late bool _isFavorite;
   Timer? _autosaveTimer;
   late final String _initialFingerprint;
   String _lastAutoSavedFingerprint = '';
   bool _dirty = false;
+  bool _isHeaderExpanded = false;
 
   @override
   void initState() {
@@ -46,11 +62,72 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _noteId =
         widget.initialNote?['id']?.toString() ??
         DateTime.now().millisecondsSinceEpoch.toString();
+    _customFolders = widget.folders.where((f) => f.id != 'default').toList();
+    _isFavorite = widget.initialNote?['pinned'] == true;
+    final initialFid = widget.initialNote?['folderId']?.toString().trim() ??
+        widget.initialFolderId?.trim();
+    _selectedFolderId =
+        (initialFid != null && initialFid.isNotEmpty) ? initialFid : 'default';
     _initialFingerprint = _fingerprintForCurrentState();
     _lastAutoSavedFingerprint = _initialFingerprint;
     _titleController.addListener(_markDirty);
     _quillController.addListener(_markDirty);
   }
+
+  String _resolveFolderName(String folderId, List<VaultFolder> folders) {
+    if (folderId.isEmpty || folderId == 'default') {
+      return 'Default';
+    }
+    for (final folder in folders) {
+      if (folder.id == folderId) return folder.name;
+    }
+    return folderId;
+  }
+
+  VaultFolder _resolveFolder(String folderId) {
+    for (final folder in _effectiveFolders) {
+      if (folder.id == folderId) return folder;
+    }
+    return VaultFolder(
+      id: folderId,
+      name: folderId.isEmpty || folderId == 'default' ? 'Default' : folderId,
+      icon: folderId == 'default' ? 'folder_special' : null,
+      createdAt: '',
+      updatedAt: '',
+    );
+  }
+
+  Future<void> _openFolderPicker() async {
+    final picked = await showVaultFolderHierarchySheet(
+      context,
+      folders: _effectiveFolders,
+      selectedFolderId: _selectedFolderId,
+      onCreateFolder: widget.onCreateFolder,
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedFolderId = picked.id;
+        if (!_customFolders.any((f) => f.id == picked.id) && picked.id != 'default') {
+          _customFolders.add(picked);
+        }
+      });
+      _markDirty();
+    }
+  }
+
+  List<VaultFolder> get _effectiveFolders {
+    return [
+      const VaultFolder(
+        id: 'default',
+        name: 'Default',
+        icon: 'folder_special',
+        createdAt: '',
+        updatedAt: '',
+      ),
+      ..._customFolders,
+    ];
+  }
+
 
   @override
   void dispose() {
@@ -96,13 +173,159 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     return quill.Document()..insert(0, '$fallbackText\n');
   }
 
+  Widget _buildExtendedHeader(ColorScheme colorScheme, ThemeData theme) {
+    final selectedFolder = _resolveFolder(_selectedFolderId);
+    final folderColor = resolveFolderColor(selectedFolder);
+    final folderName = selectedFolder.name;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+          ),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Material(
+                color: folderColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
+                child: InkWell(
+                  key: const ValueKey('note-folder-selector'),
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: _openFolderPicker,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          selectedFolder.id == 'default' ? Icons.folder_special : Icons.folder,
+                          size: 15,
+                          color: folderColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          folderName,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: folderColor,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.keyboard_arrow_down,
+                          size: 16,
+                          color: folderColor,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                key: const ValueKey('note-favorite-button'),
+                tooltip: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
+                icon: Icon(
+                  _isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: _isFavorite ? const Color(0xFFF59E0B) : colorScheme.onSurfaceVariant,
+                  size: 22,
+                ),
+                onPressed: () {
+                  setState(() => _isFavorite = !_isFavorite);
+                  _markDirty();
+                },
+              ),
+              IconButton(
+                tooltip: 'Collapse',
+                icon: Icon(
+                  Icons.keyboard_arrow_up,
+                  size: 20,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                onPressed: () {
+                  setState(() => _isHeaderExpanded = false);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const ValueKey('note-details-title-input'),
+                  controller: _titleController,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Title',
+                    hintStyle: TextStyle(
+                      color: colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                  ),
+                  onChanged: (_) {
+                    setState(() {});
+                    _markDirty();
+                  },
+                ),
+              ),
+              if (_titleController.text.isNotEmpty)
+                IconButton(
+                  key: const ValueKey('note-title-clear-button'),
+                  icon: Icon(Icons.cancel, size: 20, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7)),
+                  tooltip: 'Clear title',
+                  onPressed: () {
+                    _titleController.clear();
+                    setState(() {});
+                    _markDirty();
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Container(
+            height: 2,
+            margin: const EdgeInsets.only(bottom: 4),
+            decoration: BoxDecoration(
+              color: colorScheme.primary.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(1),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final keyboardVisible = keyboardInset > 0;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final title = widget.initialNote == null ? 'New note' : 'Edit note';
 
     return PopScope(
       canPop: false,
@@ -118,12 +341,12 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           child: Column(
             children: [
               Container(
-                height: 64,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                height: 56,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 decoration: BoxDecoration(
                   color: colorScheme.surface,
                   border: Border(
-                    bottom: BorderSide(color: colorScheme.outlineVariant),
+                    bottom: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.4)),
                   ),
                 ),
                 child: Row(
@@ -136,181 +359,198 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       onPressed: _saveAndPop,
                     ),
                     Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: colorScheme.onSurface,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                            ),
+                      child: InkWell(
+                        key: const ValueKey('note-title-header-button'),
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () {
+                          setState(() {
+                            _isHeaderExpanded = !_isHeaderExpanded;
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      _titleController.text.trim().isEmpty ? 'New note' : _titleController.text.trim(),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium?.copyWith(
+                                        color: colorScheme.onSurface,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Icon(
+                                    Icons.edit_outlined,
+                                    size: 15,
+                                    color: colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  AnimatedRotation(
+                                    turns: _isHeaderExpanded ? 0.5 : 0.0,
+                                    duration: const Duration(milliseconds: 200),
+                                    child: Icon(
+                                      Icons.keyboard_arrow_down,
+                                      size: 16,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  if (_isFavorite) ...[
+                                    const SizedBox(width: 4),
+                                    const Icon(
+                                      Icons.star_rounded,
+                                      size: 16,
+                                      color: Color(0xFFF59E0B),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              Text(
+                                '${_resolveFolderName(_selectedFolderId, _effectiveFolders)} · Note',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
                           ),
-                          Text(
-                            'Encrypted note',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
+                    IconButton(
+                      tooltip: 'Undo',
+                      icon: const Icon(Icons.undo, size: 20),
+                      onPressed: () => _quillController.undo(),
+                    ),
+                    IconButton(
+                      tooltip: 'Redo',
+                      icon: const Icon(Icons.redo, size: 20),
+                      onPressed: () => _quillController.redo(),
+                    ),
+                    const SizedBox(width: 4),
                     FilledButton(
+                      key: const ValueKey('note-save-button'),
                       onPressed: _save,
                       style: FilledButton.styleFrom(
                         backgroundColor: colorScheme.onSurface,
                         foregroundColor: colorScheme.surface,
-                        minimumSize: const Size(76, 40),
+                        minimumSize: const Size(68, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(18),
                         ),
                       ),
-                      child: const Text('Save'),
+                      child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                     ),
                   ],
                 ),
               ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeInOutCubic,
+                child: _isHeaderExpanded
+                    ? _buildExtendedHeader(colorScheme, theme)
+                    : const SizedBox.shrink(),
+              ),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
+                    final minContentHeight =
+                        (constraints.maxHeight - 32).clamp(0.0, double.infinity);
                     return SingleChildScrollView(
-                      padding: EdgeInsets.fromLTRB(
-                        16,
-                        16,
-                        16,
-                        keyboardVisible ? keyboardInset + 12 : 16,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                       child: Center(
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
                             maxWidth: 860,
-                            minHeight:
-                                constraints.maxHeight -
-                                (keyboardVisible ? keyboardInset : 0) -
-                                32,
+                            minHeight: minContentHeight,
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _NoteEditorPanel(
-                                child: TextField(
-                                  controller: _titleController,
-                                  style: TextStyle(
-                                    color: colorScheme.onSurface,
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w800,
-                                    height: 1.15,
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText: 'Untitled note',
-                                    hintStyle: TextStyle(
-                                      color: colorScheme.onSurfaceVariant,
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w800,
+                              quill.QuillSimpleToolbar(
+                                controller: _quillController,
+                                config: const quill.QuillSimpleToolbarConfig(
+                                  multiRowsDisplay: false,
+                                  toolbarSectionSpacing: 1,
+                                  showDividers: false,
+                                  buttonOptions:
+                                      quill.QuillSimpleToolbarButtonOptions(
+                                    base: quill.QuillToolbarBaseButtonOptions(
+                                      iconButtonFactor: 1.15,
+                                      iconSize: 15,
                                     ),
-                                    border: InputBorder.none,
-                                    enabledBorder: InputBorder.none,
-                                    focusedBorder: InputBorder.none,
-                                    filled: false,
-                                    isDense: true,
-                                    contentPadding: EdgeInsets.zero,
                                   ),
+                                  showFontFamily: false,
+                                  showFontSize: true,
+                                  showSubscript: false,
+                                  showSuperscript: false,
+                                  showInlineCode: true,
+                                  showCodeBlock: true,
+                                  showColorButton: true,
+                                  showBackgroundColorButton: true,
+                                  showAlignmentButtons: true,
+                                  showDirection: true,
+                                  showIndent: true,
+                                  showHeaderStyle: true,
+                                  showQuote: true,
+                                  showBoldButton: true,
+                                  showItalicButton: true,
+                                  showUnderLineButton: true,
+                                  showStrikeThrough: true,
+                                  showListBullets: true,
+                                  showListCheck: true,
+                                  showListNumbers: true,
+                                  showLink: true,
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                              _NoteEditorPanel(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 4,
+                              Divider(
+                                height: 12,
+                                thickness: 0.5,
+                                color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                              ),
+                              ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: (constraints.maxHeight - 200).clamp(360.0, 10000.0),
                                 ),
-                                child: quill.QuillSimpleToolbar(
+                                child: quill.QuillEditor.basic(
                                   controller: _quillController,
-                                  config: const quill.QuillSimpleToolbarConfig(
-                                    multiRowsDisplay: false,
-                                    toolbarSectionSpacing: 1,
-                                    showDividers: false,
-                                    buttonOptions:
-                                        quill.QuillSimpleToolbarButtonOptions(
-                                      base: quill.QuillToolbarBaseButtonOptions(
-                                        iconButtonFactor: 1.15,
-                                        iconSize: 15,
-                                      ),
+                                  focusNode: _editorFocusNode,
+                                  scrollController: _editorScrollController,
+                                  config: quill.QuillEditorConfig(
+                                    placeholder:
+                                        'Start writing a private document...',
+                                    scrollable: true,
+                                    autoFocus: true,
+                                    scrollBottomInset: keyboardVisible
+                                        ? 24
+                                        : 80,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 8,
                                     ),
-                                    showFontFamily: false,
-                                    showFontSize: true,
-                                    showSubscript: false,
-                                    showSuperscript: false,
-                                    showInlineCode: true,
-                                    showCodeBlock: true,
-                                    showColorButton: true,
-                                    showBackgroundColorButton: true,
-                                    showAlignmentButtons: true,
-                                    showDirection: true,
-                                    showIndent: true,
-                                    showHeaderStyle: true,
-                                    showQuote: true,
-                                    showBoldButton: true,
-                                    showItalicButton: true,
-                                    showUnderLineButton: true,
-                                    showStrikeThrough: true,
-                                    showListBullets: true,
-                                    showListCheck: true,
-                                    showListNumbers: true,
-                                    showLink: true,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              _NoteEditorPanel(
-                                padding: const EdgeInsets.fromLTRB(
-                                  18,
-                                  16,
-                                  18,
-                                  16,
-                                ),
-                                child: SizedBox(
-                                  height: (constraints.maxHeight - 170).clamp(
-                                    320.0,
-                                    720.0,
-                                  ),
-                                  child: quill.QuillEditor.basic(
-                                    controller: _quillController,
-                                    focusNode: _editorFocusNode,
-                                    scrollController: _editorScrollController,
-                                    config: quill.QuillEditorConfig(
-                                      placeholder:
-                                          'Start writing a private document...',
-                                      scrollable: true,
-                                      autoFocus: true,
-                                      scrollBottomInset: keyboardVisible
-                                          ? keyboardInset + 24
-                                          : 80,
-                                      padding: const EdgeInsets.fromLTRB(
-                                        0,
-                                        0,
-                                        0,
-                                        16,
-                                      ),
-                                      customStyles: quill.DefaultStyles(
-                                        paragraph: quill.DefaultTextBlockStyle(
-                                          TextStyle(
-                                            color: colorScheme.onSurface,
-                                            fontSize: 15,
-                                            height: 1.5,
-                                          ),
-                                          const quill.HorizontalSpacing(0, 0),
-                                          const quill.VerticalSpacing(0, 0),
-                                          const quill.VerticalSpacing(0, 0),
-                                          null,
+                                    customStyles: quill.DefaultStyles(
+                                      paragraph: quill.DefaultTextBlockStyle(
+                                        TextStyle(
+                                          color: colorScheme.onSurface,
+                                          fontSize: 15,
+                                          height: 1.5,
                                         ),
+                                        const quill.HorizontalSpacing(0, 0),
+                                        const quill.VerticalSpacing(0, 0),
+                                        const quill.VerticalSpacing(0, 0),
+                                        null,
                                       ),
                                     ),
                                   ),
@@ -356,6 +596,8 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       'title': normalizedTitle,
       'plainText': plainText,
       'tags': tags,
+      'folderId': _selectedFolderId,
+      'pinned': _isFavorite,
       'delta': deltaJson,
     });
     final effectiveTags = tags.isEmpty ? <String>['note'] : tags;
@@ -364,11 +606,13 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       isEmptyDraft: normalizedTitle.isEmpty && plainText.isEmpty,
       payload: {
         'id': _noteId,
+        'type': 'Note',
         'title': title,
         'preview': preview,
         'updated': 'Now',
-        'pinned': widget.initialNote?['pinned'] ?? false,
+        'pinned': _isFavorite,
         'tags': effectiveTags,
+        'folderId': _selectedFolderId,
         'delta': _cloneDeltaJson(deltaJson),
       },
     );
@@ -439,30 +683,6 @@ class _NoteEditorSnapshot {
   final Map<String, dynamic> payload;
 }
 
-class _NoteEditorPanel extends StatelessWidget {
-  const _NoteEditorPanel({
-    required this.child,
-    this.padding = const EdgeInsets.all(14),
-  });
-
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: padding,
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        border: Border.all(color: colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: child,
-    );
-  }
-}
 
 class NoteViewScreen extends StatefulWidget {
   const NoteViewScreen({
@@ -472,6 +692,8 @@ class NoteViewScreen extends StatefulWidget {
     this.readOnly = false,
     this.onAutoSave,
     this.onShareMenu,
+    this.folders = const <VaultFolder>[],
+    this.onCreateFolder,
   });
 
   final Map<String, dynamic> note;
@@ -479,6 +701,8 @@ class NoteViewScreen extends StatefulWidget {
   final bool readOnly;
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
   final VoidCallback? onShareMenu;
+  final List<VaultFolder> folders;
+  final VaultFolderCreateCallback? onCreateFolder;
 
   @override
   State<NoteViewScreen> createState() => _NoteViewScreenState();
@@ -515,6 +739,16 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
     super.dispose();
   }
 
+  String _resolveFolderName(String? folderId, List<VaultFolder> folders) {
+    if (folderId == null || folderId.isEmpty || folderId == 'default') {
+      return 'Default';
+    }
+    for (final folder in folders) {
+      if (folder.id == folderId) return folder.name;
+    }
+    return folderId;
+  }
+
   bool _checkIsRecoveryNote(Map<String, dynamic> note) {
     if (note['id']?.toString() == 'note-recovery-phrase') return true;
     final tags = (note['tags'] as List<dynamic>?)
@@ -530,6 +764,8 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final folderId = widget.note['folderId']?.toString().trim();
+    final folderName = _resolveFolderName(folderId, widget.folders);
 
     return Scaffold(
       appBar: AppBar(
@@ -538,7 +774,38 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
-        title: Text(widget.note['title']?.toString() ?? 'Note'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.note['title']?.toString() ?? 'Note',
+              overflow: TextOverflow.ellipsis,
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  folderName == 'Default'
+                      ? Icons.folder_special
+                      : Icons.folder_outlined,
+                  size: 13,
+                  color: folderName == 'Default'
+                      ? const Color(0xFFF59E0B)
+                      : const Color(0xFFEAB308),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  folderName,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
         actions: [
           if (_isRecoveryNote && _revealed)
             IconButton(
@@ -562,6 +829,8 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
                         builder: (_) => NoteEditorScreen(
                           initialNote: widget.note,
                           onAutoSave: widget.onAutoSave,
+                          folders: widget.folders,
+                          onCreateFolder: widget.onCreateFolder,
                         ),
                       ),
                     );

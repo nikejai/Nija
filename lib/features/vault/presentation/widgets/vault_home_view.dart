@@ -107,15 +107,29 @@ class _VaultHomeView extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 5),
-                      ],
-                      Text(
-                        isWide ? greeting : 'Nija',
-                        style: isWide
-                            ? DashboardTypography.greetingTitle(
-                                colorScheme.onSurface,
-                              )
-                            : vaultPageHeadingStyle(context),
-                      ),
+                        Text(
+                          greeting,
+                          style: DashboardTypography.greetingTitle(
+                            colorScheme.onSurface,
+                          ),
+                        ),
+                      ] else
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Image.asset(
+                              'assets/branding/nija_mark.png',
+                              width: 28,
+                              height: 28,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Nija',
+                              style: vaultPageHeadingStyle(context),
+                            ),
+                          ],
+                        ),
                       const SizedBox(height: 5),
                       if (isWide)
                         Text(
