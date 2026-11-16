@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/config/vault_limits.dart';
+import '../../../domain/models/vault_folder.dart';
 import 'widgets/vault_page_heading.dart';
 
 class DocumentUploadScreen extends StatefulWidget {
@@ -13,12 +14,16 @@ class DocumentUploadScreen extends StatefulWidget {
     required this.maxVaultBytes,
     this.maxDocumentBytes = VaultLimits.maxDocumentBytes,
     this.onLifecycleLockSuppressed,
+    this.folders = const <VaultFolder>[],
+    this.initialFolderId,
   });
 
   final int currentVaultSizeBytes;
   final int maxVaultBytes;
   final int maxDocumentBytes;
   final ValueChanged<bool>? onLifecycleLockSuppressed;
+  final List<VaultFolder> folders;
+  final String? initialFolderId;
 
   @override
   State<DocumentUploadScreen> createState() => _DocumentUploadScreenState();
@@ -31,6 +36,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
   late final TextEditingController _tagsController;
   late final TextEditingController _descriptionController;
   final List<PlatformFile> _selectedFiles = <PlatformFile>[];
+  late String _selectedFolderId;
   String? _errorText;
   bool _uploading = false;
   double _progress = 0;
@@ -42,6 +48,72 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     _titleController = TextEditingController();
     _tagsController = TextEditingController();
     _descriptionController = TextEditingController();
+    final initialFid = widget.initialFolderId?.trim();
+    _selectedFolderId = (initialFid != null && initialFid.isNotEmpty) ? initialFid : 'default';
+  }
+
+  List<VaultFolder> get _effectiveFolders {
+    final custom = widget.folders.where((f) => f.id != 'default').toList();
+    return [
+      VaultFolder(
+        id: 'default',
+        name: 'Default',
+        icon: 'folder_special',
+        createdAt: '',
+        updatedAt: '',
+      ),
+      ...custom,
+    ];
+  }
+
+  List<DropdownMenuItem<String>> get _folderDropdownItems {
+    final items = _effectiveFolders.map((folder) {
+      final isDefault = folder.id == 'default';
+      return DropdownMenuItem<String>(
+        value: folder.id,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isDefault ? Icons.folder_special : Icons.folder,
+              size: 18,
+              color: isDefault
+                  ? const Color(0xFFF59E0B)
+                  : const Color(0xFFEAB308),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                folder.name,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList();
+
+    if (!_effectiveFolders.any((f) => f.id == _selectedFolderId)) {
+      items.add(
+        DropdownMenuItem<String>(
+          value: _selectedFolderId,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.folder_outlined, size: 18, color: Colors.grey),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  _selectedFolderId,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return items;
   }
 
   @override
@@ -194,6 +266,32 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                                 decoration: const InputDecoration(
                                   hintText: 'Add tags',
                                   prefixIcon: Icon(Icons.sell_outlined),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              DropdownButtonFormField<String>(
+                                key: const ValueKey('document-folder-selector'),
+                                initialValue: _selectedFolderId,
+                                items: _folderDropdownItems,
+                                onChanged: _uploading
+                                    ? null
+                                    : (value) {
+                                        if (value == null || value == _selectedFolderId) return;
+                                        setState(() {
+                                          _selectedFolderId = value;
+                                        });
+                                      },
+                                decoration: InputDecoration(
+                                  labelText: 'Folder',
+                                  prefixIcon: Icon(
+                                    _selectedFolderId == 'default'
+                                        ? Icons.folder_special
+                                        : Icons.folder,
+                                    size: 20,
+                                    color: _selectedFolderId == 'default'
+                                        ? const Color(0xFFF59E0B)
+                                        : const Color(0xFFEAB308),
+                                  ),
                                 ),
                               ),
                             ],
@@ -373,6 +471,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
       'pinned': false,
       'tags': tags,
       'fields': fields,
+      'folderId': _selectedFolderId,
       if (file.readStream != null) '__documentReadStream__': file.readStream,
       if (file.bytes != null) '__documentBytes__': file.bytes,
       'documentExtension': extension,

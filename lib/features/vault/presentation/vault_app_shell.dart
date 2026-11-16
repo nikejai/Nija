@@ -1035,13 +1035,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
           maxVaultBytes: _effectiveMaxVaultBytes,
           maxDocumentBytes: VaultLimits.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+          folders: _folders,
+          initialFolderId: folderId,
         ),
       ),
     );
 
     if (created == null) return;
     final item = Map<String, dynamic>.from(created);
-    if (folderId != null) {
+    if (item['folderId'] == null && folderId != null) {
       item['folderId'] = folderId;
     }
     try {
@@ -1386,6 +1388,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       MaterialPageRoute(
         builder: (_) => _DocumentDetailScreen(
           item: accessedItem,
+          folders: _folders,
           onReadDocument: isDemoItem
               ? ({required sectionName, onProgress}) async =>
                   VaultHomeDemoData.demoPdfBytes
@@ -2089,6 +2092,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       MaterialPageRoute(
         builder: (_) => _ItemDetailScreen(
           item: accessedItem,
+          folders: _folders,
           readOnly: _isExploreDemoReadOnly,
           customTypeDefinitions: _customTypeDefinitions,
           currentVaultSizeBytes: _effectiveVaultSizeBytes,
@@ -2552,6 +2556,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
           maxVaultBytes: _effectiveMaxVaultBytes,
           maxDocumentBytes: VaultLimits.maxDocumentBytes,
           onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+          folders: _folders,
+          initialFolderId: initialFolderId,
           onCreateNote: () async {
             return Navigator.of(context).push<Map<String, dynamic>>(
               MaterialPageRoute(builder: (_) => const NoteEditorScreen()),
@@ -2565,6 +2571,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
                   maxVaultBytes: _effectiveMaxVaultBytes,
                   maxDocumentBytes: VaultLimits.maxDocumentBytes,
                   onLifecycleLockSuppressed: widget.onLifecycleLockSuppressed,
+                  folders: _folders,
+                  initialFolderId: initialFolderId,
                 ),
               ),
             );
@@ -2577,7 +2585,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final kind = created['kind']?.toString() ?? 'item';
     final entry = created['entry'];
     if (entry is! Map<String, dynamic>) return;
-    if (initialFolderId != null) {
+    if (entry['folderId'] == null && initialFolderId != null) {
       entry['folderId'] = initialFolderId;
     }
     if (kind == 'note') {

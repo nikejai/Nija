@@ -8,6 +8,7 @@ import 'package:nija/domain/models/vault_entry_data.dart';
 import 'package:nija/domain/models/vault_folder.dart';
 import 'package:nija/domain/models/vault_payload.dart';
 import 'package:nija/features/vault/application/vault_home_demo_data.dart';
+import 'package:nija/features/vault/presentation/add_vault_item_screen.dart';
 import 'package:nija/features/vault/presentation/widgets/vault_folders_view.dart';
 
 void main() {
@@ -860,6 +861,212 @@ void main() {
           expect(att['__documentBytes__'], equals(VaultHomeDemoData.demoPdfBytes));
         }
       }
+    });
+  });
+
+  group('Item Folder Integration & Selection', () {
+    final testFolders = [
+      VaultFolder(
+        id: 'work',
+        name: 'Work',
+        createdAt: '2026-11-15T00:00:00Z',
+        updatedAt: '2026-11-15T00:00:00Z',
+      ),
+      VaultFolder(
+        id: 'personal',
+        name: 'Personal',
+        createdAt: '2026-11-15T00:00:00Z',
+        updatedAt: '2026-11-15T00:00:00Z',
+      ),
+    ];
+
+    testWidgets('AddVaultItemScreen defaults folder selection to default and saves folderId', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedItem;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedItem = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => AddVaultItemScreen(
+                          fixedType: 'Login',
+                          folders: testFolders,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('item-folder-selector')), findsOneWidget);
+      expect(find.text('Default'), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Title'), 'GitHub');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['title'], 'GitHub');
+      expect(savedItem!['folderId'], 'default');
+    });
+
+    testWidgets('AddVaultItemScreen pre-selects initialFolderId and allows changing folder', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedItem;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedItem = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => AddVaultItemScreen(
+                          fixedType: 'Login',
+                          folders: testFolders,
+                          initialFolderId: 'work',
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Work'), findsOneWidget);
+
+      // Change folder to Personal
+      await tester.tap(find.byKey(const ValueKey('item-folder-selector')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Personal').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.widgetWithText(TextField, 'Title'), 'Work Email');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['title'], 'Work Email');
+      expect(savedItem!['folderId'], 'personal');
+    });
+
+    testWidgets('AddVaultItemScreen editing preserves existing folder and defaults legacy item to default', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedItem;
+
+      final existingItem = {
+        'id': 'item-101',
+        'type': 'Login',
+        'title': 'AWS Console',
+        'folderId': 'work',
+        'fields': [
+          {'label': 'Username or email', 'value': 'admin@example.com', 'sensitive': false},
+        ],
+      };
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedItem = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => AddVaultItemScreen(
+                          initialItem: existingItem,
+                          folders: testFolders,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+
+      // Pre-selected to 'work'
+      expect(find.text('Work'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedItem, isNotNull);
+      expect(savedItem!['id'], 'item-101');
+      expect(savedItem!['folderId'], 'work');
+    });
+
+    test('FolderTreeBuilder categorizes legacy items without folderId under default folder', () {
+      final legacyItem = {'id': 'i1', 'title': 'Legacy Item'};
+      final explicitDefaultItem = {'id': 'i2', 'title': 'Default Item', 'folderId': 'default'};
+      final workItem = {'id': 'i3', 'title': 'Work Item', 'folderId': 'work'};
+
+      final allItems = [legacyItem, explicitDefaultItem, workItem];
+
+      final defaultItems = FolderTreeBuilder.getItemsInFolder(
+        folderId: 'default',
+        items: allItems,
+      );
+      expect(defaultItems.map((i) => i['id']), containsAll(['i1', 'i2']));
+      expect(defaultItems.map((i) => i['id']), isNot(contains('i3')));
+
+      final workItems = FolderTreeBuilder.getItemsInFolder(
+        folderId: 'work',
+        items: allItems,
+      );
+      expect(workItems.map((i) => i['id']), equals(['i3']));
     });
   });
 }

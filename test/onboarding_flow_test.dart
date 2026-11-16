@@ -1378,7 +1378,9 @@ void main() {
       find.widgetWithText(TextField, 'Title'),
       'Persisted Login',
     );
-    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await pumpUntilFound(tester, find.text('Entry saved'));
     await tester.tap(find.text('Done'));

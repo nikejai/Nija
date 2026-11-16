@@ -21,6 +21,7 @@ class _ItemDetailScreen extends StatefulWidget {
     this.showDeleteAction = false,
     this.readOnly = false,
     this.onShareMenu,
+    this.folders = const <VaultFolder>[],
   });
 
   final Map<String, dynamic> item;
@@ -55,6 +56,7 @@ class _ItemDetailScreen extends StatefulWidget {
   final bool showDeleteAction;
   final bool readOnly;
   final VoidCallback? onShareMenu;
+  final List<VaultFolder> folders;
 
   @override
   State<_ItemDetailScreen> createState() => _ItemDetailScreenState();
@@ -157,8 +159,11 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
       fields: fields,
       selectedAttachment: _selectedAttachment(),
     );
+    final folderId = widget.item['folderId']?.toString().trim();
+    final folderName = _resolveFolderName(folderId, widget.folders);
     final metadataRows = [
       _DetailMetadataRow('Category', itemType),
+      _DetailMetadataRow('Folder', folderName),
       _DetailMetadataRow('Created', created),
       _DetailMetadataRow('Modified', modified),
       _DetailMetadataRow('Device', device),
@@ -278,6 +283,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
                               title: title,
                               icon: typeIcon,
                               color: typeColor,
+                              folderName: folderName,
                             ),
                             const SizedBox(height: 22),
                             if (isWide)
@@ -318,6 +324,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
         builder: (_) => AddVaultItemScreen(
           customTypeDefinitions: widget.customTypeDefinitions,
           initialItem: widget.item,
+          folders: widget.folders,
           currentVaultSizeBytes: widget.currentVaultSizeBytes,
           maxVaultBytes: widget.maxVaultBytes,
           maxDocumentBytes: widget.maxDocumentBytes,
@@ -908,16 +915,19 @@ class _ItemDetailHero extends StatelessWidget {
     required this.title,
     required this.icon,
     required this.color,
+    this.folderName,
   });
 
   final String itemType;
   final String title;
   final IconData icon;
   final Color color;
+  final String? folderName;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final folder = folderName;
     return Column(
       children: [
         Container(
@@ -948,6 +958,40 @@ class _ItemDetailHero extends StatelessWidget {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
+        if (folder != null && folder.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  folder == 'Default' ? Icons.folder_special : Icons.folder_outlined,
+                  size: 14,
+                  color: folder == 'Default'
+                      ? const Color(0xFFF59E0B)
+                      : const Color(0xFFEAB308),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  folder,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -22,6 +22,7 @@ class _DocumentDetailScreen extends StatefulWidget {
     this.showDeleteAction = false,
     this.readOnly = false,
     this.onShareMenu,
+    this.folders = const <VaultFolder>[],
   });
 
   final Map<String, dynamic> item;
@@ -59,6 +60,7 @@ class _DocumentDetailScreen extends StatefulWidget {
   final bool showDeleteAction;
   final bool readOnly;
   final VoidCallback? onShareMenu;
+  final List<VaultFolder> folders;
 
   @override
   State<_DocumentDetailScreen> createState() => _DocumentDetailScreenState();
@@ -290,7 +292,10 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                                 children: [
                                   Padding(
                                     padding: const EdgeInsets.only(bottom: 6),
-                                    child: _EntryMetadataPanel(entry: widget.item),
+                                    child: _EntryMetadataPanel(
+                                      entry: widget.item,
+                                      folders: widget.folders,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -787,6 +792,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         builder: (_) => AddVaultItemScreen(
           customTypeDefinitions: widget.customTypeDefinitions,
           initialItem: widget.item,
+          folders: widget.folders,
           currentVaultSizeBytes: widget.currentVaultSizeBytes,
           maxVaultBytes: widget.maxVaultBytes,
           maxDocumentBytes: widget.maxDocumentBytes,
