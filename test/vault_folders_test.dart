@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/application/services/vault_folder_manager.dart';
 import 'package:nija/domain/models/folder_tree_builder.dart';
@@ -9,6 +11,8 @@ import 'package:nija/domain/models/vault_folder.dart';
 import 'package:nija/domain/models/vault_payload.dart';
 import 'package:nija/features/vault/application/vault_home_demo_data.dart';
 import 'package:nija/features/vault/presentation/add_vault_item_screen.dart';
+import 'package:nija/features/vault/presentation/document_upload_screen.dart';
+import 'package:nija/features/vault/presentation/note_editor_screen.dart';
 import 'package:nija/features/vault/presentation/widgets/vault_folders_view.dart';
 
 void main() {
@@ -1067,6 +1071,126 @@ void main() {
         items: allItems,
       );
       expect(workItems.map((i) => i['id']), equals(['i3']));
+    });
+
+    testWidgets('NoteEditorScreen allows folder selection and saves folderId', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      Map<String, dynamic>? savedNote;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            FlutterQuillLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('en')],
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    savedNote = await Navigator.of(context).push<Map<String, dynamic>>(
+                      MaterialPageRoute(
+                        builder: (_) => NoteEditorScreen(
+                          folders: testFolders,
+                          initialFolderId: 'work',
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Open Note'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Note'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, 'Untitled note'), 'Meeting notes');
+      await tester.pumpAndSettle();
+
+      // Change folder to Personal
+      await tester.tap(find.byKey(const ValueKey('note-folder-selector')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Personal').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      expect(savedNote, isNotNull);
+      expect(savedNote!['title'], 'Meeting notes');
+      expect(savedNote!['folderId'], 'personal');
+    });
+
+    testWidgets('NoteViewScreen displays folder badge in AppBar', (tester) async {
+      final noteWithFolder = {
+        'id': 'note-1',
+        'title': 'Project Roadmap',
+        'preview': 'Q1 roadmap',
+        'folderId': 'work',
+      };
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: const [
+            FlutterQuillLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [Locale('en')],
+          home: NoteViewScreen(
+            note: noteWithFolder,
+            folders: testFolders,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Project Roadmap'), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
+    });
+
+    testWidgets('DocumentUploadScreen has folder selector with regular styling', (tester) async {
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DocumentUploadScreen(
+            currentVaultSizeBytes: 0,
+            maxVaultBytes: 100 * 1024 * 1024,
+            folders: testFolders,
+            initialFolderId: 'work',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('document-folder-selector')), findsOneWidget);
+      expect(find.text('Work'), findsOneWidget);
+      expect(find.text('Choose documents'), findsOneWidget);
+      expect(find.textContaining('per document'), findsOneWidget);
     });
   });
 }

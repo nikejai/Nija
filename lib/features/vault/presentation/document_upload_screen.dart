@@ -68,27 +68,11 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
 
   List<DropdownMenuItem<String>> get _folderDropdownItems {
     final items = _effectiveFolders.map((folder) {
-      final isDefault = folder.id == 'default';
       return DropdownMenuItem<String>(
         value: folder.id,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isDefault ? Icons.folder_special : Icons.folder,
-              size: 18,
-              color: isDefault
-                  ? const Color(0xFFF59E0B)
-                  : const Color(0xFFEAB308),
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                folder.name,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
+        child: Text(
+          folder.name,
+          overflow: TextOverflow.ellipsis,
         ),
       );
     }).toList();
@@ -97,18 +81,9 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
       items.add(
         DropdownMenuItem<String>(
           value: _selectedFolderId,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.folder_outlined, size: 18, color: Colors.grey),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  _selectedFolderId,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+          child: Text(
+            _selectedFolderId,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       );
@@ -207,13 +182,13 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                                 icon: const Icon(Icons.attach_file),
                                 label: Text(
                                   _selectedFiles.isEmpty
-                                      ? 'Choose document'
-                                      : 'Add another document',
+                                      ? 'Choose documents'
+                                      : 'Add more documents',
                                 ),
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                'Maximum file size: ${VaultLimits.formatBytes(widget.maxDocumentBytes)}',
+                                'Maximum file size: ${VaultLimits.formatBytes(widget.maxDocumentBytes)} per document',
                                 style: TextStyle(
                                   color: colorScheme.onSurfaceVariant,
                                   fontSize: 12,
@@ -272,6 +247,11 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                               DropdownButtonFormField<String>(
                                 key: const ValueKey('document-folder-selector'),
                                 initialValue: _selectedFolderId,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.normal,
+                                  color: colorScheme.onSurface,
+                                ),
                                 items: _folderDropdownItems,
                                 onChanged: _uploading
                                     ? null
@@ -345,7 +325,11 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                     child: FilledButton.icon(
                       onPressed: _canUpload ? _uploadDocument : null,
                       icon: const Icon(Icons.enhanced_encryption_outlined),
-                      label: const Text('Upload document'),
+                      label: Text(
+                        _selectedFiles.length > 1
+                            ? 'Upload ${_selectedFiles.length} documents'
+                            : 'Upload document',
+                      ),
                     ),
                   ),
                 ],
@@ -434,13 +418,9 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     if (!mounted) return;
     setState(() => _progress = 0.45);
 
-    final file = _selectedFiles.first;
-    final extension = _extensionFor(file);
-    final description = _descriptionController.text.trim();
-    final title = _titleController.text.trim().isEmpty
-        ? _fileNameWithoutExtension(file.name)
-        : _titleController.text.trim();
     final uploadedAt = DateTime.now().toUtc().toIso8601String();
+    final description = _descriptionController.text.trim();
+    final customTitle = _titleController.text.trim();
     final tags = _tagsController.text
         .split(',')
         .map((entry) => entry.trim())
@@ -451,57 +431,52 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     if (!mounted) return;
     setState(() => _progress = 0.78);
 
-    final fields = <Map<String, dynamic>>[
-      {'label': 'File name', 'value': file.name, 'sensitive': false},
-      {'label': 'Extension', 'value': extension, 'sensitive': false},
-      {'label': 'Size', 'value': _formatBytes(file.size), 'sensitive': false},
-      if (description.isNotEmpty)
-        {'label': 'Description', 'value': description, 'sensitive': false},
-    ];
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final documentsList = <Map<String, dynamic>>[];
+
+    for (var i = 0; i < _selectedFiles.length; i++) {
+      final file = _selectedFiles[i];
+      final extension = _extensionFor(file);
+      final title = (i == 0 && customTitle.isNotEmpty)
+          ? customTitle
+          : _fileNameWithoutExtension(file.name);
+      final fields = <Map<String, dynamic>>[
+        {'label': 'File name', 'value': file.name, 'sensitive': false},
+        {'label': 'Extension', 'value': extension, 'sensitive': false},
+        {'label': 'Size', 'value': _formatBytes(file.size), 'sensitive': false},
+        if (description.isNotEmpty)
+          {'label': 'Description', 'value': description, 'sensitive': false},
+      ];
+
+      documentsList.add(<String, dynamic>{
+        'id': '${nowMs}_$i',
+        'type': 'Documents',
+        'title': title,
+        'subtitle': description,
+        'updated': 'Now',
+        'pinned': false,
+        'tags': tags,
+        'fields': fields,
+        'folderId': _selectedFolderId,
+        if (file.readStream != null) '__documentReadStream__': file.readStream,
+        if (file.bytes != null) '__documentBytes__': file.bytes,
+        'documentExtension': extension,
+        'documentSizeBytes': file.size,
+        'documentFileName': file.name,
+        'documentUploadedAt': uploadedAt,
+        'documentStorage': 'pending',
+      });
+    }
 
     await Future<void>.delayed(const Duration(milliseconds: 140));
     if (!mounted) return;
     setState(() => _progress = 1);
-    Navigator.of(context).pop(<String, dynamic>{
-      'id': DateTime.now().millisecondsSinceEpoch.toString(),
-      'type': 'Documents',
-      'title': title,
-      'subtitle': description,
-      'updated': 'Now',
-      'pinned': false,
-      'tags': tags,
-      'fields': fields,
-      'folderId': _selectedFolderId,
-      if (file.readStream != null) '__documentReadStream__': file.readStream,
-      if (file.bytes != null) '__documentBytes__': file.bytes,
-      'documentExtension': extension,
-      'documentSizeBytes': file.size,
-      'documentFileName': file.name,
-      'documentUploadedAt': uploadedAt,
-      'documentStorage': 'pending',
-      if (_selectedFiles.length > 1)
-        'attachments': _selectedFiles
-            .skip(1)
-            .map((file) => _attachmentFromFile(file, uploadedAt))
-            .toList(),
-    });
-  }
 
-  Map<String, dynamic> _attachmentFromFile(
-    PlatformFile file,
-    String uploadedAt,
-  ) {
-    return {
-      'id': 'attachment-${DateTime.now().microsecondsSinceEpoch}-${file.name}',
-      'title': _fileNameWithoutExtension(file.name),
-      'documentFileName': file.name,
-      'documentExtension': _extensionFor(file),
-      'documentSizeBytes': file.size,
-      'documentUploadedAt': uploadedAt,
-      'documentStorage': 'pending',
-      if (file.readStream != null) '__documentReadStream__': file.readStream,
-      if (file.bytes != null) '__documentBytes__': file.bytes,
-    };
+    final primaryItem = Map<String, dynamic>.from(documentsList.first);
+    if (documentsList.length > 1) {
+      primaryItem['documents'] = documentsList;
+    }
+    Navigator.of(context).pop(primaryItem);
   }
 }
 
@@ -521,7 +496,7 @@ class _EmptyDocumentPicker extends StatelessWidget {
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Text(
-        'No document selected',
+        'No documents selected',
         style: TextStyle(color: colorScheme.onSurfaceVariant),
         textAlign: TextAlign.center,
       ),

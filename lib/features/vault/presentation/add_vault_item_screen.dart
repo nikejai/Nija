@@ -251,27 +251,11 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
 
   List<DropdownMenuItem<String>> get _folderDropdownItems {
     final items = _effectiveFolders.map((folder) {
-      final isDefault = folder.id == 'default';
       return DropdownMenuItem<String>(
         value: folder.id,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              isDefault ? Icons.folder_special : Icons.folder,
-              size: 18,
-              color: isDefault
-                  ? const Color(0xFFF59E0B)
-                  : const Color(0xFFEAB308),
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                folder.name,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
+        child: Text(
+          folder.name,
+          overflow: TextOverflow.ellipsis,
         ),
       );
     }).toList();
@@ -280,18 +264,9 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
       items.add(
         DropdownMenuItem<String>(
           value: _selectedFolderId,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.folder_outlined, size: 18, color: Colors.grey),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  _selectedFolderId,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
+          child: Text(
+            _selectedFolderId,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       );
@@ -490,6 +465,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final showTypeSelector =
         widget.fixedType == null && widget.initialItem == null;
     final categoryColor = _colorForItemType(
@@ -569,6 +545,11 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                             if (showTypeSelector) ...[
                               DropdownButtonFormField<String>(
                                 initialValue: _type,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.normal,
+                                  color: colorScheme.onSurface,
+                                ),
                                 items: _allTemplates
                                     .map(
                                       (template) => DropdownMenuItem(
@@ -593,6 +574,11 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                             DropdownButtonFormField<String>(
                               key: const ValueKey('item-folder-selector'),
                               initialValue: _selectedFolderId,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.normal,
+                                color: colorScheme.onSurface,
+                              ),
                               items: _folderDropdownItems,
                               onChanged: (value) {
                                 if (value == null || value == _selectedFolderId) return;

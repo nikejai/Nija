@@ -4,7 +4,7 @@ class VaultLimits {
   static const int freeVaultBytes = 1024 * 1024 * 1024;
   static const int legacyWebVaultBytes = 1024 * 1024 * 1024;
   static const int paidVaultBytes = 1024 * 1024 * 1024;
-  static const int maxDocumentBytes = 25 * 1024 * 1024;
+  static const int maxDocumentBytes = 5 * 1024 * 1024;
   static const int freeVaultCount = 99;
   static const int paidAndroidVaultCount = 99;
 

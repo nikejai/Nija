@@ -4,12 +4,21 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 import '../../../core/localization/app_strings.dart';
+import '../../../domain/models/vault_folder.dart';
 
 class NoteEditorScreen extends StatefulWidget {
-  const NoteEditorScreen({super.key, this.initialNote, this.onAutoSave});
+  const NoteEditorScreen({
+    super.key,
+    this.initialNote,
+    this.onAutoSave,
+    this.folders = const <VaultFolder>[],
+    this.initialFolderId,
+  });
 
   final Map<String, dynamic>? initialNote;
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
+  final List<VaultFolder> folders;
+  final String? initialFolderId;
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
@@ -24,6 +33,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   late final FocusNode _editorFocusNode;
   late final List<String> _tags;
   late final String _noteId;
+  late String _selectedFolderId;
   Timer? _autosaveTimer;
   late final String _initialFingerprint;
   String _lastAutoSavedFingerprint = '';
@@ -46,10 +56,53 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     _noteId =
         widget.initialNote?['id']?.toString() ??
         DateTime.now().millisecondsSinceEpoch.toString();
+    final initialFid = widget.initialNote?['folderId']?.toString().trim() ??
+        widget.initialFolderId?.trim();
+    _selectedFolderId =
+        (initialFid != null && initialFid.isNotEmpty) ? initialFid : 'default';
     _initialFingerprint = _fingerprintForCurrentState();
     _lastAutoSavedFingerprint = _initialFingerprint;
     _titleController.addListener(_markDirty);
     _quillController.addListener(_markDirty);
+  }
+
+  List<VaultFolder> get _effectiveFolders {
+    final custom = widget.folders.where((f) => f.id != 'default').toList();
+    return [
+      VaultFolder(
+        id: 'default',
+        name: 'Default',
+        icon: 'folder_special',
+        createdAt: '',
+        updatedAt: '',
+      ),
+      ...custom,
+    ];
+  }
+
+  List<DropdownMenuItem<String>> get _folderDropdownItems {
+    final items = _effectiveFolders.map((folder) {
+      return DropdownMenuItem<String>(
+        value: folder.id,
+        child: Text(
+          folder.name,
+          overflow: TextOverflow.ellipsis,
+        ),
+      );
+    }).toList();
+
+    if (!_effectiveFolders.any((f) => f.id == _selectedFolderId)) {
+      items.add(
+        DropdownMenuItem<String>(
+          value: _selectedFolderId,
+          child: Text(
+            _selectedFolderId,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
+    return items;
   }
 
   @override
@@ -228,6 +281,52 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                               const SizedBox(height: 10),
                               _NoteEditorPanel(
                                 padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 4,
+                                ),
+                                child: DropdownButtonFormField<String>(
+                                  key: const ValueKey('note-folder-selector'),
+                                  initialValue: _selectedFolderId,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.normal,
+                                    color: colorScheme.onSurface,
+                                  ),
+                                  items: _folderDropdownItems,
+                                  onChanged: (value) {
+                                    if (value == null || value == _selectedFolderId) return;
+                                    setState(() {
+                                      _selectedFolderId = value;
+                                    });
+                                    _markDirty();
+                                  },
+                                  decoration: InputDecoration(
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    filled: false,
+                                    isDense: true,
+                                    contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                                    labelText: 'Folder',
+                                    labelStyle: TextStyle(
+                                      fontSize: 12,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                    prefixIcon: Icon(
+                                      _selectedFolderId == 'default'
+                                          ? Icons.folder_special
+                                          : Icons.folder,
+                                      size: 20,
+                                      color: _selectedFolderId == 'default'
+                                          ? const Color(0xFFF59E0B)
+                                          : const Color(0xFFEAB308),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              _NoteEditorPanel(
+                                padding: const EdgeInsets.symmetric(
                                   horizontal: 4,
                                   vertical: 4,
                                 ),
@@ -356,6 +455,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       'title': normalizedTitle,
       'plainText': plainText,
       'tags': tags,
+      'folderId': _selectedFolderId,
       'delta': deltaJson,
     });
     final effectiveTags = tags.isEmpty ? <String>['note'] : tags;
@@ -369,6 +469,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
         'updated': 'Now',
         'pinned': widget.initialNote?['pinned'] ?? false,
         'tags': effectiveTags,
+        'folderId': _selectedFolderId,
         'delta': _cloneDeltaJson(deltaJson),
       },
     );
@@ -472,6 +573,7 @@ class NoteViewScreen extends StatefulWidget {
     this.readOnly = false,
     this.onAutoSave,
     this.onShareMenu,
+    this.folders = const <VaultFolder>[],
   });
 
   final Map<String, dynamic> note;
@@ -479,6 +581,7 @@ class NoteViewScreen extends StatefulWidget {
   final bool readOnly;
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
   final VoidCallback? onShareMenu;
+  final List<VaultFolder> folders;
 
   @override
   State<NoteViewScreen> createState() => _NoteViewScreenState();
@@ -515,6 +618,16 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
     super.dispose();
   }
 
+  String _resolveFolderName(String? folderId, List<VaultFolder> folders) {
+    if (folderId == null || folderId.isEmpty || folderId == 'default') {
+      return 'Default';
+    }
+    for (final folder in folders) {
+      if (folder.id == folderId) return folder.name;
+    }
+    return folderId;
+  }
+
   bool _checkIsRecoveryNote(Map<String, dynamic> note) {
     if (note['id']?.toString() == 'note-recovery-phrase') return true;
     final tags = (note['tags'] as List<dynamic>?)
@@ -530,6 +643,8 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final folderId = widget.note['folderId']?.toString().trim();
+    final folderName = _resolveFolderName(folderId, widget.folders);
 
     return Scaffold(
       appBar: AppBar(
@@ -538,7 +653,38 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
-        title: Text(widget.note['title']?.toString() ?? 'Note'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.note['title']?.toString() ?? 'Note',
+              overflow: TextOverflow.ellipsis,
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  folderName == 'Default'
+                      ? Icons.folder_special
+                      : Icons.folder_outlined,
+                  size: 13,
+                  color: folderName == 'Default'
+                      ? const Color(0xFFF59E0B)
+                      : const Color(0xFFEAB308),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  folderName,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
         actions: [
           if (_isRecoveryNote && _revealed)
             IconButton(
@@ -562,6 +708,7 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
                         builder: (_) => NoteEditorScreen(
                           initialNote: widget.note,
                           onAutoSave: widget.onAutoSave,
+                          folders: widget.folders,
                         ),
                       ),
                     );

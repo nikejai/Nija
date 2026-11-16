@@ -1042,23 +1042,31 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
 
     if (created == null) return;
-    final item = Map<String, dynamic>.from(created);
-    if (item['folderId'] == null && folderId != null) {
-      item['folderId'] = folderId;
+    final docList = (created['documents'] as List<dynamic>?)
+        ?.whereType<Map<String, dynamic>>()
+        .toList();
+    final itemsToSave = (docList != null && docList.isNotEmpty)
+        ? docList
+        : <Map<String, dynamic>>[Map<String, dynamic>.from(created)];
+
+    for (final item in itemsToSave) {
+      if (item['folderId'] == null && folderId != null) {
+        item['folderId'] = folderId;
+      }
+      try {
+        if (!await _isPendingDocumentStored(item)) return;
+        if (!await _arePendingAttachmentsStored(item)) return;
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save document.')),
+        );
+        return;
+      }
+      _updateState(() {
+        _items.insert(0, item);
+      });
     }
-    try {
-      if (!await _isPendingDocumentStored(item)) return;
-      if (!await _arePendingAttachmentsStored(item)) return;
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to save document.')),
-      );
-      return;
-    }
-    _updateState(() {
-      _items.insert(0, item);
-    });
     await _persistVaultData();
   }
 
@@ -2480,6 +2488,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           onShareMenu: _isExploreDemoReadOnly
               ? null
               : () => _showNoteQuickActions(context, accessedNote),
+          folders: _folders,
         ),
       ),
     );
@@ -2560,7 +2569,12 @@ class _VaultAppShellState extends State<VaultAppShell> {
           initialFolderId: initialFolderId,
           onCreateNote: () async {
             return Navigator.of(context).push<Map<String, dynamic>>(
-              MaterialPageRoute(builder: (_) => const NoteEditorScreen()),
+              MaterialPageRoute(
+                builder: (_) => NoteEditorScreen(
+                  folders: _folders,
+                  initialFolderId: initialFolderId,
+                ),
+              ),
             );
           },
           onCreateDocument: () async {
@@ -2593,20 +2607,31 @@ class _VaultAppShellState extends State<VaultAppShell> {
       await _persistVaultData();
       return;
     }
-    final item = Map<String, dynamic>.from(entry);
-    try {
-      if (!await _isPendingDocumentStored(item)) return;
-      if (!await _arePendingAttachmentsStored(item)) return;
-    } catch (_) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to store document. Please retry.'),
-        ),
-      );
-      return;
+    final docList = (entry['documents'] as List<dynamic>?)
+        ?.whereType<Map<String, dynamic>>()
+        .toList();
+    final itemsToSave = (docList != null && docList.isNotEmpty)
+        ? docList
+        : <Map<String, dynamic>>[Map<String, dynamic>.from(entry)];
+
+    for (final item in itemsToSave) {
+      if (item['folderId'] == null && initialFolderId != null) {
+        item['folderId'] = initialFolderId;
+      }
+      try {
+        if (!await _isPendingDocumentStored(item)) return;
+        if (!await _arePendingAttachmentsStored(item)) return;
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to store document. Please retry.'),
+          ),
+        );
+        return;
+      }
+      setState(() => _items.insert(0, item));
     }
-    setState(() => _items.insert(0, item));
     await _persistVaultData();
   }
 
