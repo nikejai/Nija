@@ -437,91 +437,78 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               _buildNotesCanvasHeader(colorScheme, theme),
-                              _NoteEditorPanel(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 4,
-                                ),
-                                child: quill.QuillSimpleToolbar(
-                                  controller: _quillController,
-                                  config: const quill.QuillSimpleToolbarConfig(
-                                    multiRowsDisplay: false,
-                                    toolbarSectionSpacing: 1,
-                                    showDividers: false,
-                                    buttonOptions:
-                                        quill.QuillSimpleToolbarButtonOptions(
-                                      base: quill.QuillToolbarBaseButtonOptions(
-                                        iconButtonFactor: 1.15,
-                                        iconSize: 15,
-                                      ),
+                              quill.QuillSimpleToolbar(
+                                controller: _quillController,
+                                config: const quill.QuillSimpleToolbarConfig(
+                                  multiRowsDisplay: false,
+                                  toolbarSectionSpacing: 1,
+                                  showDividers: false,
+                                  buttonOptions:
+                                      quill.QuillSimpleToolbarButtonOptions(
+                                    base: quill.QuillToolbarBaseButtonOptions(
+                                      iconButtonFactor: 1.15,
+                                      iconSize: 15,
                                     ),
-                                    showFontFamily: false,
-                                    showFontSize: true,
-                                    showSubscript: false,
-                                    showSuperscript: false,
-                                    showInlineCode: true,
-                                    showCodeBlock: true,
-                                    showColorButton: true,
-                                    showBackgroundColorButton: true,
-                                    showAlignmentButtons: true,
-                                    showDirection: true,
-                                    showIndent: true,
-                                    showHeaderStyle: true,
-                                    showQuote: true,
-                                    showBoldButton: true,
-                                    showItalicButton: true,
-                                    showUnderLineButton: true,
-                                    showStrikeThrough: true,
-                                    showListBullets: true,
-                                    showListCheck: true,
-                                    showListNumbers: true,
-                                    showLink: true,
                                   ),
+                                  showFontFamily: false,
+                                  showFontSize: true,
+                                  showSubscript: false,
+                                  showSuperscript: false,
+                                  showInlineCode: true,
+                                  showCodeBlock: true,
+                                  showColorButton: true,
+                                  showBackgroundColorButton: true,
+                                  showAlignmentButtons: true,
+                                  showDirection: true,
+                                  showIndent: true,
+                                  showHeaderStyle: true,
+                                  showQuote: true,
+                                  showBoldButton: true,
+                                  showItalicButton: true,
+                                  showUnderLineButton: true,
+                                  showStrikeThrough: true,
+                                  showListBullets: true,
+                                  showListCheck: true,
+                                  showListNumbers: true,
+                                  showLink: true,
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                              _NoteEditorPanel(
-                                padding: const EdgeInsets.fromLTRB(
-                                  18,
-                                  16,
-                                  18,
-                                  16,
+                              Divider(
+                                height: 12,
+                                thickness: 0.5,
+                                color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                              ),
+                              ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: (constraints.maxHeight - 200).clamp(360.0, 10000.0),
                                 ),
-                                child: SizedBox(
-                                  height: (constraints.maxHeight - 170).clamp(
-                                    320.0,
-                                    720.0,
-                                  ),
-                                  child: quill.QuillEditor.basic(
-                                    controller: _quillController,
-                                    focusNode: _editorFocusNode,
-                                    scrollController: _editorScrollController,
-                                    config: quill.QuillEditorConfig(
-                                      placeholder:
-                                          'Start writing a private document...',
-                                      scrollable: true,
-                                      autoFocus: true,
-                                      scrollBottomInset: keyboardVisible
-                                          ? keyboardInset + 24
-                                          : 80,
-                                      padding: const EdgeInsets.fromLTRB(
-                                        0,
-                                        0,
-                                        0,
-                                        16,
-                                      ),
-                                      customStyles: quill.DefaultStyles(
-                                        paragraph: quill.DefaultTextBlockStyle(
-                                          TextStyle(
-                                            color: colorScheme.onSurface,
-                                            fontSize: 15,
-                                            height: 1.5,
-                                          ),
-                                          const quill.HorizontalSpacing(0, 0),
-                                          const quill.VerticalSpacing(0, 0),
-                                          const quill.VerticalSpacing(0, 0),
-                                          null,
+                                child: quill.QuillEditor.basic(
+                                  controller: _quillController,
+                                  focusNode: _editorFocusNode,
+                                  scrollController: _editorScrollController,
+                                  config: quill.QuillEditorConfig(
+                                    placeholder:
+                                        'Start writing a private document...',
+                                    scrollable: true,
+                                    autoFocus: true,
+                                    scrollBottomInset: keyboardVisible
+                                        ? keyboardInset + 24
+                                        : 80,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 8,
+                                    ),
+                                    customStyles: quill.DefaultStyles(
+                                      paragraph: quill.DefaultTextBlockStyle(
+                                        TextStyle(
+                                          color: colorScheme.onSurface,
+                                          fontSize: 15,
+                                          height: 1.5,
                                         ),
+                                        const quill.HorizontalSpacing(0, 0),
+                                        const quill.VerticalSpacing(0, 0),
+                                        const quill.VerticalSpacing(0, 0),
+                                        null,
                                       ),
                                     ),
                                   ),
@@ -653,30 +640,6 @@ class _NoteEditorSnapshot {
   final Map<String, dynamic> payload;
 }
 
-class _NoteEditorPanel extends StatelessWidget {
-  const _NoteEditorPanel({
-    required this.child,
-    this.padding = const EdgeInsets.all(14),
-  });
-
-  final Widget child;
-  final EdgeInsetsGeometry padding;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: padding,
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        border: Border.all(color: colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: child,
-    );
-  }
-}
 
 class NoteViewScreen extends StatefulWidget {
   const NoteViewScreen({
