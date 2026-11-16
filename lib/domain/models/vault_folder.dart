@@ -1,5 +1,11 @@
 import 'package:flutter/foundation.dart';
 
+typedef VaultFolderCreateCallback = Future<VaultFolder?> Function(
+  String name, {
+  String? parentId,
+  String? color,
+});
+
 @immutable
 class VaultFolder {
   const VaultFolder({

@@ -62,7 +62,7 @@ class _DocumentDetailScreen extends StatefulWidget {
   final bool readOnly;
   final VoidCallback? onShareMenu;
   final List<VaultFolder> folders;
-  final Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder;
+  final VaultFolderCreateCallback? onCreateFolder;
 
   @override
   State<_DocumentDetailScreen> createState() => _DocumentDetailScreenState();

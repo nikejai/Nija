@@ -21,7 +21,7 @@ class NoteEditorScreen extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
   final List<VaultFolder> folders;
   final String? initialFolderId;
-  final Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder;
+  final VaultFolderCreateCallback? onCreateFolder;
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
@@ -83,230 +83,40 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     return folderId;
   }
 
-  Future<void> _openNotePropertiesSheet() async {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final folderName = _resolveFolderName(_selectedFolderId, _effectiveFolders);
-            final isDefault = _selectedFolderId == 'default';
-
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 12,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: colorScheme.outlineVariant,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Text(
-                        'Note details',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 18,
-                        ),
-                      ),
-                      const Spacer(),
-                      TextButton(
-                        key: const ValueKey('note-details-done-button'),
-                        onPressed: () {
-                          Navigator.of(sheetContext).pop();
-                        },
-                        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w700)),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const ValueKey('note-details-title-input'),
-                    controller: _titleController,
-                    autofocus: true,
-                    textCapitalization: TextCapitalization.sentences,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurface,
-                    ),
-                    decoration: InputDecoration(
-                      labelText: 'Title',
-                      hintText: 'Untitled note',
-                      prefixIcon: const Icon(Icons.title),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      suffixIcon: _titleController.text.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear, size: 18),
-                              onPressed: () {
-                                setSheetState(() {
-                                  _titleController.clear();
-                                });
-                                setState(() {});
-                              },
-                            )
-                          : null,
-                    ),
-                    onChanged: (_) {
-                      setSheetState(() {});
-                      setState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  Material(
-                    color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: colorScheme.outlineVariant),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: SwitchListTile(
-                      key: const ValueKey('note-details-favorite-switch'),
-                      value: _isFavorite,
-                      onChanged: (val) {
-                        setSheetState(() {
-                          _isFavorite = val;
-                        });
-                        setState(() {
-                          _isFavorite = val;
-                        });
-                        _markDirty();
-                      },
-                      secondary: Icon(
-                        _isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
-                        color: _isFavorite ? const Color(0xFFF59E0B) : colorScheme.onSurfaceVariant,
-                        size: 24,
-                      ),
-                      title: const Text('Add to favorites', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text(
-                        _isFavorite ? 'Pinned to top of notes' : 'Standard note',
-                        style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      key: const ValueKey('note-folder-selector'),
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () async {
-                        final picked = await showVaultFolderHierarchySheet(
-                          context,
-                          folders: _effectiveFolders,
-                          selectedFolderId: _selectedFolderId,
-                          onCreateFolder: widget.onCreateFolder,
-                        );
-                        if (picked != null) {
-                          setSheetState(() {
-                            _selectedFolderId = picked.id;
-                            if (!_customFolders.any((f) => f.id == picked.id) && picked.id != 'default') {
-                              _customFolders.add(picked);
-                            }
-                          });
-                          setState(() {
-                            _selectedFolderId = picked.id;
-                            if (!_customFolders.any((f) => f.id == picked.id) && picked.id != 'default') {
-                              _customFolders.add(picked);
-                            }
-                          });
-                          _markDirty();
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: colorScheme.outlineVariant),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              isDefault ? Icons.folder_special : Icons.folder_outlined,
-                              size: 22,
-                              color: isDefault ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Folder',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    folderName,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Icon(
-                              Icons.chevron_right,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    key: const ValueKey('note-details-apply-button'),
-                    onPressed: () {
-                      Navigator.of(sheetContext).pop();
-                    },
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 46),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    child: const Text('Apply'),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+  VaultFolder _resolveFolder(String folderId) {
+    for (final folder in _effectiveFolders) {
+      if (folder.id == folderId) return folder;
+    }
+    return VaultFolder(
+      id: folderId,
+      name: folderId.isEmpty || folderId == 'default' ? 'Default' : folderId,
+      icon: folderId == 'default' ? 'folder_special' : null,
+      createdAt: '',
+      updatedAt: '',
     );
+  }
+
+  Future<void> _openFolderPicker() async {
+    final picked = await showVaultFolderHierarchySheet(
+      context,
+      folders: _effectiveFolders,
+      selectedFolderId: _selectedFolderId,
+      onCreateFolder: widget.onCreateFolder,
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedFolderId = picked.id;
+        if (!_customFolders.any((f) => f.id == picked.id) && picked.id != 'default') {
+          _customFolders.add(picked);
+        }
+      });
+      _markDirty();
+    }
   }
 
   List<VaultFolder> get _effectiveFolders {
     return [
-      VaultFolder(
+      const VaultFolder(
         id: 'default',
         name: 'Default',
         icon: 'folder_special',
@@ -362,6 +172,132 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     return quill.Document()..insert(0, '$fallbackText\n');
   }
 
+  Widget _buildNotesCanvasHeader(ColorScheme colorScheme, ThemeData theme) {
+    final selectedFolder = _resolveFolder(_selectedFolderId);
+    final folderColor = resolveFolderColor(selectedFolder);
+    final folderName = selectedFolder.name;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Folder Pill and Favorite Row (One UI Samsung Notes style)
+        Row(
+          children: [
+            Material(
+              color: folderColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+              child: InkWell(
+                key: const ValueKey('note-folder-selector'),
+                borderRadius: BorderRadius.circular(20),
+                onTap: _openFolderPicker,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        selectedFolder.id == 'default' ? Icons.folder_special : Icons.folder,
+                        size: 15,
+                        color: folderColor,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        folderName,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: folderColor,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.keyboard_arrow_down,
+                        size: 16,
+                        color: folderColor,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const Spacer(),
+            IconButton(
+              key: const ValueKey('note-favorite-button'),
+              tooltip: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
+              icon: Icon(
+                _isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                color: _isFavorite ? const Color(0xFFF59E0B) : colorScheme.onSurfaceVariant,
+                size: 22,
+              ),
+              onPressed: () {
+                setState(() => _isFavorite = !_isFavorite);
+                _markDirty();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        // Large Title Input Row + Clear ('X') Button
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: TextField(
+                key: const ValueKey('note-details-title-input'),
+                controller: _titleController,
+                textCapitalization: TextCapitalization.sentences,
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Title',
+                  hintStyle: TextStyle(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  filled: false,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                ),
+                onChanged: (_) {
+                  setState(() {});
+                  _markDirty();
+                },
+              ),
+            ),
+            if (_titleController.text.isNotEmpty)
+              IconButton(
+                key: const ValueKey('note-title-clear-button'),
+                icon: Icon(Icons.cancel, size: 20, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7)),
+                tooltip: 'Clear title',
+                onPressed: () {
+                  _titleController.clear();
+                  setState(() {});
+                  _markDirty();
+                },
+              ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Container(
+          height: 2,
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+            color: colorScheme.primary.withValues(alpha: 0.8),
+            borderRadius: BorderRadius.circular(1),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
@@ -383,12 +319,12 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           child: Column(
             children: [
               Container(
-                height: 64,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                height: 56,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 decoration: BoxDecoration(
                   color: colorScheme.surface,
                   border: Border(
-                    bottom: BorderSide(color: colorScheme.outlineVariant),
+                    bottom: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.4)),
                   ),
                 ),
                 child: Row(
@@ -404,9 +340,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       child: InkWell(
                         key: const ValueKey('note-title-header-button'),
                         borderRadius: BorderRadius.circular(8),
-                        onTap: _openNotePropertiesSheet,
+                        onTap: _openFolderPicker,
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -421,66 +357,59 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                                       overflow: TextOverflow.ellipsis,
                                       style: theme.textTheme.titleMedium?.copyWith(
                                         color: colorScheme.onSurface,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w800,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Icon(
-                                    Icons.edit_outlined,
-                                    size: 16,
-                                    color: colorScheme.primary,
                                   ),
                                   if (_isFavorite) ...[
                                     const SizedBox(width: 4),
                                     const Icon(
                                       Icons.star_rounded,
-                                      size: 18,
+                                      size: 16,
                                       color: Color(0xFFF59E0B),
                                     ),
                                   ],
                                 ],
                               ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    _selectedFolderId == 'default' ? Icons.folder_special : Icons.folder_outlined,
-                                    size: 12,
-                                    color: _selectedFolderId == 'default' ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Flexible(
-                                    child: Text(
-                                      _resolveFolderName(_selectedFolderId, _effectiveFolders),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color: colorScheme.onSurfaceVariant,
-                                        fontWeight: FontWeight.w600,
-                                        letterSpacing: 0,
-                                      ),
-                                    ),
-                                  ),
-                                ],
+                              Text(
+                                '${_resolveFolderName(_selectedFolderId, _effectiveFolders)} · Note',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontSize: 11,
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ),
                     ),
+                    IconButton(
+                      tooltip: 'Undo',
+                      icon: const Icon(Icons.undo, size: 20),
+                      onPressed: () => _quillController.undo(),
+                    ),
+                    IconButton(
+                      tooltip: 'Redo',
+                      icon: const Icon(Icons.redo, size: 20),
+                      onPressed: () => _quillController.redo(),
+                    ),
+                    const SizedBox(width: 4),
                     FilledButton(
+                      key: const ValueKey('note-save-button'),
                       onPressed: _save,
                       style: FilledButton.styleFrom(
                         backgroundColor: colorScheme.onSurface,
                         foregroundColor: colorScheme.surface,
-                        minimumSize: const Size(76, 40),
+                        minimumSize: const Size(68, 36),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(18),
                         ),
                       ),
-                      child: const Text('Save'),
+                      child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                     ),
                   ],
                 ),
@@ -507,6 +436,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              _buildNotesCanvasHeader(colorScheme, theme),
                               _NoteEditorPanel(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 4,
@@ -766,7 +696,7 @@ class NoteViewScreen extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>>? onAutoSave;
   final VoidCallback? onShareMenu;
   final List<VaultFolder> folders;
-  final Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder;
+  final VaultFolderCreateCallback? onCreateFolder;
 
   @override
   State<NoteViewScreen> createState() => _NoteViewScreenState();

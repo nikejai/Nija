@@ -1117,11 +1117,6 @@ void main() {
       await tester.tap(find.text('Open Note'));
       await tester.pumpAndSettle();
 
-      // Tap header title to open note details sheet
-      expect(find.byKey(const ValueKey('note-title-header-button')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
-      await tester.pumpAndSettle();
-
       expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
       expect(find.text('Work'), findsWidgets);
 
@@ -1133,10 +1128,6 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Personal').last);
-      await tester.pumpAndSettle();
-
-      // Dismiss details sheet
-      await tester.tap(find.text('Apply'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Save'));
@@ -1225,7 +1216,7 @@ void main() {
                         builder: (_) => AddVaultItemScreen(
                           fixedType: 'Login',
                           folders: testFolders,
-                          onCreateFolder: (name, {parentId}) async {
+                          onCreateFolder: (name, {parentId, color}) async {
                             final folder = VaultFolder(
                               id: 'folder-finances',
                               name: name,
@@ -1304,7 +1295,7 @@ void main() {
             currentVaultSizeBytes: 0,
             maxVaultBytes: 100 * 1024 * 1024,
             folders: testFolders,
-            onCreateFolder: (name, {parentId}) async {
+            onCreateFolder: (name, {parentId, color}) async {
               final folder = VaultFolder(
                 id: 'folder-legal',
                 name: name,
@@ -1363,7 +1354,7 @@ void main() {
                       MaterialPageRoute(
                         builder: (_) => NoteEditorScreen(
                           folders: testFolders,
-                          onCreateFolder: (name, {parentId}) async {
+                          onCreateFolder: (name, {parentId, color}) async {
                             final folder = VaultFolder(
                               id: 'folder-journal',
                               name: name,
@@ -1389,10 +1380,6 @@ void main() {
       await tester.tap(find.text('Open Note'));
       await tester.pumpAndSettle();
 
-      // Tap header title to open note details sheet
-      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
-      await tester.pumpAndSettle();
-
       await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'Daily Journal');
       await tester.pumpAndSettle();
 
@@ -1414,10 +1401,6 @@ void main() {
 
       expect(createdFolders.length, 1);
       expect(createdFolders.first.name, 'Journal');
-
-      // Dismiss details sheet
-      await tester.tap(find.text('Apply'));
-      await tester.pumpAndSettle();
 
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -1449,11 +1432,12 @@ void main() {
           home: Scaffold(
             body: NoteEditorScreen(
               folders: testFolders,
-              onCreateFolder: (name, {parentId}) async {
+              onCreateFolder: (name, {parentId, color}) async {
                 final folder = VaultFolder(
                   id: 'folder-sub',
                   name: name,
                   parentId: parentId,
+                  color: color,
                   createdAt: '2026-11-16T12:00:00Z',
                   updatedAt: '2026-11-16T12:00:00Z',
                 );
@@ -1466,11 +1450,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Open note details
-      await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
-      await tester.pumpAndSettle();
-
-      // Open folder hierarchy
+      // Open folder hierarchy directly from canvas folder pill
+      expect(find.byKey(const ValueKey('note-folder-selector')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('note-folder-selector')));
       await tester.pumpAndSettle();
 

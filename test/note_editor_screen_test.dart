@@ -50,13 +50,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
-    await tester.pumpAndSettle();
-
     await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'Updated Draft');
-    await tester.tap(find.text('Apply'));
-    await tester.pumpAndSettle();
-
     await tester.pump(const Duration(milliseconds: 1200));
     expect(latest, isNotNull);
     expect(latest!['title'], 'Updated Draft');
@@ -89,9 +83,6 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('note-title-header-button')));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byKey(const ValueKey('note-details-title-input')), 'A');

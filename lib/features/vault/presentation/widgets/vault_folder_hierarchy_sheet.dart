@@ -4,18 +4,24 @@ import '../../../../domain/models/folder_tree_node.dart';
 import '../../../../domain/models/vault_folder.dart';
 import 'vault_create_folder_dialog.dart';
 
+Color resolveFolderColor(VaultFolder folder, {Color defaultColor = const Color(0xFF0381FE)}) {
+  if (folder.id == 'default') return const Color(0xFFF59E0B);
+  if (folder.color != null && folder.color!.trim().isNotEmpty) {
+    return parseFolderHexColor(folder.color, fallback: defaultColor);
+  }
+  return defaultColor;
+}
+
 Future<VaultFolder?> showVaultFolderHierarchySheet(
   BuildContext context, {
   required List<VaultFolder> folders,
   required String selectedFolderId,
-  Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder,
+  VaultFolderCreateCallback? onCreateFolder,
 }) async {
   return showModalBottomSheet<VaultFolder>(
     context: context,
     isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
+    backgroundColor: Colors.transparent,
     builder: (ctx) => _FolderHierarchySheetContent(
       initialFolders: folders,
       selectedFolderId: selectedFolderId,
@@ -33,7 +39,7 @@ class _FolderHierarchySheetContent extends StatefulWidget {
 
   final List<VaultFolder> initialFolders;
   final String selectedFolderId;
-  final Future<VaultFolder?> Function(String name, {String? parentId})? onCreateFolder;
+  final VaultFolderCreateCallback? onCreateFolder;
 
   @override
   State<_FolderHierarchySheetContent> createState() =>
@@ -80,10 +86,14 @@ class _FolderHierarchySheetContentState
   }
 
   Future<void> _showFolderOptions(VaultFolder folder) async {
+    final folderColor = resolveFolderColor(folder);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     await showModalBottomSheet<void>(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheetContext) => SafeArea(
         child: Column(
@@ -93,11 +103,20 @@ class _FolderHierarchySheetContentState
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
                 children: [
-                  Icon(
-                    folder.id == 'default' ? Icons.folder_special : Icons.folder_outlined,
-                    color: folder.id == 'default' ? const Color(0xFFF59E0B) : const Color(0xFFEAB308),
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: folderColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      folder.id == 'default' ? Icons.folder_special : Icons.folder,
+                      color: folderColor,
+                      size: 18,
+                    ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       folder.name,
@@ -110,7 +129,7 @@ class _FolderHierarchySheetContentState
             ),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.create_new_folder_outlined),
+              leading: Icon(Icons.create_new_folder_outlined, color: colorScheme.primary),
               title: Text('Create subfolder inside "${folder.name}"'),
               onTap: () async {
                 Navigator.of(sheetContext).pop();
@@ -118,6 +137,7 @@ class _FolderHierarchySheetContentState
                   context,
                   parentFolderId: folder.id,
                   parentFolderName: folder.name,
+                  initialColor: folder.color,
                   onCreateFolder: widget.onCreateFolder,
                 );
                 if (subfolder != null && mounted) {
@@ -130,14 +150,38 @@ class _FolderHierarchySheetContentState
                 }
               },
             ),
+            if (folder.id != 'default')
+              ListTile(
+                leading: Icon(Icons.edit_outlined, color: colorScheme.onSurfaceVariant),
+                title: const Text('Rename'),
+                onTap: () async {
+                  Navigator.of(sheetContext).pop();
+                  final renamed = await showCreateVaultFolderDialog(
+                    context,
+                    initialName: folder.name,
+                    initialColor: folder.color,
+                    isRename: true,
+                    onCreateFolder: widget.onCreateFolder,
+                  );
+                  if (renamed != null && mounted) {
+                    setState(() {
+                      final idx = _folders.indexWhere((f) => f.id == folder.id);
+                      if (idx != -1) {
+                        _folders[idx] = _folders[idx].copyWith(name: renamed.name, color: renamed.color);
+                      }
+                    });
+                  }
+                },
+              ),
             ListTile(
-              leading: const Icon(Icons.check_circle_outline),
+              leading: Icon(Icons.check_circle_outline, color: colorScheme.primary),
               title: const Text('Select this folder'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 Navigator.of(context).pop(folder);
               },
             ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -155,7 +199,7 @@ class _FolderHierarchySheetContentState
 
     final defaultFolder = _folders.firstWhere(
       (f) => f.id == 'default',
-      orElse: () => VaultFolder(
+      orElse: () => const VaultFolder(
         id: 'default',
         name: 'Default',
         icon: 'folder_special',
@@ -170,77 +214,97 @@ class _FolderHierarchySheetContentState
       maxChildSize: 0.9,
       expand: false,
       builder: (context, scrollController) {
-        return Column(
-          children: [
-            // Drag handle
-            Container(
-              margin: const EdgeInsets.only(top: 10, bottom: 6),
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: colorScheme.outlineVariant,
-                borderRadius: BorderRadius.circular(2),
+        return Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 16,
+                offset: const Offset(0, -4),
               ),
-            ),
-            // Header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 12, 12),
-              child: Row(
-                children: [
-                  Text(
-                    'Select Folder',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 18,
-                    ),
+            ],
+          ),
+          child: Column(
+            children: [
+              // One UI Drag Handle
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 4),
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
                   ),
-                  const Spacer(),
-                  FilledButton.tonalIcon(
-                    key: const ValueKey('hierarchy-create-folder-button'),
-                    onPressed: _createTopLevelFolder,
-                    icon: const Icon(Icons.create_new_folder_outlined, size: 18),
-                    label: const Text('New folder'),
-                    style: FilledButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                'Tip: Long-press any folder to create a subfolder inside it.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: colorScheme.onSurfaceVariant,
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Divider(height: 1),
-            // Folder Tree List
-            Expanded(
-              child: ListView(
-                controller: scrollController,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                children: [
-                  // Default Folder Tile
-                  _buildFolderTile(
-                    folder: defaultFolder,
-                    level: 0,
-                    hasChildren: false,
-                    isExpanded: false,
-                  ),
-                  // Hierarchical Folder Nodes
-                  for (final node in tree) ..._renderTreeNode(node, 0),
-                ],
+              // Header: "Select folder" on left, '+' and 'x' on right
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 8, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      'Select folder',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      key: const ValueKey('hierarchy-create-folder-button'),
+                      tooltip: 'Create folder',
+                      icon: const Icon(Icons.add, size: 22),
+                      onPressed: _createTopLevelFolder,
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      icon: const Icon(Icons.close, size: 20),
+                      onPressed: () => Navigator.of(context).pop(null),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              const Divider(height: 1),
+              // Folder Tree List
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  children: [
+                    _buildFolderTile(
+                      folder: defaultFolder,
+                      level: 0,
+                      hasChildren: false,
+                      isExpanded: false,
+                    ),
+                    for (final node in tree) ..._renderTreeNode(node, 0),
+                  ],
+                ),
+              ),
+              // Subtle Native Gesture Discovery Caption
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                  border: Border(top: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.4))),
+                ),
+                child: Text(
+                  'Tap + to create folder · Touch & hold a folder to add subfolder',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -278,9 +342,10 @@ class _FolderHierarchySheetContentState
     final colorScheme = Theme.of(context).colorScheme;
     final isSelected = _selectedFolderId == folder.id;
     final isDefault = folder.id == 'default';
+    final folderColor = resolveFolderColor(folder);
 
     return Material(
-      color: isSelected ? colorScheme.primaryContainer.withValues(alpha: 0.25) : Colors.transparent,
+      color: isSelected ? folderColor.withValues(alpha: 0.10) : Colors.transparent,
       child: InkWell(
         onTap: () {
           setState(() => _selectedFolderId = folder.id);
@@ -289,69 +354,110 @@ class _FolderHierarchySheetContentState
         onLongPress: () => _showFolderOptions(folder),
         child: Padding(
           padding: EdgeInsets.only(
-            left: 16.0 + (level * 22.0),
+            left: 14.0 + (level * 22.0),
             right: 16,
-            top: 10,
-            bottom: 10,
+            top: 8,
+            bottom: 8,
           ),
           child: Row(
-          children: [
-            if (hasChildren)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  setState(() {
-                    if (isExpanded) {
-                      _expandedFolderIds.remove(folder.id);
-                    } else {
-                      _expandedFolderIds.add(folder.id);
-                    }
-                  });
-                },
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: Icon(
-                    isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-                    size: 20,
-                    color: colorScheme.onSurfaceVariant,
+            children: [
+              if (hasChildren)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    setState(() {
+                      if (isExpanded) {
+                        _expandedFolderIds.remove(folder.id);
+                      } else {
+                        _expandedFolderIds.add(folder.id);
+                      }
+                    });
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Icon(
+                      isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                      size: 20,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              else
+                SizedBox(
+                  width: 24,
+                  child: level > 0
+                      ? Center(
+                          child: Text(
+                            '└',
+                            style: TextStyle(
+                              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                              fontSize: 14,
+                            ),
+                          ),
+                        )
+                      : null,
+                ),
+              // Folder icon with tinted container
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: folderColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(
+                  isDefault
+                      ? Icons.folder_special
+                      : (folder.parentId != null
+                          ? Icons.folder_open_outlined
+                          : Icons.folder),
+                  size: 18,
+                  color: folderColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      folder.name,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                        color: isSelected ? folderColor : colorScheme.onSurface,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      isDefault ? 'Standard folder' : (folder.parentId != null ? 'Subfolder' : 'Folder'),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isSelected)
+                Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: folderColor,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.check,
+                    size: 14,
+                    color: Colors.white,
                   ),
                 ),
-              )
-            else
-              const SizedBox(width: 26),
-            Icon(
-              isDefault
-                  ? Icons.folder_special
-                  : (folder.parentId != null
-                      ? Icons.folder_open_outlined
-                      : Icons.folder_outlined),
-              size: 22,
-              color: isDefault
-                  ? const Color(0xFFF59E0B)
-                  : (isSelected ? colorScheme.primary : const Color(0xFFEAB308)),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                folder.name,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                  color: isSelected ? colorScheme.primary : colorScheme.onSurface,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (isSelected)
-              Icon(
-                Icons.check_circle_rounded,
-                size: 20,
-                color: colorScheme.primary,
-              ),
-          ],
+            ],
+          ),
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 }

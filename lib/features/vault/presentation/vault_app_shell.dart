@@ -937,7 +937,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     _persistVaultDataUnchecked();
   }
 
-  Future<VaultFolder?> _handleCreateFolder(String name, {String? parentId}) async {
+  Future<VaultFolder?> _handleCreateFolder(String name, {String? parentId, String? color}) async {
     final clean = name.trim();
     if (clean.isEmpty) return null;
     late final VaultFolder createdFolder;
@@ -946,6 +946,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         folders: _folders,
         name: clean,
         parentId: parentId,
+        color: color,
       );
       createdFolder = updated.last;
       _folders = updated;
