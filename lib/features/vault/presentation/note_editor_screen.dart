@@ -466,21 +466,15 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
+                    final minContentHeight =
+                        (constraints.maxHeight - 32).clamp(0.0, double.infinity);
                     return SingleChildScrollView(
-                      padding: EdgeInsets.fromLTRB(
-                        16,
-                        16,
-                        16,
-                        keyboardVisible ? keyboardInset + 12 : 16,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                       child: Center(
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
                             maxWidth: 860,
-                            minHeight:
-                                constraints.maxHeight -
-                                (keyboardVisible ? keyboardInset : 0) -
-                                32,
+                            minHeight: minContentHeight,
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -540,7 +534,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                                     scrollable: true,
                                     autoFocus: true,
                                     scrollBottomInset: keyboardVisible
-                                        ? keyboardInset + 24
+                                        ? 24
                                         : 80,
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 4,
