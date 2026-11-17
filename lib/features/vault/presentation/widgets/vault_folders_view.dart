@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -199,6 +200,9 @@ class VaultFoldersView extends StatefulWidget {
     required this.onMoveItem,
     required this.onCopyItem,
     required this.onDeleteItem,
+    this.onMoveItems,
+    this.onCopyItems,
+    this.onDeleteItems,
     this.isDemoPreview = false,
     this.onExitDemoPreview,
     this.onFolderChanged,
@@ -221,6 +225,9 @@ class VaultFoldersView extends StatefulWidget {
   final void Function(Map<String, dynamic> item, String? targetFolderId) onMoveItem;
   final void Function(Map<String, dynamic> item, String? targetFolderId) onCopyItem;
   final ValueChanged<Map<String, dynamic>> onDeleteItem;
+  final void Function(List<Map<String, dynamic>> items, String? targetFolderId)? onMoveItems;
+  final void Function(List<Map<String, dynamic>> items, String? targetFolderId)? onCopyItems;
+  final void Function(List<Map<String, dynamic>> items)? onDeleteItems;
   final bool isDemoPreview;
   final VoidCallback? onExitDemoPreview;
   final ValueChanged<String?>? onFolderChanged;
@@ -351,107 +358,77 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     });
   }
 
-  void _moveSelectedItems() {
-    final selected = _selectedItems;
-    if (selected.isEmpty) return;
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Move ${selected.length} items to...'),
-        content: SizedBox(
-          width: 320,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.folder_special, color: Color(0xFFF59E0B)),
-                title: const Text('Default Folder'),
-                subtitle: const Text('Move to default vault location'),
-                onTap: () {
-                  for (final item in selected) {
-                    widget.onMoveItem(item, null);
-                  }
-                  Navigator.pop(ctx);
-                  _exitSelectionMode();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Moved ${selected.length} items to Default Folder.')),
-                  );
-                },
-              ),
-              for (final target in widget.folders.where((f) => f.id != VaultFoldersView.defaultFolderId))
-                ListTile(
-                  leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
-                  title: Text(target.name),
-                  onTap: () {
-                    for (final item in selected) {
-                      widget.onMoveItem(item, target.id);
-                    }
-                    Navigator.pop(ctx);
-                    _exitSelectionMode();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Moved ${selected.length} items to "${target.name}".')),
-                    );
-                  },
-                ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ],
-      ),
+  Future<VaultFolder?> _createFolderCallback(
+    String name, {
+    String? parentId,
+    String? color,
+  }) async {
+    widget.onCreateFolder(name, parentId, color);
+    return VaultFolder(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      name: name,
+      parentId: parentId,
+      color: color,
+      createdAt: DateTime.now().toIso8601String(),
+      updatedAt: DateTime.now().toIso8601String(),
     );
   }
 
-  void _copySelectedItems() {
+  Future<void> _moveSelectedItems() async {
     final selected = _selectedItems;
     if (selected.isEmpty) return;
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Copy ${selected.length} items to...'),
-        content: SizedBox(
-          width: 320,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.folder_special, color: Color(0xFFF59E0B)),
-                title: const Text('Default Folder'),
-                subtitle: const Text('Copy to default vault location'),
-                onTap: () {
-                  for (final item in selected) {
-                    widget.onCopyItem(item, null);
-                  }
-                  Navigator.pop(ctx);
-                  _exitSelectionMode();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Copied ${selected.length} items to Default Folder.')),
-                  );
-                },
-              ),
-              for (final target in widget.folders.where((f) => f.id != VaultFoldersView.defaultFolderId))
-                ListTile(
-                  leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
-                  title: Text(target.name),
-                  onTap: () {
-                    for (final item in selected) {
-                      widget.onCopyItem(item, target.id);
-                    }
-                    Navigator.pop(ctx);
-                    _exitSelectionMode();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Copied ${selected.length} items to "${target.name}".')),
-                    );
-                  },
-                ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ],
-      ),
+    final targetFolder = await showVaultFolderHierarchySheet(
+      context,
+      folders: widget.folders,
+      selectedFolderId: _currentFolderId ?? VaultFoldersView.defaultFolderId,
+      onCreateFolder: _createFolderCallback,
+      title: 'Move ${selected.length} items to...',
+    );
+    if (targetFolder == null || !mounted) return;
+
+    _exitSelectionMode();
+    final targetId = targetFolder.id == VaultFoldersView.defaultFolderId || targetFolder.id == 'root'
+        ? null
+        : targetFolder.id;
+
+    if (widget.onMoveItems != null) {
+      widget.onMoveItems!(selected, targetId);
+    } else {
+      for (final item in selected) {
+        widget.onMoveItem(item, targetId);
+      }
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Moved ${selected.length} items to "${targetFolder.name}".')),
+    );
+  }
+
+  Future<void> _copySelectedItems() async {
+    final selected = _selectedItems;
+    if (selected.isEmpty) return;
+    final targetFolder = await showVaultFolderHierarchySheet(
+      context,
+      folders: widget.folders,
+      selectedFolderId: _currentFolderId ?? VaultFoldersView.defaultFolderId,
+      onCreateFolder: _createFolderCallback,
+      title: 'Copy ${selected.length} items to...',
+    );
+    if (targetFolder == null || !mounted) return;
+
+    _exitSelectionMode();
+    final targetId = targetFolder.id == VaultFoldersView.defaultFolderId || targetFolder.id == 'root'
+        ? null
+        : targetFolder.id;
+
+    if (widget.onCopyItems != null) {
+      widget.onCopyItems!(selected, targetId);
+    } else {
+      for (final item in selected) {
+        widget.onCopyItem(item, targetId);
+      }
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Copied ${selected.length} items to "${targetFolder.name}".')),
     );
   }
 
@@ -475,11 +452,15 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               minimumSize: const Size(64, 38),
             ),
             onPressed: () {
-              for (final item in selected) {
-                widget.onDeleteItem(item);
-              }
               Navigator.pop(ctx);
               _exitSelectionMode();
+              if (widget.onDeleteItems != null) {
+                widget.onDeleteItems!(selected);
+              } else {
+                for (final item in selected) {
+                  widget.onDeleteItem(item);
+                }
+              }
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Deleted ${selected.length} items.')),
               );
@@ -794,46 +775,48 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               onPressed: _exitSelectionMode,
             ),
             const SizedBox(width: 8),
-            Text(
-              count == 0 ? 'Select items' : '$count selected',
-              key: const ValueKey('explorer-selection-count'),
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                color: colorScheme.onSurface,
+            Expanded(
+              child: Text(
+                count == 0 ? 'Select items' : '$count selected',
+                key: const ValueKey('explorer-selection-count'),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: colorScheme.onSurface,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Spacer(),
-            TextButton.icon(
+            IconButton(
               key: const ValueKey('explorer-selection-select-all'),
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              ),
-              icon: Icon(allSelected ? Icons.deselect : Icons.select_all, size: 16),
-              label: Text(
-                allSelected ? 'Deselect All' : 'Select All',
-                style: const TextStyle(fontSize: 12),
-              ),
+              icon: Icon(allSelected ? Icons.deselect : Icons.select_all, size: 20),
+              tooltip: allSelected ? 'Deselect All' : 'Select All',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: _selectAllItems,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 2),
             IconButton(
               key: const ValueKey('explorer-selection-move'),
               icon: const Icon(Icons.drive_file_move_outlined, size: 20),
               tooltip: 'Move selected',
               visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: count == 0 ? null : _moveSelectedItems,
             ),
+            const SizedBox(width: 2),
             IconButton(
               key: const ValueKey('explorer-selection-copy'),
               icon: const Icon(Icons.content_copy_outlined, size: 20),
               tooltip: 'Copy selected',
               visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: count == 0 ? null : _copySelectedItems,
             ),
+            const SizedBox(width: 2),
             IconButton(
               key: const ValueKey('explorer-selection-delete'),
               icon: Icon(
@@ -843,6 +826,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               ),
               tooltip: 'Delete selected',
               visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: count == 0 ? null : _deleteSelectedItems,
             ),
@@ -870,6 +854,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     );
 
     final viewSegmented = SegmentedButton<ExplorerViewMode>(
+      showSelectedIcon: false,
       segments: const [
         ButtonSegment(
           value: ExplorerViewMode.list,
@@ -1373,6 +1358,16 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final itemIcon = widget.iconForType?.call(type) ?? defaultIconForType(type);
     final itemColor = widget.colorForType?.call(type) ?? defaultColorForType(type);
 
+    final folderId = item['folderId']?.toString();
+    final folder = (folderId != null && folderId.isNotEmpty && folderId != VaultFoldersView.defaultFolderId)
+        ? widget.folders.firstWhere(
+            (f) => f.id == folderId,
+            orElse: () => VaultFolder(id: folderId, name: folderId, createdAt: '', updatedAt: ''),
+          )
+        : null;
+    final folderName = folder?.name ?? (widget.folders.isNotEmpty ? 'Default' : null);
+    final folderColor = folder != null ? resolveFolderColor(folder) : const Color(0xFFF59E0B);
+
     final subtitleParts = <String>[type];
     if (sizeLabel.isNotEmpty && sizeLabel != '--') subtitleParts.add(sizeLabel);
     if (dateLabel.isNotEmpty) subtitleParts.add(dateLabel);
@@ -1448,6 +1443,31 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                     ),
                     Expanded(
                       flex: 2,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            folderName == 'Default' ? Icons.folder_special : Icons.folder_outlined,
+                            size: 13,
+                            color: folderColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              folderName ?? 'Default',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: folderColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
                       child: Text(
                         sizeLabel,
                         style: EntryTypography.technicalMonospace(fontSize: 11, color: colorScheme.onSurfaceVariant),
@@ -1497,11 +1517,44 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                             overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            subtitle,
-                            style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
-                            overflow: TextOverflow.ellipsis,
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                margin: const EdgeInsets.only(right: 6),
+                                decoration: BoxDecoration(
+                                  color: folderColor.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      folderName == 'Default' ? Icons.folder_special : Icons.folder_outlined,
+                                      size: 11,
+                                      color: folderColor,
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      folderName ?? 'Default',
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: folderColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  subtitle,
+                                  style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -1635,6 +1688,16 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final itemIcon = widget.iconForType?.call(type) ?? defaultIconForType(type);
     final itemColor = widget.colorForType?.call(type) ?? defaultColorForType(type);
 
+    final folderId = item['folderId']?.toString();
+    final folder = (folderId != null && folderId.isNotEmpty && folderId != VaultFoldersView.defaultFolderId)
+        ? widget.folders.firstWhere(
+            (f) => f.id == folderId,
+            orElse: () => VaultFolder(id: folderId, name: folderId, createdAt: '', updatedAt: ''),
+          )
+        : null;
+    final folderName = folder?.name ?? (widget.folders.isNotEmpty ? 'Default' : null);
+    final folderColor = folder != null ? resolveFolderColor(folder) : const Color(0xFFF59E0B);
+
     final itemId = _itemId(item);
     final isSelected = _selectedItemIds.contains(itemId);
 
@@ -1716,6 +1779,37 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
               ),
+              Container(
+                margin: const EdgeInsets.only(top: 3, bottom: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: folderColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      folderName == 'Default' ? Icons.folder_special : Icons.folder_outlined,
+                      size: 10,
+                      color: folderColor,
+                    ),
+                    const SizedBox(width: 3),
+                    Flexible(
+                      child: Text(
+                        folderName ?? 'Default',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: folderColor,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 2),
               Text(
                 sizeLabel.isNotEmpty && sizeLabel != '--' ? '$type · $sizeLabel' : type,
@@ -1739,43 +1833,70 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       items: [...widget.items, ...widget.notes],
     );
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Left Pane: Folder Tree (Scrollable horizontally and vertically for deep nesting)
-        Container(
-          width: widget.isWide ? 280 : 180,
-          decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
-          ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: 320,
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                children: [
-                  // Root Tree Entry
-                  _buildTreeFolderTile(
-                    title: 'Root',
-                    folderId: null,
-                    isSelected: _currentFolderId == null,
-                    hasChildren: tree.isNotEmpty,
-                    level: 0,
+    final hasContent = _childFolders.isNotEmpty || _currentItems.isNotEmpty;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        // In portrait view, take 25% of the screen space for folder hierarchy
+        final treeWidth = widget.isWide ? 280.0 : (totalWidth * 0.25);
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Left Pane: Folder Tree (Scrollable horizontally and vertically for deep nesting)
+            Container(
+              key: const ValueKey('explorer-tree-left-pane'),
+              width: treeWidth,
+              decoration: BoxDecoration(
+                border: Border(right: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: 320,
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                    children: [
+                      // Root Tree Entry
+                      _buildTreeFolderTile(
+                        title: 'Root',
+                        folderId: null,
+                        isSelected: _currentFolderId == null,
+                        hasChildren: tree.isNotEmpty,
+                        level: 0,
+                      ),
+                      for (final node in tree)
+                        ..._renderTreeNode(node, 1),
+                    ],
                   ),
-                  for (final node in tree)
-                    ..._renderTreeNode(node, 1),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
 
-        // Right Pane: Contents of the active folder
-        Expanded(
-          child: _buildListView(context),
-        ),
-      ],
+            // Right Pane: Contents of the active folder (horizontally scrollable in portrait to view all item details)
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, rightConstraints) {
+                  final availableWidth = rightConstraints.maxWidth;
+                  final minContentWidth = (widget.isWide || !hasContent)
+                      ? availableWidth
+                      : math.max(availableWidth, 420.0);
+
+                  return SingleChildScrollView(
+                    key: const ValueKey('explorer-tree-right-scroll'),
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: minContentWidth,
+                      child: _buildListView(context),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1817,55 +1938,60 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final folderColor = folder != null ? resolveFolderColor(folder) : const Color(0xFFEAB308);
 
     return InkWell(
+      key: ValueKey('explorer-tree-tile-${folderId ?? "root"}'),
       onTap: () => _navigateToFolder(folderId),
       onLongPress: folder != null ? () => _showFolderActionsBottomSheet(folder) : null,
       borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: EdgeInsets.only(left: 4.0 + (level * 14.0), right: 6, top: 6, bottom: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          children: [
-            if (hasChildren && folderId != null)
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    if (isExpanded) {
-                      _expandedTreeFolderIds.remove(folderId);
-                    } else {
-                      _expandedTreeFolderIds.add(folderId);
-                    }
-                  });
-                },
-                child: Icon(
-                  isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-                  size: 16,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              )
-            else
-              const SizedBox(width: 16),
-            const SizedBox(width: 4),
-            Icon(
-              isSelected ? Icons.folder_open : Icons.folder,
-              size: 18,
-              color: folderColor,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  color: isSelected ? colorScheme.primary : colorScheme.onSurface,
-                ),
-                overflow: TextOverflow.ellipsis,
+      child: Tooltip(
+        message: title,
+        waitDuration: const Duration(milliseconds: 500),
+        child: Container(
+          padding: EdgeInsets.only(left: 4.0 + (level * 14.0), right: 6, top: 6, bottom: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            children: [
+              if (hasChildren && folderId != null)
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (isExpanded) {
+                        _expandedTreeFolderIds.remove(folderId);
+                      } else {
+                        _expandedTreeFolderIds.add(folderId);
+                      }
+                    });
+                  },
+                  child: Icon(
+                    isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                    size: 16,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                const SizedBox(width: 16),
+              const SizedBox(width: 4),
+              Icon(
+                isSelected ? Icons.folder_open : Icons.folder,
+                size: 18,
+                color: folderColor,
               ),
-            ),
-          ],
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                    color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2341,127 +2467,71 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     );
   }
 
-  void _showMoveFolderPicker(VaultFolder folder) {
-    // Collect potential parent folders (excluding itself and its descendants)
+  Future<void> _showMoveFolderPicker(VaultFolder folder) async {
     final descendants = FolderTreeBuilder.getDescendantFolderIds(folderId: folder.id, folders: widget.folders);
-    final candidates = widget.folders.where((f) => f.id != folder.id && !descendants.contains(f.id)).toList();
+    final excludedIds = {folder.id, ...descendants};
 
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Move "${folder.name}" to...'),
-        content: SizedBox(
-          width: 320,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.home_outlined),
-                title: const Text('Root Directory'),
-                onTap: () {
-                  widget.onMoveFolder(folder.id, null);
-                  Navigator.pop(ctx);
-                },
-              ),
-              for (final candidate in candidates)
-                ListTile(
-                  leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
-                  title: Text(candidate.name),
-                  onTap: () {
-                    widget.onMoveFolder(folder.id, candidate.id);
-                    Navigator.pop(ctx);
-                  },
-                ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ],
-      ),
+    final targetFolder = await showVaultFolderHierarchySheet(
+      context,
+      folders: widget.folders,
+      selectedFolderId: folder.parentId ?? 'root',
+      onCreateFolder: _createFolderCallback,
+      title: 'Move "${folder.name}" to...',
+      showRootOption: true,
+      hideDefaultFolder: true,
+      excludedFolderIds: excludedIds,
+    );
+    if (targetFolder == null || !mounted) return;
+
+    final targetParentId = targetFolder.id == 'root' ? null : targetFolder.id;
+    widget.onMoveFolder(folder.id, targetParentId);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Moved "${folder.name}" to "${targetFolder.name}".')),
     );
   }
 
-  void _handleItemAction(Map<String, dynamic> item, String action) {
+  void _handleItemAction(Map<String, dynamic> item, String action) async {
     switch (action) {
       case 'open':
         widget.onOpenItem(item);
       case 'info':
         _showItemInfoBottomSheet(item);
       case 'move':
-        showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text('Move "${item['title'] ?? 'item'}" to...'),
-            content: SizedBox(
-              width: 320,
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.folder_special, color: Color(0xFFF59E0B)),
-                    title: const Text('Default Folder'),
-                    subtitle: const Text('Move to default vault location'),
-                    onTap: () {
-                      widget.onMoveItem(item, null);
-                      Navigator.pop(ctx);
-                    },
-                  ),
-                  for (final target in widget.folders.where((f) => f.id != VaultFoldersView.defaultFolderId))
-                    ListTile(
-                      leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
-                      title: Text(target.name),
-                      onTap: () {
-                        widget.onMoveItem(item, target.id);
-                        Navigator.pop(ctx);
-                      },
-                    ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ],
-          ),
+        final targetFolder = await showVaultFolderHierarchySheet(
+          context,
+          folders: widget.folders,
+          selectedFolderId: item['folderId']?.toString() ?? VaultFoldersView.defaultFolderId,
+          onCreateFolder: _createFolderCallback,
+          title: 'Move "${item['title'] ?? 'item'}" to...',
         );
+        if (targetFolder != null && mounted) {
+          final targetId = targetFolder.id == VaultFoldersView.defaultFolderId || targetFolder.id == 'root'
+              ? null
+              : targetFolder.id;
+          widget.onMoveItem(item, targetId);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Moved "${item['title'] ?? 'item'}" to "${targetFolder.name}".')),
+          );
+        }
       case 'copy':
-        showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text('Copy "${item['title'] ?? 'item'}" to...'),
-            content: SizedBox(
-              width: 320,
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.folder_special, color: Color(0xFFF59E0B)),
-                    title: const Text('Default Folder'),
-                    subtitle: const Text('Copy to default vault location'),
-                    onTap: () {
-                      widget.onCopyItem(item, null);
-                      Navigator.pop(ctx);
-                    },
-                  ),
-                  for (final target in widget.folders.where((f) => f.id != VaultFoldersView.defaultFolderId))
-                    ListTile(
-                      leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
-                      title: Text(target.name),
-                      onTap: () {
-                        widget.onCopyItem(item, target.id);
-                        Navigator.pop(ctx);
-                      },
-                    ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            ],
-          ),
+        final targetFolder = await showVaultFolderHierarchySheet(
+          context,
+          folders: widget.folders,
+          selectedFolderId: item['folderId']?.toString() ?? VaultFoldersView.defaultFolderId,
+          onCreateFolder: _createFolderCallback,
+          title: 'Copy "${item['title'] ?? 'item'}" to...',
         );
+        if (targetFolder != null && mounted) {
+          final targetId = targetFolder.id == VaultFoldersView.defaultFolderId || targetFolder.id == 'root'
+              ? null
+              : targetFolder.id;
+          widget.onCopyItem(item, targetId);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Copied "${item['title'] ?? 'item'}" to "${targetFolder.name}".')),
+          );
+        }
       case 'delete':
-        showDialog<void>(
+        await showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: Text('Delete "${item['title'] ?? 'item'}"?'),

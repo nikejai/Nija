@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/app/theme/app_theme.dart';
+import 'package:nija/core/config/guardian_profiles.dart';
 import 'package:nija/core/localization/app_strings.dart';
 import 'package:nija/features/vault/application/vault_home_demo_data.dart';
 import 'package:nija/features/vault/presentation/add_vault_item_screen.dart';
@@ -2073,7 +2074,7 @@ void main() {
   });
 
   testWidgets(
-    'opening an item records lastAccessedAt and updates recent order',
+    'opening an item is read-only and does not persist vault data to avoid backup conflicts',
     (tester) async {
       List<Map<String, dynamic>>? persistedItems;
       tester.view.physicalSize = const Size(800, 1000);
@@ -2158,21 +2159,16 @@ void main() {
       await tester.tap(find.text('Older item'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Last accessed'), findsOneWidget);
-
       await tester.tap(find.byIcon(Icons.arrow_back));
       await tester.pumpAndSettle();
 
-      final older = persistedItems!.firstWhere(
-        (entry) => entry['id'] == 'item-older',
-      );
-      expect(older['lastAccessedAt'], isNotNull);
+      // Opening an item must not trigger persistence
+      expect(persistedItems, isNull);
 
       await tester.tap(find.text('Home'));
       await tester.pumpAndSettle();
       expect(find.text('Older item'), findsOneWidget);
       expect(find.text('Newer item'), findsOneWidget);
-      expect(find.textContaining('Just now'), findsWidgets);
     },
   );
 
@@ -5114,6 +5110,102 @@ void main() {
     expect(restoreCalls, 1);
     expect(backupCalls, 1);
   });
+
+  testWidgets(
+    'settings displays migrate to balanced vault for lion profile and migrates',
+    (tester) async {
+      String? migratedPassword;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: VaultAppShell(
+            guardianProfile: GuardianProfiles.lion,
+            onMigrateToBalancedProfile: ({required currentPassword}) async {
+              migratedPassword = currentPassword;
+            },
+            recoveryWords: const [
+              'anchor',
+              'apple',
+              'arrow',
+              'atlas',
+              'beacon',
+              'breeze',
+              'canyon',
+              'cedar',
+              'cobalt',
+              'ember',
+              'harbor',
+              'willow',
+            ],
+            initialItems: const [],
+            initialNotes: const [],
+            initialCustomTypeDefinitions: const [],
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            biometricEnabled: false,
+            onBiometricChanged: (_) {},
+            onPersistVaultData: ({
+              required items,
+              required notes,
+              required customTypeDefinitions,
+            }) async {},
+            onRotateMasterPassword: ({
+              required currentPassword,
+              required newPassword,
+            }) async {},
+            onRotateRecoveryPhrase: ({
+              required currentRecoveryPhrase,
+              required newRecoveryPhrase,
+            }) async {},
+            onLockNow: () {},
+            onExportVault: () async {},
+            onImportVault: () async {},
+            onBackupToCloud: () async {},
+            onRestoreFromCloud: () async {},
+            onReadCloudBackupAccount: () async => null,
+            onChangeCloudBackupAccount: () async => false,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Settings'));
+      await tester.pumpAndSettle();
+
+      final migrateRow = find.byKey(
+        const ValueKey('settings-migrate-to-balanced-row'),
+      );
+      await tester.scrollUntilVisible(migrateRow, 200);
+      await Scrollable.ensureVisible(
+        tester.element(migrateRow),
+        alignment: 0.2,
+      );
+      await tester.pumpAndSettle();
+      expect(migrateRow, findsOneWidget);
+
+      await tester.tap(migrateRow);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Migrate to Balanced Vault?'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('migrate-balanced-password-input')),
+        'LionPass123',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('migrate-balanced-confirm-button')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(migratedPassword, 'LionPass123');
+      expect(
+        find.text('Vault successfully migrated to Balanced profile (Owl).'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('settings-migrate-to-balanced-row')),
+        findsNothing,
+      );
+    },
+  );
 }
 
 class _CancelingSecretSharePortabilityAdapter

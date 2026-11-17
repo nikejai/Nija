@@ -148,6 +148,18 @@ extension _VaultSettingsTab on _VaultAppShellState {
                             ? null
                             : () => widget.onPinChanged!(!widget.pinEnabled),
                       ),
+                      if (_activeGuardianProfile.id != GuardianProfiles.owl.id &&
+                          widget.onMigrateToBalancedProfile != null)
+                        _SettingsRow(
+                          key: const ValueKey('settings-migrate-to-balanced-row'),
+                          icon: Icons.speed_outlined,
+                          iconColor: theme.colorScheme.primary,
+                          title: 'Migrate to Balanced Vault',
+                          subtitle:
+                              'Switch from ${_activeGuardianProfile.displayName} to Owl for faster unlock',
+                          value: 'Recommended',
+                          onTap: () => _showMigrateToBalancedDialog(context),
+                        ),
                       _SettingsRow(
                         key: const ValueKey('settings-security-encryption-row'),
                         icon: Icons.shield_outlined,

@@ -63,6 +63,14 @@ class GoogleDriveVaultPortability {
     if (googleSignIn.currentUser != null) {
       return googleSignIn.currentUser;
     }
+    if (!forceAccountChooser) {
+      try {
+        final silent = await googleSignIn.signInSilently();
+        if (silent != null) {
+          return silent;
+        }
+      } catch (_) {}
+    }
     return googleSignIn.signIn();
   }
 
@@ -100,6 +108,87 @@ class GoogleDriveVaultPortability {
     } catch (error) {
       debugLogCloudError('GoogleDriveBackup', error);
       throw StateError('Google Drive backup failed.');
+    }
+  }
+
+  Future<bool> backupVaultStreamToCloud({
+    required String vaultId,
+    required String suggestedName,
+    required Stream<List<int>> stream,
+    required int lengthBytes,
+    String mimeType = 'application/octet-stream',
+    Map<String, String>? extraProperties,
+    bool forceAccountChooser = false,
+  }) async {
+    final session = await _openDriveSession(
+      forceAccountChooser: forceAccountChooser,
+    );
+    if (session == null) return false;
+
+    try {
+      final driveApi = session.driveApi;
+      final media = drive.Media(stream, lengthBytes);
+      final existingId = await _findDriveFileIdInAppDataForVault(
+        driveApi: driveApi,
+        vaultId: vaultId,
+      );
+      final meta = drive.File()
+        ..name = suggestedName
+        ..mimeType = mimeType
+        ..modifiedTime = DateTime.now().toUtc()
+        ..appProperties = <String, String>{
+          'nijaVaultId': vaultId,
+          ...?extraProperties,
+        };
+
+      if (existingId != null) {
+        await driveApi.files.update(meta, existingId, uploadMedia: media);
+      } else {
+        meta.parents = <String>[_appDataFolderId];
+        await driveApi.files.create(meta, uploadMedia: media);
+      }
+
+      final legacyId = await _findLegacyDriveFileIdForVault(
+        driveApi: driveApi,
+        vaultId: vaultId,
+      );
+      if (legacyId != null) {
+        try {
+          await driveApi.files.delete(legacyId);
+        } catch (error) {
+          debugLogCloudError('GoogleDriveDeleteLegacyBackup', error);
+        }
+      }
+      return true;
+    } catch (error) {
+      debugLogCloudError('GoogleDriveBackupStream', error);
+      throw StateError('Google Drive backup failed.');
+    }
+  }
+
+  Future<bool> downloadCloudBackupToSink(
+    String driveFileId,
+    EventSink<List<int>> sink, {
+    bool forceAccountChooser = false,
+  }) async {
+    final session = await _openDriveSession(
+      forceAccountChooser: forceAccountChooser,
+    );
+    if (session == null) return false;
+
+    try {
+      final media = await session.driveApi.files
+          .get(driveFileId, downloadOptions: drive.DownloadOptions.fullMedia)
+          .timeout(_driveDownloadTimeout);
+      if (media is! drive.Media) return false;
+
+      await for (final chunk in media.stream.timeout(_driveDownloadTimeout)) {
+        sink.add(chunk);
+      }
+      return true;
+    } catch (error) {
+      debugLogCloudError('GoogleDriveDownloadToSink', error);
+      return false;
     }
   }
 
@@ -367,12 +456,14 @@ class GoogleDriveVaultPortability {
         if (vaultId != null && propertyVaultId != vaultId) {
           continue;
         }
+        final revision = int.tryParse(file.appProperties?['revision'] ?? '') ?? 0;
         final backup = CloudVaultBackupFile(
           storageId: 'gdrive_$driveFileId.nija',
           label: file.name ?? 'Google Drive backup',
           content: '',
           fileName: file.name ?? '',
           modifiedAt: file.modifiedTime?.toLocal(),
+          revision: revision,
           driveFileId: driveFileId,
           listedVaultId: propertyVaultId,
         );

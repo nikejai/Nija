@@ -12,6 +12,7 @@ import '../../../app/theme/dashboard_typography.dart';
 import '../../../app/theme/entry_typography.dart';
 import '../../../app/widgets/nija_brand_lockup.dart';
 import '../../../core/config/app_features.dart';
+import '../../../core/config/guardian_profiles.dart';
 import '../../../core/config/vault_limits.dart';
 import '../../../core/localization/app_strings.dart';
 import '../../../core/platform/pwa_install_service.dart';
@@ -172,6 +173,9 @@ class VaultAppShell extends StatefulWidget {
     this.secretSharePortability,
     this.onReadRawVaultContent,
     this.onRestoreRawVaultContent,
+    this.guardianProfile,
+    this.onMigrateToBalancedProfile,
+    this.onExitRequested,
   });
 
   final List<String> recoveryWords;
@@ -222,12 +226,18 @@ class VaultAppShell extends StatefulWidget {
   final SecretSharePortabilityAdapter? secretSharePortability;
   final Future<String> Function()? onReadRawVaultContent;
   final Future<bool> Function(String content)? onRestoreRawVaultContent;
+  final GuardianProfile? guardianProfile;
+  final Future<void> Function({required String currentPassword})?
+      onMigrateToBalancedProfile;
+  final Future<void> Function()? onExitRequested;
 
   @override
   State<VaultAppShell> createState() => _VaultAppShellState();
 }
 
 class _VaultAppShellState extends State<VaultAppShell> {
+  late GuardianProfile _activeGuardianProfile =
+      widget.guardianProfile ?? GuardianProfiles.owl;
   static const MethodChannel _documentOpenChannel = MethodChannel(
     'nija/document_open',
   );
@@ -302,13 +312,20 @@ class _VaultAppShellState extends State<VaultAppShell> {
   late final List<Map<String, dynamic>> _notes;
   late List<VaultFolder> _folders;
   final VaultFolderManager _folderManager = const VaultFolderManager();
-  late final List<VaultListEntryAdapter> _vaultListEntryAdapters;
+  List<VaultListEntryAdapter> get _vaultListEntryAdapters => [
+    VaultDocumentListEntryAdapter(folders: _folders),
+    VaultItemListEntryAdapter(
+      iconForType: _iconForDashboardType,
+      colorForType: _colorForDashboardType,
+      folders: _folders,
+    ),
+    VaultNoteListEntryAdapter(folders: _folders),
+  ];
   late String _activeVaultName;
 
   List<_IndexedEntry> _lastDeletedAllItems = <_IndexedEntry>[];
   Map<String, bool> _lastPinnedStateItemById = <String, bool>{};
   Map<String, bool> _lastPinnedStateNoteById = <String, bool>{};
-  DateTime? _lastBackOnDashboardAt;
 
   void _updateState(VoidCallback fn) => setState(fn);
 
@@ -351,14 +368,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _dashboardDataCache = null;
       _dashboardDataSignature = null;
     }
-    _vaultListEntryAdapters = [
-      const VaultDocumentListEntryAdapter(),
-      VaultItemListEntryAdapter(
-        iconForType: _iconForDashboardType,
-        colorForType: _colorForDashboardType,
-      ),
-      const VaultNoteListEntryAdapter(),
-    ];
     if (_notes.isEmpty &&
         !widget.isExploreDemoSession &&
         !widget.initialNotes.any(
@@ -812,6 +821,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
       onMoveItem: _moveItemToFolder,
       onCopyItem: _copyItemToFolder,
       onDeleteItem: _deleteItemFromExplorer,
+      onMoveItems: _moveItemsToFolder,
+      onCopyItems: _copyItemsToFolder,
+      onDeleteItems: _deleteItemsFromExplorer,
     );
   }
 
@@ -941,7 +953,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         newName: newName,
       );
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
   }
 
   void _updateFolderColor(String folderId, String? color) {
@@ -952,7 +964,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         color: color,
       );
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
   }
 
   void _moveFolder(String folderId, String? newParentId) {
@@ -963,7 +975,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         newParentId: newParentId,
       );
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
   }
 
   void _deleteFolder(String folderId, bool cascade) {
@@ -978,7 +990,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _items.clear();
       _items.addAll(res.items);
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
   }
 
   void _moveItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
@@ -997,7 +1009,29 @@ class _VaultAppShellState extends State<VaultAppShell> {
         }
       }
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
+  }
+
+  void _moveItemsToFolder(List<Map<String, dynamic>> items, String? targetFolderId) {
+    if (items.isEmpty) return;
+    _updateState(() {
+      for (final item in items) {
+        final updated = _folderManager.moveItemToFolder(
+          item: item,
+          targetFolderId: targetFolderId,
+        );
+        final idx = _items.indexWhere((i) => i['id'] == item['id']);
+        if (idx >= 0) {
+          _items[idx] = updated;
+        } else {
+          final noteIdx = _notes.indexWhere((n) => n['id'] == item['id']);
+          if (noteIdx >= 0) {
+            _notes[noteIdx] = updated;
+          }
+        }
+      }
+    });
+    _schedulePersistVaultData();
   }
 
   void _copyItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
@@ -1012,7 +1046,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
         _items.add(copy);
       }
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
+  }
+
+  void _copyItemsToFolder(List<Map<String, dynamic>> items, String? targetFolderId) {
+    if (items.isEmpty) return;
+    _updateState(() {
+      for (final item in items) {
+        final copy = _folderManager.copyItemToFolder(
+          item: item,
+          targetFolderId: targetFolderId,
+        );
+        if (item['type'] == 'Secure Note' || item.containsKey('delta')) {
+          _notes.add(copy);
+        } else {
+          _items.add(copy);
+        }
+      }
+    });
+    _schedulePersistVaultData();
   }
 
   void _deleteItemFromExplorer(Map<String, dynamic> item) {
@@ -1021,7 +1073,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _items.removeWhere((i) => i['id'] == itemId);
       _notes.removeWhere((n) => n['id'] == itemId);
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
+  }
+
+  void _deleteItemsFromExplorer(List<Map<String, dynamic>> items) {
+    if (items.isEmpty) return;
+    final idsToDelete = items.map((i) => i['id']).toSet();
+    _updateState(() {
+      _items.removeWhere((i) => idsToDelete.contains(i['id']));
+      _notes.removeWhere((n) => idsToDelete.contains(n['id']));
+    });
+    _schedulePersistVaultData();
   }
 
   Future<void> _openUploadDocumentToFolder(String? folderId) async {
@@ -1243,25 +1305,106 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }
     if (_tabIndex != 0) {
       setState(() => _tabIndex = 0);
-      _lastBackOnDashboardAt = null;
       return;
     }
 
-    final now = DateTime.now();
-    final shouldExit =
-        _lastBackOnDashboardAt != null &&
-        now.difference(_lastBackOnDashboardAt!) < const Duration(seconds: 2);
-    if (shouldExit) {
-      _lastBackOnDashboardAt = null;
+    if (widget.onExitRequested != null) {
+      await widget.onExitRequested!();
+      return;
+    }
+
+    final confirmed = await _confirmQuitApplication();
+    if (confirmed && mounted) {
       widget.onLockNow();
-      return;
+      await SystemNavigator.pop();
     }
+  }
 
-    _lastBackOnDashboardAt = now;
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Press back again to lock.')));
+  Future<bool> _confirmQuitApplication() async {
+    if (!mounted) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Quit Application?'),
+        content: const Text('Are you sure you want to quit the app?'),
+        actions: [
+          TextButton(
+            key: const ValueKey('quit-dialog-cancel-button'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('quit-dialog-confirm-button'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Quit'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
+  Future<void> _showMigrateToBalancedDialog(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final passwordController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Migrate to Balanced Vault?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Your vault currently uses high-security protection (Lion profile), which requires intensive encryption computation and may feel slow when unlocking or opening items on mobile devices.\n\nMigrating to Balanced protection (Owl profile) keeps industry-standard Argon2id security while dramatically speeding up unlock and item performance.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              key: const ValueKey('migrate-balanced-password-input'),
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Master Password',
+                hintText: 'Enter current master password',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('migrate-balanced-cancel-button'),
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('migrate-balanced-confirm-button'),
+            onPressed: () {
+              if (passwordController.text.trim().isEmpty) return;
+              Navigator.of(dialogCtx).pop(true);
+            },
+            child: const Text('Migrate to Balanced'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      final pwd = passwordController.text.trim();
+      await _runWithBusy('Migrating to Balanced profile...', () async {
+        await widget.onMigrateToBalancedProfile?.call(currentPassword: pwd);
+        if (mounted) {
+          setState(() {
+            _activeGuardianProfile = GuardianProfiles.owl;
+          });
+        }
+      });
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(
+          content:
+              Text('Vault successfully migrated to Balanced profile (Owl).'),
+        ),
+      );
+    }
   }
 
   Widget _buildVaultTab(BuildContext context) {
@@ -2547,27 +2690,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Map<String, dynamic> _markItemLastAccessed(Map<String, dynamic> item) {
-    final id = item['id']?.toString();
-    if (id == null || id.isEmpty) return item;
-    final idx = _items.indexWhere((entry) => entry['id']?.toString() == id);
-    if (idx == -1) return item;
-    final updated = Map<String, dynamic>.from(_items[idx]);
-    updated['lastAccessedAt'] = DateTime.now().toUtc().toIso8601String();
-    setState(() => _items[idx] = updated);
-    _schedulePersistVaultData();
-    return updated;
+    // Opening an item is read-only: do not mutate the item or schedule persistence
+    // to prevent unnecessary file mutations and backup/restore conflicts.
+    return item;
   }
 
   Map<String, dynamic> _markNoteLastAccessed(Map<String, dynamic> note) {
-    final id = note['id']?.toString();
-    if (id == null || id.isEmpty) return note;
-    final idx = _notes.indexWhere((entry) => entry['id']?.toString() == id);
-    if (idx == -1) return note;
-    final updated = Map<String, dynamic>.from(_notes[idx]);
-    updated['lastAccessedAt'] = DateTime.now().toUtc().toIso8601String();
-    setState(() => _notes[idx] = updated);
-    _schedulePersistVaultData();
-    return updated;
+    // Opening a note is read-only: do not mutate the note or schedule persistence
+    // to prevent unnecessary file mutations and backup/restore conflicts.
+    return note;
   }
 
   Map<String, dynamic> _preserveLastAccessedAt(
@@ -2815,7 +2946,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (widget.isExploreDemoSession) return;
     _persistDebounceTimer?.cancel();
     _persistDebounceTimer = Timer(const Duration(milliseconds: 400), () {
-      unawaited(_persistVaultData());
+      unawaited(_persistVaultDataUnchecked());
     });
   }
 
@@ -3065,17 +3196,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       if (!mounted) return;
       await _refreshCloudBackupAccountLabel();
       if (!mounted) return;
-      final cloudBackup = await _readCloudBackupSummary();
-      if (!mounted) return;
-      if (cloudBackup != null) {
-        await _applyCloudBackupSummary(
-          cloudBackup,
-          fallbackLastAt: DateTime.now(),
-        );
-        return;
-      }
-      if (widget.onReadCloudBackupSummary == null &&
-          _cloudBackupAccountLabel != 'Not connected') {
+      if (_cloudBackupAccountLabel != 'Not connected') {
         final now = DateTime.now().millisecondsSinceEpoch;
         final revision = widget.activeVaultRevision;
         final versionId = widget.activeVaultVersionId.trim();
@@ -3088,6 +3209,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
         );
       }
     });
+    if (mounted && widget.onReadCloudBackupSummary != null) {
+      unawaited(() async {
+        final cloudBackup = await _readCloudBackupSummary();
+        if (mounted && cloudBackup != null) {
+          await _applyCloudBackupSummary(
+            cloudBackup,
+            fallbackLastAt: DateTime.now(),
+          );
+        }
+      }());
+    }
   }
 
   String _localSnapshotsSummary() {

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nija/app/theme/app_theme.dart';
 import 'package:nija/application/services/default_vault_service.dart';
+import 'package:nija/core/config/guardian_profiles.dart';
 import 'package:nija/domain/models/vault_reference.dart';
 import 'package:nija/core/localization/app_strings.dart';
 import 'package:nija/features/onboarding/presentation/onboarding_flow.dart';
@@ -808,7 +810,7 @@ void main() {
   });
 
   testWidgets(
-    'unlock screen requires double back to exit and app back opens vault selection',
+    'unlock screen back shows quit dialog and cancelling keeps unlock screen',
     (tester) async {
       tester.view.physicalSize = const Size(430, 932);
       tester.view.devicePixelRatio = 1.0;
@@ -833,7 +835,9 @@ void main() {
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(find.text('Press back again to exit.'), findsOneWidget);
+      expect(find.text('Quit Application?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('quit-dialog-cancel-button')));
+      await tester.pumpAndSettle();
       expect(find.text('Unlock vault'), findsOneWidget);
 
       await tester.enterText(find.byType(TextField).first, 'StrongPass123');
@@ -843,16 +847,10 @@ void main() {
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('known-vault-selection-screen')),
-        findsOneWidget,
-      );
-
-      await tester.tap(
-        find.byKey(const ValueKey('known-vault-card-test.nija')),
-      );
+      expect(find.text('Quit Application?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('quit-dialog-cancel-button')));
       await tester.pumpAndSettle();
-      expect(find.text('Unlock vault'), findsOneWidget);
+      expect(find.text('Quit Application?'), findsNothing);
     },
   );
 
@@ -1363,4 +1361,110 @@ void main() {
       isTrue,
     );
   });
+
+  testWidgets(
+    'unlock screen back shows quit confirmation dialog and cancels',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 932);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OnboardingFlow(
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            vaultService: DefaultVaultService(
+              storageAdapter: InMemoryVaultStorageAdapter(),
+              cryptoAdapter: _FastTestCryptoAdapter(),
+            ),
+            vaultFilePath: 'test.nija',
+          ),
+        ),
+      );
+
+      await goToUnlockScreen(tester);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('Quit Application?'), findsOneWidget);
+      expect(find.text('Are you sure you want to quit the app?'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('quit-dialog-cancel-button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Quit Application?'), findsNothing);
+      expect(find.text('Unlock vault'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'unlocking non-balanced vault automatically migrates to balanced with loading progress',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 760);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final storage = InMemoryVaultStorageAdapter();
+      final service = DefaultVaultService(
+        storageAdapter: storage,
+        cryptoAdapter: _FastTestCryptoAdapter(),
+      );
+
+      // Create a vault using Lion profile
+      await service.createVault(
+        filePath: 'test.nija',
+        vaultId: 'vault-lion',
+        vaultName: 'test.nija',
+        guardianProfileId: GuardianProfiles.lion.id,
+        password: 'StrongPass123',
+        recoveryPhrase:
+            'anchor apple arrow atlas beacon breeze canyon cedar cobalt ember harbor willow',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OnboardingFlow(
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            vaultService: service,
+            vaultFilePath: 'test.nija',
+            initialKnownVaults: const [
+              VaultReference(
+                id: 'test.nija',
+                label: 'test.nija',
+                addedAtEpochMs: 0,
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Tap on the recent vault card to go to unlock
+      await tester.tap(find.byKey(const ValueKey('entry-recent-vault-test.nija')));
+      await tester.pumpAndSettle();
+
+      // Enter password and unlock
+      expect(find.text('Unlock vault'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).first, 'StrongPass123');
+      await tester.tap(find.text('Unlock'));
+      await tester.pumpAndSettle();
+
+      // Verify migration message was shown and vault unlocked
+      expect(
+        find.text(
+          'Vault automatically migrated to Balanced profile for faster performance.',
+        ),
+        findsOneWidget,
+      );
+
+      // Verify vault raw header now has owl profile
+      final raw = await service.readRawVaultFile(filePath: 'test.nija');
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      expect(decoded['guardian']['profile'], GuardianProfiles.owl.id);
+    },
+  );
 }

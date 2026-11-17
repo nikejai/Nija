@@ -128,6 +128,7 @@ class VaultFile {
   }
 
   VaultFile copyWith({
+    String? vaultId,
     int? formatVersion,
     int? schemaVersion,
     int? storageLayoutVersion,
@@ -155,7 +156,7 @@ class VaultFile {
       schemaVersion: schemaVersion ?? this.schemaVersion,
       storageLayoutVersion: storageLayoutVersion ?? this.storageLayoutVersion,
       manifestVersion: manifestVersion ?? this.manifestVersion,
-      vaultId: vaultId,
+      vaultId: vaultId ?? this.vaultId,
       vaultName: clearVaultName ? null : vaultName ?? this.vaultName,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,

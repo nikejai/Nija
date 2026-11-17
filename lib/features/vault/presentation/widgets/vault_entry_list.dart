@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../../app/theme/entry_typography.dart';
+import '../../../../domain/models/vault_folder.dart';
 import '../../application/vault_entry_activity.dart';
+import 'vault_create_folder_dialog.dart';
 
 enum VaultEntryTrailingMode { none, chevron, more }
 
@@ -17,6 +19,8 @@ class VaultListEntry {
     required this.tags,
     this.icon,
     this.color,
+    this.folderName,
+    this.folderColor,
   });
 
   final Map<String, dynamic> entry;
@@ -29,6 +33,28 @@ class VaultListEntry {
   final List<String> tags;
   final IconData? icon;
   final Color? color;
+  final String? folderName;
+  final Color? folderColor;
+}
+
+({String? name, Color? color}) _resolveEntryFolder(
+  Map<String, dynamic> entry,
+  List<VaultFolder> folders,
+) {
+  if (folders.isEmpty) return (name: null, color: null);
+  final folderId = entry['folderId']?.toString().trim();
+  if (folderId == null || folderId.isEmpty || folderId == 'default') {
+    return (name: 'Default', color: const Color(0xFFF59E0B));
+  }
+  for (final f in folders) {
+    if (f.id == folderId) {
+      final color = f.color != null && f.color!.trim().isNotEmpty
+          ? parseFolderHexColor(f.color)
+          : const Color(0xFF0381FE);
+      return (name: f.name, color: color);
+    }
+  }
+  return (name: folderId, color: const Color(0xFF0381FE));
 }
 
 abstract class VaultListEntryAdapter {
@@ -43,10 +69,15 @@ abstract class VaultListEntryAdapter {
 }
 
 class VaultItemListEntryAdapter extends VaultListEntryAdapter {
-  const VaultItemListEntryAdapter({this.iconForType, this.colorForType});
+  const VaultItemListEntryAdapter({
+    this.iconForType,
+    this.colorForType,
+    this.folders = const <VaultFolder>[],
+  });
 
   final IconData Function(String type)? iconForType;
   final Color Function(String type)? colorForType;
+  final List<VaultFolder> folders;
 
   @override
   bool canAdapt(Map<String, dynamic> row) =>
@@ -55,6 +86,7 @@ class VaultItemListEntryAdapter extends VaultListEntryAdapter {
   @override
   VaultListEntry adapt(Map<String, dynamic> row) {
     final entry = entryFrom(row);
+    final folderInfo = _resolveEntryFolder(entry, folders);
     return VaultListEntry(
       entry: entry,
       kind: 'item',
@@ -68,6 +100,8 @@ class VaultItemListEntryAdapter extends VaultListEntryAdapter {
       tags: _entryTags(entry),
       icon: iconForType?.call(entry['type']?.toString() ?? 'Unknown'),
       color: colorForType?.call(entry['type']?.toString() ?? 'Unknown'),
+      folderName: folderInfo.name,
+      folderColor: folderInfo.color,
     );
   }
 }
@@ -130,7 +164,11 @@ String _safeVaultItemSubtitle(Map<String, dynamic> entry) {
 }
 
 class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
-  const VaultNoteListEntryAdapter();
+  const VaultNoteListEntryAdapter({
+    this.folders = const <VaultFolder>[],
+  });
+
+  final List<VaultFolder> folders;
 
   @override
   bool canAdapt(Map<String, dynamic> row) => row['kind']?.toString() == 'note';
@@ -138,6 +176,7 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
   @override
   VaultListEntry adapt(Map<String, dynamic> row) {
     final entry = entryFrom(row);
+    final folderInfo = _resolveEntryFolder(entry, folders);
     return VaultListEntry(
       entry: entry,
       kind: 'note',
@@ -151,6 +190,8 @@ class VaultNoteListEntryAdapter extends VaultListEntryAdapter {
       tags: _entryTags(entry),
       icon: Icons.description_outlined,
       color: const Color(0xFFA78BFA),
+      folderName: folderInfo.name,
+      folderColor: folderInfo.color,
     );
   }
 }
@@ -218,7 +259,11 @@ String _noteListPreviewText(Map<String, dynamic> note) {
 }
 
 class VaultDocumentListEntryAdapter extends VaultListEntryAdapter {
-  const VaultDocumentListEntryAdapter();
+  const VaultDocumentListEntryAdapter({
+    this.folders = const <VaultFolder>[],
+  });
+
+  final List<VaultFolder> folders;
 
   @override
   bool canAdapt(Map<String, dynamic> row) {
@@ -243,6 +288,7 @@ class VaultDocumentListEntryAdapter extends VaultListEntryAdapter {
     final updated =
         row['updatedLabel']?.toString() ??
         vaultEntryRelativeTimeLabel(entry, fallback: 'Unknown');
+    final folderInfo = _resolveEntryFolder(entry, folders);
     return VaultListEntry(
       entry: entry,
       kind: 'item',
@@ -256,8 +302,10 @@ class VaultDocumentListEntryAdapter extends VaultListEntryAdapter {
       updated: '$updated · ${_formatDocumentBytes(sizeBytes)}',
       pinned: entry['pinned'] == true,
       tags: _entryTags(entry),
-      icon: Icons.insert_drive_file_outlined,
+      icon: Icons.description_outlined,
       color: const Color(0xFFFB7185),
+      folderName: folderInfo.name,
+      folderColor: folderInfo.color,
     );
   }
 
@@ -462,7 +510,56 @@ class _VaultEntryTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    Text('${entry.type} · ${entry.updated}', style: metaStyle),
+                    Row(
+                      children: [
+                        if (entry.folderName != null &&
+                            entry.folderName!.isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1.5,
+                            ),
+                            margin: const EdgeInsets.only(right: 6),
+                            decoration: BoxDecoration(
+                              color: (entry.folderColor ??
+                                      const Color(0xFFF59E0B))
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  entry.folderName == 'Default'
+                                      ? Icons.folder_special
+                                      : Icons.folder_outlined,
+                                  size: 11,
+                                  color: entry.folderColor ??
+                                      const Color(0xFFF59E0B),
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  entry.folderName!,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: entry.folderColor ??
+                                        const Color(0xFFF59E0B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        Expanded(
+                          child: Text(
+                            '${entry.type} · ${entry.updated}',
+                            style: metaStyle,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                     if (entry.subtitle.isNotEmpty)
                       Text(
                         entry.subtitle,
@@ -609,7 +706,7 @@ IconData _iconForVaultEntryType(String type) {
     return Icons.account_balance_wallet_outlined;
   }
   if (normalized.contains('ident')) return Icons.perm_identity_outlined;
-  if (normalized.contains('document')) return Icons.folder_outlined;
+  if (normalized.contains('document')) return Icons.description_outlined;
   if (normalized.contains('health')) return Icons.favorite_outline;
   return Icons.shield_outlined;
 }

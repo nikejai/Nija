@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'vault_portability_model.dart';
 
 abstract class VaultPortabilityAdapter {
@@ -12,11 +14,25 @@ abstract class VaultPortabilityAdapter {
     required String content,
     bool forceAccountChooser = false,
   });
+  Future<bool> backupVaultStreamToCloud({
+    required String vaultId,
+    required String suggestedName,
+    required Stream<List<int>> stream,
+    required int lengthBytes,
+    String mimeType = 'application/octet-stream',
+    Map<String, String>? extraProperties,
+    bool forceAccountChooser = false,
+  });
   Future<List<CloudVaultBackupFile>> listCloudBackups({
     bool forceAccountChooser = false,
   });
   Future<CloudVaultBackupFile> hydrateCloudBackupContent(
     CloudVaultBackupFile listing, {
+    bool forceAccountChooser = false,
+  });
+  Future<bool> downloadCloudBackupToSink(
+    String driveFileId,
+    EventSink<List<int>> sink, {
     bool forceAccountChooser = false,
   });
   Future<CloudVaultBackupFile?> readCloudBackup({
