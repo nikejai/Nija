@@ -131,7 +131,6 @@ class OnboardingFlow extends StatefulWidget {
 class _OnboardingFlowState extends State<OnboardingFlow>
     with WidgetsBindingObserver {
   static const _vaultOpTimeout = Duration(seconds: 20);
-  static const _unlockBackExitWindow = Duration(seconds: 2);
   static const _prefsDeviceIdKey = 'nija_device_id_v1';
   static const _prefsFirstInstallWalkthroughCompletedKey =
       'nija_first_install_walkthrough_completed_v1';
@@ -204,7 +203,6 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   final Random _idRandom = Random.secure();
   String _deviceId = '';
   String _deviceLabel = 'unknown';
-  DateTime? _lastUnlockBackPressAt;
   SharedTextIntent? _pendingSharedTextIntent;
   bool _setupOpenedFromUnlock = false;
   bool _consumingPendingSecretIntent = false;
@@ -441,6 +439,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onRotateMasterPassword: _isExploreDemoSession
             ? ({required currentPassword, required newPassword}) async {}
             : _rotateMasterPassword,
+        guardianProfile: _activeGuardianProfile,
+        onMigrateToBalancedProfile: _isExploreDemoSession
+            ? null
+            : _migrateToBalancedProfile,
         onRotateRecoveryPhrase: _isExploreDemoSession
             ? ({
                 required currentRecoveryPhrase,
@@ -474,6 +476,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             ? _readVaultInternals
             : null,
         onLockNow: _lockVaultSession,
+        onExitRequested: _handleExitFromAppShell,
         onSwitchVault: _isExploreDemoSession
             ? _exitExploreDemoSession
             : _switchVaultFromApp,
@@ -638,11 +641,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       return false;
     }
     if (_step == OnboardingStep.app) {
-      _lockVaultSession();
       return false;
     }
-    if (_step == OnboardingStep.walkthrough) {
-      return true;
+    if (_step == OnboardingStep.walkthrough || _step == OnboardingStep.welcome) {
+      return await _confirmQuitApplication();
     }
     if (_step == OnboardingStep.setup) {
       if (!mounted) return false;
@@ -669,20 +671,39 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _goBackFromSelectVault();
       return false;
     }
-    if (_step != OnboardingStep.unlock) return true;
+    return await _confirmQuitApplication();
+  }
 
-    final now = DateTime.now();
-    final allowExit =
-        _lastUnlockBackPressAt != null &&
-        now.difference(_lastUnlockBackPressAt!) <= _unlockBackExitWindow;
-    _lastUnlockBackPressAt = now;
-    if (allowExit) return true;
+  Future<void> _handleExitFromAppShell() async {
+    final allowQuit = await _confirmQuitApplication();
+    if (allowQuit && mounted) {
+      _lockVaultSession();
+      await SystemNavigator.pop();
+    }
+  }
 
+  Future<bool> _confirmQuitApplication() async {
     if (!mounted) return false;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Press back again to exit.')));
-    return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Quit Application?'),
+        content: const Text('Are you sure you want to quit the app?'),
+        actions: [
+          TextButton(
+            key: const ValueKey('quit-dialog-cancel-button'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('quit-dialog-confirm-button'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Quit'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   Future<void> _handleRootPopInvoked() async {
@@ -961,13 +982,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<GuardianProfile> _resolveGuardianForVault(String filePath) async {
     try {
-      final raw = await _vaultService.readRawVaultFile(filePath: filePath);
-      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      final guardian = decoded['guardian'];
-      if (guardian is Map) {
-        final profileId = guardian['profile']?.toString() ?? '';
-        for (final candidate in GuardianProfiles.all) {
-          if (candidate.id == profileId) return candidate;
+      final header = await _vaultService.readVaultHeader(filePath: filePath);
+      final profileId = header.guardian.profile;
+      final guardianId = header.guardian.id;
+      for (final candidate in GuardianProfiles.all) {
+        if (candidate.id == profileId ||
+            candidate.displayName.toLowerCase() == guardianId.toLowerCase() ||
+            candidate.displayName.toLowerCase() == profileId.toLowerCase()) {
+          return candidate;
         }
       }
     } catch (_) {
@@ -1178,6 +1200,39 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       _activeVaultName = await _resolveVaultLabel(vaultPath);
       await _refreshVaultSize();
       _sessionMasterPassword = _passwordController.text;
+
+      bool autoMigrated = false;
+      final currentProfile = await _resolveGuardianForVault(vaultPath);
+      if (currentProfile.id != GuardianProfiles.owl.id) {
+        _updateBusy(
+          const VaultOperationProgress(
+            value: 0.85,
+            message: 'Migrating vault to Balanced profile...',
+          ),
+        );
+        try {
+          final recoveryPhrase = _recoveryWords.isNotEmpty
+              ? _recoveryWords.join(' ')
+              : null;
+          await _vaultService
+              .migrateToBalancedProfile(
+                filePath: vaultPath,
+                currentPassword: _passwordController.text,
+                currentRecoveryPhrase: recoveryPhrase,
+                onProgress: _updateBusy,
+              )
+              .timeout(_vaultOpTimeout);
+          if (mounted) {
+            setState(() {
+              _activeGuardianProfile = GuardianProfiles.owl;
+            });
+            autoMigrated = true;
+          }
+        } catch (error, stackTrace) {
+          _logOperationError('autoMigrateToBalanced', error, stackTrace);
+        }
+      }
+
       if (_biometricEnabled && !kIsWeb) {
         try {
           await _biometricCredentialStore.saveMasterPassword(
@@ -1198,6 +1253,15 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         _completeActionUnlockRequest(success: true);
       }
       _handleUnlock();
+      if (autoMigrated && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Vault automatically migrated to Balanced profile for faster performance.',
+            ),
+          ),
+        );
+      }
     } on TimeoutException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3378,9 +3442,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           await _vaultService.vaultExists(filePath: webHandle)) {
         if (trimmed.isEmpty) return webHandle;
         try {
-          final raw = await _vaultService.readRawVaultFile(filePath: webHandle);
-          final decoded = jsonDecode(raw);
-          if (decoded is Map && decoded['vaultId']?.toString() == trimmed) {
+          final header = await _vaultService.readVaultHeader(filePath: webHandle);
+          if (header.vaultId == trimmed) {
             return webHandle;
           }
         } catch (_) {
@@ -3417,9 +3480,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     try {
-      final raw = await _vaultService.readRawVaultFile(filePath: filePath);
-      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      final name = decoded['vaultName']?.toString().trim() ?? '';
+      final header = await _vaultService.readVaultHeader(filePath: filePath);
+      final name = header.vaultName?.trim() ?? '';
       if (name.isNotEmpty &&
           name != 'vault.nija' &&
           name != 'nija_vault.nija' &&
@@ -3434,12 +3496,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
   Future<String?> _resolveVaultId(String filePath) async {
     try {
-      final raw = await _vaultService.readRawVaultFile(filePath: filePath);
-      final decoded = jsonDecode(raw);
-      if (decoded is Map) {
-        final id = decoded['vaultId']?.toString().trim() ?? '';
-        if (id.isNotEmpty) return id;
-      }
+      final header = await _vaultService.readVaultHeader(filePath: filePath);
+      final id = header.vaultId.trim();
+      if (id.isNotEmpty) return id;
     } catch (_) {
       // Fallback
     }
@@ -3597,14 +3656,22 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
   }
 
-  Future<bool> _ensureCloudBackupGoogleAccountSelected() async {
+  Future<bool> _ensureCloudBackupGoogleAccountSelected({
+    bool forceAccountChooser = false,
+  }) async {
     if (kIsWeb) {
+      if (!forceAccountChooser) {
+        const drivePortability = GoogleDriveVaultPortability();
+        final ready = await drivePortability.ensureDriveSessionReady();
+        if (ready) return true;
+        if (!mounted) return false;
+      }
       final selected = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         barrierColor: Colors.black.withValues(alpha: 0.45),
         builder: (context) =>
-            const GoogleDriveWebSignInDialog(forceAccountChooser: true),
+            GoogleDriveWebSignInDialog(forceAccountChooser: forceAccountChooser),
       );
       if (selected != true && mounted) {
         _showOperationSnackBar(
@@ -3624,7 +3691,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     final selected = await _vaultPortability.ensureCloudBackupAccountSelected(
-      forceAccountChooser: true,
+      forceAccountChooser: forceAccountChooser,
     );
     if (!selected && mounted) {
       _showOperationSnackBar('Google account sign-in cancelled.');
@@ -4191,12 +4258,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       if (!signedIn || !mounted) return;
 
       startCloudBusy('Preparing cloud backup...');
-      final rawContent = await _vaultService.readRawVaultFile(
+      final header = await _vaultService.readVaultHeader(
         filePath: _vaultFilePath,
       );
-      _updateBusyStep('Reading vault metadata...', 0.15);
-      final decoded = Map<String, dynamic>.from(jsonDecode(rawContent) as Map);
-      final vaultId = decoded['vaultId']?.toString().trim() ?? '';
+      final vaultId = header.vaultId.trim();
       if (vaultId.isEmpty) {
         throw StateError('Vault metadata is missing vaultId');
       }
@@ -4208,37 +4273,48 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         '_',
       );
       final suggestedName = 'backup_${stamp}_$baseName';
-      _updateBusyStep('Checking cloud backup status...', 0.30);
-      final existingBackup = await _vaultPortability.readCloudBackup(
-        vaultId: vaultId,
-        forceAccountChooser: false,
-      );
-      stopCloudBusy();
-      var shouldContinue = true;
-      var uploadContent = rawContent;
-      if (existingBackup != null) {
-        final result = await _importCloudBackupForMerge(
-          backup: existingBackup,
-          askBackupAfterMerge: true,
-        );
-        shouldContinue = result != _CloudMergeOutcome.cancelled;
-        if (shouldContinue) {
-          uploadContent = await _vaultService.readRawVaultFile(
-            filePath: _vaultFilePath,
+      _updateBusyStep('Sending vault to cloud storage...', 0.50);
+
+      bool backedUp;
+      if (!kIsWeb) {
+        final tempPath =
+            '${Directory.systemTemp.path}${Platform.pathSeparator}backup_${vaultId}_${now.millisecondsSinceEpoch}.nija';
+        final tempFile = File(tempPath);
+        try {
+          await _vaultService.exportVault(
+            vaultId: vaultId,
+            destinationPath: tempPath,
           );
+          final stream = tempFile.openRead();
+          final length = await tempFile.length();
+          backedUp = await _vaultPortability.backupVaultStreamToCloud(
+            vaultId: vaultId,
+            suggestedName: suggestedName,
+            stream: stream,
+            lengthBytes: length,
+            extraProperties: <String, String>{
+              'revision': '${header.revision}',
+              'vaultVersionId': header.vaultVersionId,
+              'updatedAt': header.updatedAt,
+            },
+            forceAccountChooser: false,
+          );
+        } finally {
+          if (await tempFile.exists()) {
+            await tempFile.delete();
+          }
         }
+      } else {
+        final rawContent = await _vaultService.readRawVaultFile(
+          filePath: _vaultFilePath,
+        );
+        backedUp = await _vaultPortability.backupVaultToCloud(
+          vaultId: vaultId,
+          suggestedName: suggestedName,
+          content: rawContent,
+          forceAccountChooser: false,
+        );
       }
-      if (!shouldContinue) return;
-      startCloudBusy('Uploading cloud backup...');
-      final finalContent = uploadContent;
-      _updateBusyStep('Sending vault to cloud storage...', 0.55);
-      final backedUp = await _vaultPortability.backupVaultToCloud(
-        vaultId: vaultId,
-        suggestedName: suggestedName,
-        content: finalContent,
-        forceAccountChooser: false,
-      );
-      _updateBusyStep('Finishing cloud backup...', 0.95);
       stopCloudBusy();
       if (!mounted) return;
       if (!backedUp) {
@@ -4376,12 +4452,34 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     required CloudVaultBackupFile backup,
     required bool askBackupAfterMerge,
   }) async {
-    final hydrated = await _ensureCloudBackupContent(backup);
-    final backupFilePath = await _localPathForCloudBackup(hydrated);
-    await _vaultService.writeRawVaultFile(
-      filePath: backupFilePath,
-      rawContent: hydrated.content,
-    );
+    final backupFilePath = await _localPathForCloudBackup(backup);
+    if (!kIsWeb && backup.driveFileId.isNotEmpty) {
+      final destFile = File(backupFilePath);
+      await destFile.parent.create(recursive: true);
+      final sink = destFile.openWrite();
+      try {
+        final downloaded = await _vaultPortability.downloadCloudBackupToSink(
+          backup.driveFileId,
+          sink,
+        );
+        await sink.flush();
+        await sink.close();
+        if (!downloaded) {
+          throw StateError('Selected cloud backup could not be downloaded.');
+        }
+      } catch (_) {
+        try {
+          await sink.close();
+        } catch (_) {}
+        rethrow;
+      }
+    } else {
+      final hydrated = await _ensureCloudBackupContent(backup);
+      await _vaultService.writeRawVaultFile(
+        filePath: backupFilePath,
+        rawContent: hydrated.content,
+      );
+    }
     var credential = _passwordController.text.trim();
     if (credential.isEmpty) {
       final prompted = await _promptImportVaultCredential(
@@ -4474,7 +4572,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       await _reviewAndMergeVaultConflict(
         conflictVaultId: conflictVaultId,
         importedPassword: credential,
-        resolvedVaultVersionId: await _vaultVersionIdFromRaw(hydrated.content),
+        resolvedVaultVersionId:
+            (await _vaultService.readVaultHeader(filePath: backupFilePath))
+                .vaultVersionId,
         askBackupAfterMerge: askBackupAfterMerge,
         importedSourceLabel: 'Cloud backup',
       );
@@ -4564,15 +4664,6 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
   }
 
-  Future<String?> _vaultVersionIdFromRaw(String raw) async {
-    try {
-      final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      return decoded['vaultVersionId']?.toString();
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _confirmBackupAfterCloudMerge() async {
     if (!mounted || !_cloudBackupFeatureAvailable) return;
     final backupNow = await showDialog<bool>(
@@ -4607,12 +4698,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     try {
       final label = await _readCloudBackupAccountLabel();
       if (label == null || label.trim().isEmpty) return null;
-      final rawContent = await _vaultService.readRawVaultFile(
+      final header = await _vaultService.readVaultHeader(
         filePath: _vaultFilePath,
       );
-      final decoded = jsonDecode(rawContent);
-      if (decoded is! Map) return null;
-      final vaultId = decoded['vaultId']?.toString().trim() ?? '';
+      final vaultId = header.vaultId.trim();
       if (vaultId.isEmpty) return null;
       return _vaultPortability.readCloudBackup(
         vaultId: vaultId,
@@ -4629,7 +4718,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   ) async {}
 
   Future<bool> _changeCloudBackupAccount() {
-    return _ensureCloudBackupGoogleAccountSelected();
+    return _ensureCloudBackupGoogleAccountSelected(forceAccountChooser: true);
   }
 
   Future<void> _refreshVaultSize() async {
@@ -4645,15 +4734,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
 
     try {
-      final raw = await _vaultService.readRawVaultFile(
+      final header = await _vaultService.readVaultHeader(
         filePath: _vaultFilePath,
       );
-      final decoded = jsonDecode(raw);
-      if (decoded is Map<String, dynamic>) {
-        revision = int.tryParse(decoded['revision']?.toString() ?? '') ?? 0;
-        versionId = decoded['vaultVersionId']?.toString().trim() ?? '';
-        updatedAt = decoded['updatedAt']?.toString().trim() ?? '';
-      }
+      revision = header.revision;
+      versionId = header.vaultVersionId;
+      updatedAt = header.updatedAt;
     } catch (_) {
       revision = 0;
       versionId = '';
@@ -5422,6 +5508,33 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           ),
         ),
       );
+    } finally {
+      _stopBusy();
+    }
+  }
+
+  Future<void> _migrateToBalancedProfile({
+    required String currentPassword,
+  }) async {
+    if (_isBusy) return;
+    final vaultId = _vaultFilePath;
+    _startBusy('Migrating to Balanced profile (Owl)...');
+    try {
+      final recoveryPhrase = _recoveryWords.join(' ');
+      await _vaultService
+          .migrateToBalancedProfile(
+            filePath: vaultId,
+            currentPassword: currentPassword,
+            currentRecoveryPhrase: recoveryPhrase,
+            onProgress: _updateBusy,
+          )
+          .timeout(_vaultOpTimeout);
+      if (!mounted) return;
+      setState(() {
+        _activeGuardianProfile = GuardianProfiles.owl;
+      });
+      _passwordController.text = currentPassword;
+      await _resetBiometricForVault(vaultId);
     } finally {
       _stopBusy();
     }

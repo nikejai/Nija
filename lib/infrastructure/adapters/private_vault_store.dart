@@ -9,11 +9,17 @@ abstract class PrivateVaultStore {
   Future<bool> vaultExists(String vaultStoreId);
   Future<VaultFile> readHeader(String vaultStoreId);
   Future<Uint8List> readSection(String vaultStoreId, String fileName);
+  Stream<List<int>> openSectionRead(String vaultStoreId, String fileName);
   Future<void> writeHeader(String vaultStoreId, VaultFile header);
   Future<void> writeSection(
     String vaultStoreId,
     String fileName,
     Uint8List bytes,
+  );
+  Future<void> writeSectionStream(
+    String vaultStoreId,
+    String fileName,
+    Stream<List<int>> stream,
   );
   Future<void> commitVault({
     required String vaultStoreId,
@@ -69,6 +75,15 @@ class InMemoryPrivateVaultStore implements PrivateVaultStore {
   }
 
   @override
+  Stream<List<int>> openSectionRead(String vaultStoreId, String fileName) {
+    final raw = _vaults[vaultStoreId]?[fileName];
+    if (raw == null) {
+      throw StateError('Working vault section not found: $fileName');
+    }
+    return Stream<List<int>>.value(raw);
+  }
+
+  @override
   Future<void> writeHeader(String vaultStoreId, VaultFile header) async {
     final vault = _vaults.putIfAbsent(
       vaultStoreId,
@@ -90,6 +105,19 @@ class InMemoryPrivateVaultStore implements PrivateVaultStore {
       () => <String, Uint8List>{},
     );
     vault[fileName] = Uint8List.fromList(bytes);
+  }
+
+  @override
+  Future<void> writeSectionStream(
+    String vaultStoreId,
+    String fileName,
+    Stream<List<int>> stream,
+  ) async {
+    final bytes = <int>[];
+    await for (final chunk in stream) {
+      bytes.addAll(chunk);
+    }
+    await writeSection(vaultStoreId, fileName, Uint8List.fromList(bytes));
   }
 
   @override
@@ -196,6 +224,17 @@ class FilePrivateVaultStore implements PrivateVaultStore {
   }
 
   @override
+  Stream<List<int>> openSectionRead(String vaultStoreId, String fileName) {
+    final file = File(
+      '${_dir(vaultStoreId).path}${Platform.pathSeparator}$fileName',
+    );
+    if (!file.existsSync()) {
+      throw StateError('Working vault section not found: $fileName');
+    }
+    return file.openRead();
+  }
+
+  @override
   Future<void> writeHeader(String vaultStoreId, VaultFile header) async {
     final dir = _dir(vaultStoreId);
     await dir.create(recursive: true);
@@ -217,6 +256,38 @@ class FilePrivateVaultStore implements PrivateVaultStore {
       File('${dir.path}${Platform.pathSeparator}$fileName'),
       bytes,
     );
+  }
+
+  @override
+  Future<void> writeSectionStream(
+    String vaultStoreId,
+    String fileName,
+    Stream<List<int>> stream,
+  ) async {
+    final dir = _dir(vaultStoreId);
+    await dir.create(recursive: true);
+    final target = File('${dir.path}${Platform.pathSeparator}$fileName');
+    final temp = File(
+      '${dir.path}${Platform.pathSeparator}$fileName.stream.tmp',
+    );
+    final sink = temp.openWrite();
+    try {
+      await sink.addStream(stream);
+      await sink.flush();
+      await sink.close();
+      if (await target.exists()) {
+        await target.delete();
+      }
+      await temp.rename(target.path);
+    } catch (_) {
+      try {
+        await sink.close();
+      } catch (_) {}
+      if (await temp.exists()) {
+        await temp.delete();
+      }
+      rethrow;
+    }
   }
 
   @override

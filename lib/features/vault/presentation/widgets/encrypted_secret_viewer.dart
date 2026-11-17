@@ -824,7 +824,7 @@ class _ImportPreviewRow extends StatelessWidget {
 
 IconData _iconForImportEntry(EncryptedImportEntry entry) {
   if (entry.kind == 'note') return Icons.sticky_note_2_outlined;
-  if (entry.kind == 'document') return Icons.folder_outlined;
+  if (entry.kind == 'document') return Icons.description_outlined;
   return Icons.lock_outline;
 }
 

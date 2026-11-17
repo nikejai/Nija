@@ -2,12 +2,30 @@ import 'package:flutter/material.dart';
 import '../../../../domain/models/vault_folder.dart';
 
 const List<String> kDefaultFolderColors = [
-  '#0381FE', // Blue
-  '#7C4DFF', // Purple
-  '#1FA968', // Teal
-  '#D97706', // Amber
+  '#0381FE', // Royal Blue
+  '#0284C7', // Sky Blue
+  '#06B6D4', // Cyan
+  '#14B8A6', // Teal
+  '#1FA968', // Emerald Green
+  '#10B981', // Mint Green
+  '#84CC16', // Lime Green
+  '#EAB308', // Sunflower Gold
+  '#D97706', // Warm Amber
+  '#F97316', // Bright Orange
   '#E86A33', // Coral
-  '#4B5563', // Charcoal
+  '#EA580C', // Tangerine
+  '#EF4444', // Crimson Red
+  '#F43F5E', // Rose Pink
+  '#EC4899', // Hot Pink
+  '#D946EF', // Magenta
+  '#A855F7', // Violet
+  '#7C4DFF', // Deep Purple
+  '#6366F1', // Indigo
+  '#8B5CF6', // Lavender
+  '#4B5563', // Slate Charcoal
+  '#64748B', // Cool Grey
+  '#78716C', // Warm Stone
+  '#B45309', // Bronze Brown
 ];
 
 Color parseFolderHexColor(String? hexString, {Color fallback = const Color(0xFF0381FE)}) {

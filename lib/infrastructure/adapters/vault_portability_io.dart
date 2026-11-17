@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
@@ -110,6 +111,46 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
         vaultId: vaultId,
         suggestedName: suggestedName,
         content: content,
+        forceAccountChooser: forceAccountChooser,
+      );
+    }
+    return Future<bool>.value(false);
+  }
+
+  @override
+  Future<bool> backupVaultStreamToCloud({
+    required String vaultId,
+    required String suggestedName,
+    required Stream<List<int>> stream,
+    required int lengthBytes,
+    String mimeType = 'application/octet-stream',
+    Map<String, String>? extraProperties,
+    bool forceAccountChooser = false,
+  }) {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return _googleDrive.backupVaultStreamToCloud(
+        vaultId: vaultId,
+        suggestedName: suggestedName,
+        stream: stream,
+        lengthBytes: lengthBytes,
+        mimeType: mimeType,
+        extraProperties: extraProperties,
+        forceAccountChooser: forceAccountChooser,
+      );
+    }
+    return Future<bool>.value(false);
+  }
+
+  @override
+  Future<bool> downloadCloudBackupToSink(
+    String driveFileId,
+    EventSink<List<int>> sink, {
+    bool forceAccountChooser = false,
+  }) {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return _googleDrive.downloadCloudBackupToSink(
+        driveFileId,
+        sink,
         forceAccountChooser: forceAccountChooser,
       );
     }

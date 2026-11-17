@@ -1,4 +1,5 @@
 import '../../domain/models/vault.dart';
+import '../../domain/models/vault_file.dart';
 import '../../domain/models/vault_payload.dart';
 import '../../domain/models/vault_transfer_result.dart';
 
@@ -13,6 +14,8 @@ typedef VaultProgressCallback = void Function(VaultOperationProgress progress);
 
 abstract class VaultService {
   Future<String> readRawVaultFile({required String filePath});
+
+  Future<VaultFile> readVaultHeader({required String filePath});
 
   Future<void> writeRawVaultFile({
     required String filePath,
@@ -61,6 +64,13 @@ abstract class VaultService {
     required String filePath,
     required String currentRecoveryPhrase,
     required String newRecoveryPhrase,
+    VaultProgressCallback? onProgress,
+  });
+
+  Future<void> migrateToBalancedProfile({
+    required String filePath,
+    required String currentPassword,
+    String? currentRecoveryPhrase,
     VaultProgressCallback? onProgress,
   });
 

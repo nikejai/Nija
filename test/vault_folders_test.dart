@@ -645,7 +645,7 @@ void main() {
       expect(find.byType(GridView), findsNothing);
     });
 
-    testWidgets('tree view in portrait mode allocates 20% width to tree and enables horizontal scrolling on right pane', (tester) async {
+    testWidgets('tree view in portrait mode allocates 25% width to tree and enables horizontal scrolling on right pane', (tester) async {
       tester.view.physicalSize = const Size(400, 800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() {
@@ -688,11 +688,11 @@ void main() {
       await tester.tap(folderIconFinder);
       await tester.pumpAndSettle();
 
-      // Verify left pane takes 20% of 400px = 80px width
+      // Verify left pane takes 25% of 400px = 100px width
       final leftPaneFinder = find.byKey(const ValueKey('explorer-tree-left-pane'));
       expect(leftPaneFinder, findsOneWidget);
       final leftPaneSize = tester.getSize(leftPaneFinder);
-      expect(leftPaneSize.width, closeTo(80.0, 0.1));
+      expect(leftPaneSize.width, closeTo(100.0, 0.1));
 
       // Verify right pane has horizontal scroll view
       final rightScrollFinder = find.byKey(const ValueKey('explorer-tree-right-scroll'));
@@ -913,8 +913,8 @@ void main() {
       await tester.pumpAndSettle();
 
       // Choose Default Folder
-      expect(find.text('Default Folder'), findsOneWidget);
-      await tester.tap(find.text('Default Folder'));
+      expect(find.text('Default'), findsOneWidget);
+      await tester.tap(find.text('Default'));
       await tester.pumpAndSettle();
 
       expect(movedItem?['id'], 'item-custom-1');
@@ -1225,7 +1225,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Copy 2 items to...'), findsOneWidget);
-      await tester.tap(find.text('Default Folder'));
+      await tester.tap(find.text('Default'));
       await tester.pumpAndSettle();
 
       expect(copiedItems.length, 2);

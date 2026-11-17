@@ -628,8 +628,13 @@ const List<_TemplateIconOption> _availableTemplateIcons = [
     icon: Icons.account_balance_wallet_outlined,
   ),
   _TemplateIconOption(
-    key: 'folder',
+    key: 'document',
     label: 'Documents',
+    icon: Icons.description_outlined,
+  ),
+  _TemplateIconOption(
+    key: 'folder',
+    label: 'Folder',
     icon: Icons.folder_outlined,
   ),
   _TemplateIconOption(

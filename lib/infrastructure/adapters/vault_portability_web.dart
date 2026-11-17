@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import '../../../core/platform/nija_browser_bridge.dart';
@@ -71,6 +72,40 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       vaultId: vaultId,
       suggestedName: suggestedName,
       content: content,
+      forceAccountChooser: forceAccountChooser,
+    );
+  }
+
+  @override
+  Future<bool> backupVaultStreamToCloud({
+    required String vaultId,
+    required String suggestedName,
+    required Stream<List<int>> stream,
+    required int lengthBytes,
+    String mimeType = 'application/octet-stream',
+    Map<String, String>? extraProperties,
+    bool forceAccountChooser = false,
+  }) {
+    return _googleDrive.backupVaultStreamToCloud(
+      vaultId: vaultId,
+      suggestedName: suggestedName,
+      stream: stream,
+      lengthBytes: lengthBytes,
+      mimeType: mimeType,
+      extraProperties: extraProperties,
+      forceAccountChooser: forceAccountChooser,
+    );
+  }
+
+  @override
+  Future<bool> downloadCloudBackupToSink(
+    String driveFileId,
+    EventSink<List<int>> sink, {
+    bool forceAccountChooser = false,
+  }) {
+    return _googleDrive.downloadCloudBackupToSink(
+      driveFileId,
+      sink,
       forceAccountChooser: forceAccountChooser,
     );
   }

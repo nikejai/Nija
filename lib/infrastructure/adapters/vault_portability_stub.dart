@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'vault_portability_base.dart';
 import 'vault_portability_model.dart';
 
@@ -24,6 +26,32 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
   }) {
     throw UnsupportedError(
       'Cloud vault backup is not supported on this platform.',
+    );
+  }
+
+  @override
+  Future<bool> backupVaultStreamToCloud({
+    required String vaultId,
+    required String suggestedName,
+    required Stream<List<int>> stream,
+    required int lengthBytes,
+    String mimeType = 'application/octet-stream',
+    Map<String, String>? extraProperties,
+    bool forceAccountChooser = false,
+  }) {
+    throw UnsupportedError(
+      'Cloud vault backup is not supported on this platform.',
+    );
+  }
+
+  @override
+  Future<bool> downloadCloudBackupToSink(
+    String driveFileId,
+    EventSink<List<int>> sink, {
+    bool forceAccountChooser = false,
+  }) {
+    throw UnsupportedError(
+      'Cloud vault restore is not supported on this platform.',
     );
   }
 

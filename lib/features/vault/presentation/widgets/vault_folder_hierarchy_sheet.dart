@@ -17,6 +17,10 @@ Future<VaultFolder?> showVaultFolderHierarchySheet(
   required List<VaultFolder> folders,
   required String selectedFolderId,
   VaultFolderCreateCallback? onCreateFolder,
+  String? title,
+  bool showRootOption = false,
+  Set<String>? excludedFolderIds,
+  bool hideDefaultFolder = false,
 }) async {
   return showModalBottomSheet<VaultFolder>(
     context: context,
@@ -26,6 +30,10 @@ Future<VaultFolder?> showVaultFolderHierarchySheet(
       initialFolders: folders,
       selectedFolderId: selectedFolderId,
       onCreateFolder: onCreateFolder,
+      title: title,
+      showRootOption: showRootOption,
+      excludedFolderIds: excludedFolderIds,
+      hideDefaultFolder: hideDefaultFolder,
     ),
   );
 }
@@ -35,11 +43,19 @@ class _FolderHierarchySheetContent extends StatefulWidget {
     required this.initialFolders,
     required this.selectedFolderId,
     this.onCreateFolder,
+    this.title,
+    this.showRootOption = false,
+    this.excludedFolderIds,
+    this.hideDefaultFolder = false,
   });
 
   final List<VaultFolder> initialFolders;
   final String selectedFolderId;
   final VaultFolderCreateCallback? onCreateFolder;
+  final String? title;
+  final bool showRootOption;
+  final Set<String>? excludedFolderIds;
+  final bool hideDefaultFolder;
 
   @override
   State<_FolderHierarchySheetContent> createState() =>
@@ -192,8 +208,13 @@ class _FolderHierarchySheetContentState
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final filteredFolders = _folders
+        .where((f) =>
+            f.id != 'default' &&
+            !(widget.excludedFolderIds?.contains(f.id) ?? false))
+        .toList();
     final tree = FolderTreeBuilder.buildTree(
-      folders: _folders.where((f) => f.id != 'default').toList(),
+      folders: filteredFolders,
       items: const <Map<String, dynamic>>[],
     );
 
@@ -240,20 +261,23 @@ class _FolderHierarchySheetContentState
                   ),
                 ),
               ),
-              // Header: "Select folder" on left, '+' and 'x' on right
+              // Header: title on left, '+' and 'x' on right
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 4, 8, 8),
                 child: Row(
                   children: [
-                    Text(
-                      'Select folder',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 18,
-                        letterSpacing: -0.3,
+                    Expanded(
+                      child: Text(
+                        widget.title ?? 'Select folder',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 18,
+                          letterSpacing: -0.3,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const Spacer(),
                     IconButton(
                       key: const ValueKey('hierarchy-create-folder-button'),
                       tooltip: 'Create folder',
@@ -275,12 +299,57 @@ class _FolderHierarchySheetContentState
                   controller: scrollController,
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   children: [
-                    _buildFolderTile(
-                      folder: defaultFolder,
-                      level: 0,
-                      hasChildren: false,
-                      isExpanded: false,
-                    ),
+                    if (widget.showRootOption)
+                      Material(
+                        color: _selectedFolderId == 'root'
+                            ? colorScheme.primary.withValues(alpha: 0.10)
+                            : Colors.transparent,
+                        child: InkWell(
+                          onTap: () {
+                            setState(() => _selectedFolderId = 'root');
+                            Navigator.of(context).pop(
+                              const VaultFolder(
+                                id: 'root',
+                                name: 'Root Directory',
+                                icon: 'home',
+                                createdAt: '',
+                                updatedAt: '',
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            child: Row(
+                              children: [
+                                const SizedBox(width: 26),
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.primary.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(Icons.home_outlined, color: colorScheme.primary, size: 18),
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Text(
+                                    'Root Directory',
+                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (!widget.hideDefaultFolder)
+                      _buildFolderTile(
+                        folder: defaultFolder,
+                        level: 0,
+                        hasChildren: false,
+                        isExpanded: false,
+                      ),
                     for (final node in tree) ..._renderTreeNode(node, 0),
                   ],
                 ),

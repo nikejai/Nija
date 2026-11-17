@@ -294,7 +294,7 @@ IconData _iconForHomeType(String type) {
     return Icons.account_balance_wallet_outlined;
   }
   if (normalized.contains('ident')) return Icons.perm_identity_outlined;
-  if (normalized.contains('document')) return Icons.folder_outlined;
+  if (normalized.contains('document')) return Icons.description_outlined;
   if (normalized.contains('health')) return Icons.favorite_outline;
   return Icons.shield_outlined;
 }
@@ -339,6 +339,8 @@ IconData _iconForCustomTemplateKey(String? key) {
       return Icons.badge_outlined;
     case 'wallet':
       return Icons.account_balance_wallet_outlined;
+    case 'document':
+      return Icons.description_outlined;
     case 'folder':
       return Icons.folder_outlined;
     case 'heart':

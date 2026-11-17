@@ -1634,7 +1634,7 @@ List<_CategoryOption> _buildCategoryOptions(
     kind: 'document',
     type: 'Documents',
     subtitle: 'Encrypted files up to 25 MB',
-    icon: Icons.folder_outlined,
+    icon: Icons.description_outlined,
     color: const Color(0xFFFB7185),
   );
   final builtIn = AddVaultItemScreen.templates
@@ -1701,7 +1701,7 @@ IconData _iconForCategoryType(String type) {
   if (normalized == 'login') return Icons.lock_outline;
   if (normalized == 'password') return Icons.password_outlined;
   if (normalized.contains('note')) return Icons.sticky_note_2_outlined;
-  if (normalized.contains('document')) return Icons.folder_outlined;
+  if (normalized.contains('document')) return Icons.description_outlined;
   if (normalized.contains('card')) return Icons.credit_card_outlined;
   if (normalized.contains('bank')) return Icons.account_balance_outlined;
   if (normalized.contains('passport')) return Icons.flight_takeoff_outlined;

@@ -413,7 +413,7 @@ class _EncryptedImportEntryPreviewScreenState
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       children: [
         _ImportPreviewHeader(
-          icon: Icons.folder_outlined,
+          icon: Icons.description_outlined,
           color: const Color(0xFFFB923C),
           title: entry.title,
           subtitle: 'Document',
@@ -553,7 +553,7 @@ class _ImportPreviewRow extends StatelessWidget {
 
 IconData _iconForImportEntry(_EncryptedImportEntry entry) {
   if (entry.kind == 'note') return Icons.sticky_note_2_outlined;
-  if (entry.kind == 'document') return Icons.folder_outlined;
+  if (entry.kind == 'document') return Icons.description_outlined;
   final rawEntry = entry.bundleEntry['entry'];
   if (rawEntry is Map) {
     return _iconForHomeType(rawEntry['type']?.toString() ?? 'Item');
