@@ -201,7 +201,6 @@ class VaultFoldersView extends StatefulWidget {
     required this.onDeleteItem,
     this.isDemoPreview = false,
     this.onExitDemoPreview,
-    this.onOpenDemoPreview,
     this.onFolderChanged,
     this.iconForType,
     this.colorForType,
@@ -224,7 +223,6 @@ class VaultFoldersView extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>> onDeleteItem;
   final bool isDemoPreview;
   final VoidCallback? onExitDemoPreview;
-  final VoidCallback? onOpenDemoPreview;
   final ValueChanged<String?>? onFolderChanged;
   final IconData Function(String type)? iconForType;
   final Color Function(String type)? colorForType;
@@ -240,6 +238,11 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   FolderSortOption _sortOption = FolderSortOption.nameAsc;
   final Set<String> _expandedTreeFolderIds = {};
   String _searchFilter = '';
+  bool _isSearchExpanded = false;
+
+  final Set<String> _selectedItemIds = {};
+  bool _isSelectionModeExplicit = false;
+  bool get _isSelectionMode => _isSelectionModeExplicit || _selectedItemIds.isNotEmpty;
 
   late final TextEditingController _searchController;
   late final FocusNode _searchFocusNode;
@@ -250,6 +253,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     _searchController = TextEditingController(text: _searchFilter);
     _searchFocusNode = FocusNode();
     _searchController.addListener(_onSearchChanged);
+    if (_searchFilter.isNotEmpty) {
+      _isSearchExpanded = true;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.onFolderChanged?.call(_currentFolderId);
     });
@@ -268,6 +274,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     if (_searchFilter != text) {
       setState(() {
         _searchFilter = text;
+        if (text.isNotEmpty) {
+          _isSearchExpanded = true;
+        }
       });
     }
   }
@@ -296,8 +305,195 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
         );
   }
 
+  String _itemId(Map<String, dynamic> item) {
+    final id = item['id'];
+    if (id != null && id.toString().isNotEmpty) {
+      return id.toString();
+    }
+    return (item['title'] ?? '').toString();
+  }
+
+  List<Map<String, dynamic>> get _selectedItems {
+    final all = [...widget.items, ...widget.notes];
+    return all.where((i) => _selectedItemIds.contains(_itemId(i))).toList();
+  }
+
+  void _toggleItemSelection(Map<String, dynamic> item) {
+    final id = _itemId(item);
+    setState(() {
+      _isSelectionModeExplicit = true;
+      if (_selectedItemIds.contains(id)) {
+        _selectedItemIds.remove(id);
+      } else {
+        _selectedItemIds.add(id);
+      }
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectedItemIds.clear();
+      _isSelectionModeExplicit = false;
+    });
+  }
+
+  void _selectAllItems() {
+    final items = _currentItems;
+    final allSelected = items.isNotEmpty && items.every((i) => _selectedItemIds.contains(_itemId(i)));
+    setState(() {
+      if (allSelected) {
+        _selectedItemIds.clear();
+      } else {
+        for (final item in items) {
+          _selectedItemIds.add(_itemId(item));
+        }
+      }
+    });
+  }
+
+  void _moveSelectedItems() {
+    final selected = _selectedItems;
+    if (selected.isEmpty) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Move ${selected.length} items to...'),
+        content: SizedBox(
+          width: 320,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.folder_special, color: Color(0xFFF59E0B)),
+                title: const Text('Default Folder'),
+                subtitle: const Text('Move to default vault location'),
+                onTap: () {
+                  for (final item in selected) {
+                    widget.onMoveItem(item, null);
+                  }
+                  Navigator.pop(ctx);
+                  _exitSelectionMode();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Moved ${selected.length} items to Default Folder.')),
+                  );
+                },
+              ),
+              for (final target in widget.folders.where((f) => f.id != VaultFoldersView.defaultFolderId))
+                ListTile(
+                  leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
+                  title: Text(target.name),
+                  onTap: () {
+                    for (final item in selected) {
+                      widget.onMoveItem(item, target.id);
+                    }
+                    Navigator.pop(ctx);
+                    _exitSelectionMode();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Moved ${selected.length} items to "${target.name}".')),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ],
+      ),
+    );
+  }
+
+  void _copySelectedItems() {
+    final selected = _selectedItems;
+    if (selected.isEmpty) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Copy ${selected.length} items to...'),
+        content: SizedBox(
+          width: 320,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.folder_special, color: Color(0xFFF59E0B)),
+                title: const Text('Default Folder'),
+                subtitle: const Text('Copy to default vault location'),
+                onTap: () {
+                  for (final item in selected) {
+                    widget.onCopyItem(item, null);
+                  }
+                  Navigator.pop(ctx);
+                  _exitSelectionMode();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Copied ${selected.length} items to Default Folder.')),
+                  );
+                },
+              ),
+              for (final target in widget.folders.where((f) => f.id != VaultFoldersView.defaultFolderId))
+                ListTile(
+                  leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
+                  title: Text(target.name),
+                  onTap: () {
+                    for (final item in selected) {
+                      widget.onCopyItem(item, target.id);
+                    }
+                    Navigator.pop(ctx);
+                    _exitSelectionMode();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Copied ${selected.length} items to "${target.name}".')),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ],
+      ),
+    );
+  }
+
+  void _deleteSelectedItems() {
+    final selected = _selectedItems;
+    if (selected.isEmpty) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete ${selected.length} items?'),
+        content: Text(
+          selected.length == 1
+              ? 'Are you sure you want to delete this encrypted item?'
+              : 'Are you sure you want to delete these ${selected.length} encrypted items? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+              minimumSize: const Size(64, 38),
+            ),
+            onPressed: () {
+              for (final item in selected) {
+                widget.onDeleteItem(item);
+              }
+              Navigator.pop(ctx);
+              _exitSelectionMode();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Deleted ${selected.length} items.')),
+              );
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _navigateToFolder(String? targetFolderId) {
     if (_currentFolderId == targetFolderId) return;
+    _exitSelectionMode();
     setState(() {
       _backHistory.add(_currentFolderId);
       _currentFolderId = targetFolderId;
@@ -310,6 +506,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
 
   void _navigateBack() {
     if (_backHistory.isEmpty) return;
+    _exitSelectionMode();
     setState(() {
       _currentFolderId = _backHistory.removeLast();
     });
@@ -456,7 +653,78 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           Expanded(
             child: _buildExplorerBody(context),
           ),
+          if (_isSelectionMode && _selectedItemIds.isNotEmpty)
+            _buildSelectionBottomBar(context),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSelectionBottomBar(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final count = _selectedItemIds.length;
+
+    return Container(
+      key: const ValueKey('explorer-selection-bottom-bar'),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.scaffoldBackgroundColor,
+        border: Border(top: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const ValueKey('explorer-bottom-move'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+                icon: const Icon(Icons.drive_file_move_outlined, size: 18),
+                label: Text('Move ($count)'),
+                onPressed: _moveSelectedItems,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const ValueKey('explorer-bottom-copy'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+                icon: const Icon(Icons.content_copy_outlined, size: 18),
+                label: Text('Copy ($count)'),
+                onPressed: _copySelectedItems,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                key: const ValueKey('explorer-bottom-delete'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: Text('Delete ($count)'),
+                onPressed: _deleteSelectedItems,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -506,6 +774,83 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final canGoBack = _backHistory.isNotEmpty;
     final canGoUp = _currentFolderId != null;
 
+    if (_isSelectionMode) {
+      final allSelected = _currentItems.isNotEmpty &&
+          _currentItems.every((i) => _selectedItemIds.contains(_itemId(i)));
+      final count = _selectedItemIds.length;
+      return Container(
+        key: const ValueKey('explorer-selection-header'),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        color: theme.scaffoldBackgroundColor,
+        child: Row(
+          children: [
+            IconButton(
+              key: const ValueKey('explorer-selection-cancel'),
+              icon: const Icon(Icons.close, size: 20),
+              tooltip: 'Cancel selection',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: _exitSelectionMode,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              count == 0 ? 'Select items' : '$count selected',
+              key: const ValueKey('explorer-selection-count'),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+                color: colorScheme.onSurface,
+              ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              key: const ValueKey('explorer-selection-select-all'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              icon: Icon(allSelected ? Icons.deselect : Icons.select_all, size: 16),
+              label: Text(
+                allSelected ? 'Deselect All' : 'Select All',
+                style: const TextStyle(fontSize: 12),
+              ),
+              onPressed: _selectAllItems,
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              key: const ValueKey('explorer-selection-move'),
+              icon: const Icon(Icons.drive_file_move_outlined, size: 20),
+              tooltip: 'Move selected',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: count == 0 ? null : _moveSelectedItems,
+            ),
+            IconButton(
+              key: const ValueKey('explorer-selection-copy'),
+              icon: const Icon(Icons.content_copy_outlined, size: 20),
+              tooltip: 'Copy selected',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: count == 0 ? null : _copySelectedItems,
+            ),
+            IconButton(
+              key: const ValueKey('explorer-selection-delete'),
+              icon: Icon(
+                Icons.delete_outline,
+                size: 20,
+                color: count == 0 ? colorScheme.onSurfaceVariant.withValues(alpha: 0.38) : Colors.red,
+              ),
+              tooltip: 'Delete selected',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: count == 0 ? null : _deleteSelectedItems,
+            ),
+          ],
+        ),
+      );
+    }
+
     final sortButton = PopupMenuButton<FolderSortOption>(
       key: const ValueKey('explorer-sort-button'),
       initialValue: _sortOption,
@@ -552,47 +897,160 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       ),
     );
 
-    final searchField = SizedBox(
-      height: 36,
-      child: TextField(
-        key: const ValueKey('explorer-search-input'),
-        controller: _searchController,
-        focusNode: _searchFocusNode,
-        style: const TextStyle(fontSize: 13),
-        decoration: InputDecoration(
-          hintText: _currentFolderId == null
-              ? 'Search all folders & items...'
-              : 'Search in this folder...',
-          hintStyle: TextStyle(
-            fontSize: 13,
-            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-          prefixIcon: const Icon(Icons.search, size: 16),
-          prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: colorScheme.outlineVariant),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
-          ),
-          suffixIcon: _searchFilter.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear, size: 14),
-                  onPressed: () {
-                    _searchController.clear();
-                    setState(() => _searchFilter = '');
-                  },
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                )
-              : null,
+    final searchToggleButton = IconButton(
+      key: const ValueKey('explorer-search-toggle'),
+      tooltip: _isSearchExpanded ? 'Close search' : 'Search folders and items',
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      icon: AnimatedRotation(
+        turns: _isSearchExpanded ? 0.25 : 0.0,
+        duration: const Duration(milliseconds: 200),
+        child: Icon(
+          _isSearchExpanded ? Icons.close : Icons.search,
+          size: 20,
+          color: _isSearchExpanded || _searchFilter.isNotEmpty
+              ? colorScheme.primary
+              : colorScheme.onSurfaceVariant,
         ),
       ),
+      onPressed: () {
+        setState(() {
+          _isSearchExpanded = !_isSearchExpanded;
+          if (_isSearchExpanded) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _searchFocusNode.requestFocus();
+            });
+          } else {
+            _searchController.clear();
+            _searchFilter = '';
+            _searchFocusNode.unfocus();
+          }
+        });
+      },
+    );
+
+    final animatedSearchBar = AnimatedSize(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeInOutCubic,
+      child: _isSearchExpanded
+          ? Container(
+              margin: const EdgeInsets.only(top: 6, bottom: 2),
+              height: 38,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: colorScheme.primary.withValues(alpha: 0.5),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(width: 10),
+                  Icon(
+                    Icons.search,
+                    size: 16,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('explorer-search-input'),
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: _currentFolderId == null
+                            ? 'Search all folders & items...'
+                            : 'Search in this folder...',
+                        hintStyle: TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                        ),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                    ),
+                  ),
+                  if (_searchFilter.isNotEmpty)
+                    IconButton(
+                      key: const ValueKey('explorer-search-clear'),
+                      icon: Icon(
+                        Icons.cancel,
+                        size: 16,
+                        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                      ),
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _searchFilter = '');
+                      },
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    ),
+                  IconButton(
+                    key: const ValueKey('explorer-search-collapse'),
+                    icon: Icon(
+                      Icons.keyboard_arrow_up,
+                      size: 18,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    tooltip: 'Collapse search',
+                    onPressed: () {
+                      setState(() {
+                        _isSearchExpanded = false;
+                        _searchController.clear();
+                        _searchFilter = '';
+                        _searchFocusNode.unfocus();
+                      });
+                    },
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              ),
+            )
+          : const SizedBox.shrink(),
+    );
+
+    final navigationButtons = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (canGoBack) ...[
+          IconButton(
+            icon: const Icon(Icons.arrow_back, size: 18),
+            onPressed: _navigateBack,
+            tooltip: 'Back',
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+          const SizedBox(width: 2),
+        ],
+        if (canGoUp) ...[
+          IconButton(
+            icon: const Icon(Icons.arrow_upward, size: 18),
+            onPressed: _navigateUp,
+            tooltip: 'Up to parent folder',
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.all(4),
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+          const SizedBox(width: 2),
+        ],
+      ],
     );
 
     final breadcrumbsWidget = SingleChildScrollView(
@@ -600,28 +1058,6 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (canGoBack) ...[
-            IconButton(
-              icon: const Icon(Icons.arrow_back, size: 18),
-              onPressed: _navigateBack,
-              tooltip: 'Back',
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            ),
-            const SizedBox(width: 2),
-          ],
-          if (canGoUp) ...[
-            IconButton(
-              icon: const Icon(Icons.arrow_upward, size: 18),
-              onPressed: _navigateUp,
-              tooltip: 'Up to parent folder',
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            ),
-            const SizedBox(width: 2),
-          ],
           Material(
             color: Colors.transparent,
             child: InkWell(
@@ -696,42 +1132,59 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       ),
     );
 
+    final multiSelectToggle = IconButton(
+      key: const ValueKey('explorer-multi-select-toggle'),
+      tooltip: 'Select multiple items',
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      icon: const Icon(Icons.checklist, size: 20),
+      onPressed: () {
+        setState(() {
+          _isSelectionModeExplicit = true;
+        });
+      },
+    );
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       color: theme.scaffoldBackgroundColor,
-      child: widget.isWide
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    SizedBox(width: 240, child: searchField),
-                    const Spacer(),
-                    sortButton,
-                    const SizedBox(width: 8),
-                    viewSegmented,
-                  ],
-                ),
-                const SizedBox(height: 6),
-                breadcrumbsWidget,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              navigationButtons,
+              Expanded(child: breadcrumbsWidget),
+              if (widget.isWide) ...[
+                const SizedBox(width: 8),
+                searchToggleButton,
+                const SizedBox(width: 4),
+                sortButton,
+                const SizedBox(width: 4),
+                multiSelectToggle,
+                const SizedBox(width: 6),
+                viewSegmented,
               ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            ],
+          ),
+          if (!widget.isWide) ...[
+            const SizedBox(height: 4),
+            Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(child: searchField),
-                    const SizedBox(width: 6),
-                    sortButton,
-                    const SizedBox(width: 6),
-                    viewSegmented,
-                  ],
-                ),
-                const SizedBox(height: 8),
-                breadcrumbsWidget,
+                searchToggleButton,
+                const SizedBox(width: 4),
+                sortButton,
+                const SizedBox(width: 4),
+                multiSelectToggle,
+                const Spacer(),
+                viewSegmented,
               ],
             ),
+          ],
+          animatedSearchBar,
+        ],
+      ),
     );
   }
 
@@ -925,21 +1378,46 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     if (dateLabel.isNotEmpty) subtitleParts.add(dateLabel);
     final subtitle = subtitleParts.join(' · ');
 
+    final itemId = _itemId(item);
+    final isSelected = _selectedItemIds.contains(itemId);
+
+    final selectionIndicator = Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: Icon(
+        isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+        size: 20,
+        color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+      ),
+    );
+
     return Card(
+      key: ValueKey('explorer-item-card-$itemId'),
       margin: const EdgeInsets.symmetric(vertical: 2),
       elevation: 0,
+      color: isSelected ? colorScheme.primaryContainer.withValues(alpha: 0.35) : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+        side: BorderSide(
+          color: isSelected ? colorScheme.primary : colorScheme.outlineVariant.withValues(alpha: 0.5),
+          width: isSelected ? 1.5 : 1,
+        ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
-        onTap: () => widget.onOpenItem(item),
+        onTap: () {
+          if (_isSelectionMode) {
+            _toggleItemSelection(item);
+          } else {
+            widget.onOpenItem(item);
+          }
+        },
+        onLongPress: () => _toggleItemSelection(item),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: widget.isWide
               ? Row(
                   children: [
+                    if (_isSelectionMode) selectionIndicator,
                     Expanded(
                       flex: 4,
                       child: Row(
@@ -976,26 +1454,29 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    IconButton(
-                      icon: Icon(Icons.info_outline, size: 18, color: colorScheme.onSurfaceVariant),
-                      tooltip: 'Item details',
-                      onPressed: () => _showItemInfoBottomSheet(item),
-                    ),
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, size: 18),
-                      onSelected: (val) => _handleItemAction(item, val),
-                      itemBuilder: (ctx) => [
-                        const PopupMenuItem(value: 'open', child: Text('Open Details')),
-                        const PopupMenuItem(value: 'info', child: Text('Item Info')),
-                        const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
-                        const PopupMenuItem(value: 'move', child: Text('Move to...')),
-                        const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
-                      ],
-                    ),
+                    if (!_isSelectionMode) ...[
+                      IconButton(
+                        icon: Icon(Icons.info_outline, size: 18, color: colorScheme.onSurfaceVariant),
+                        tooltip: 'Item details',
+                        onPressed: () => _showItemInfoBottomSheet(item),
+                      ),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, size: 18),
+                        onSelected: (val) => _handleItemAction(item, val),
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(value: 'open', child: Text('Open Details')),
+                          const PopupMenuItem(value: 'info', child: Text('Item Info')),
+                          const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
+                          const PopupMenuItem(value: 'move', child: Text('Move to...')),
+                          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                        ],
+                      ),
+                    ],
                   ],
                 )
               : Row(
                   children: [
+                    if (_isSelectionMode) selectionIndicator,
                     Container(
                       width: 32,
                       height: 32,
@@ -1025,23 +1506,25 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                         ],
                       ),
                     ),
-                    IconButton(
-                      key: ValueKey('item-info-btn-${item['id'] ?? title}'),
-                      icon: Icon(Icons.info_outline, size: 18, color: colorScheme.onSurfaceVariant),
-                      tooltip: 'Item details',
-                      onPressed: () => _showItemInfoBottomSheet(item),
-                    ),
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, size: 18),
-                      onSelected: (val) => _handleItemAction(item, val),
-                      itemBuilder: (ctx) => [
-                        const PopupMenuItem(value: 'open', child: Text('Open Details')),
-                        const PopupMenuItem(value: 'info', child: Text('Item Info')),
-                        const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
-                        const PopupMenuItem(value: 'move', child: Text('Move to...')),
-                        const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
-                      ],
-                    ),
+                    if (!_isSelectionMode) ...[
+                      IconButton(
+                        key: ValueKey('item-info-btn-${item['id'] ?? title}'),
+                        icon: Icon(Icons.info_outline, size: 18, color: colorScheme.onSurfaceVariant),
+                        tooltip: 'Item details',
+                        onPressed: () => _showItemInfoBottomSheet(item),
+                      ),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, size: 18),
+                        onSelected: (val) => _handleItemAction(item, val),
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(value: 'open', child: Text('Open Details')),
+                          const PopupMenuItem(value: 'info', child: Text('Item Info')),
+                          const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
+                          const PopupMenuItem(value: 'move', child: Text('Move to...')),
+                          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
         ),
@@ -1152,43 +1635,68 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final itemIcon = widget.iconForType?.call(type) ?? defaultIconForType(type);
     final itemColor = widget.colorForType?.call(type) ?? defaultColorForType(type);
 
+    final itemId = _itemId(item);
+    final isSelected = _selectedItemIds.contains(itemId);
+
     return Card(
+      key: ValueKey('explorer-item-grid-$itemId'),
       elevation: 1,
+      color: isSelected ? colorScheme.primaryContainer.withValues(alpha: 0.35) : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
+        side: BorderSide(
+          color: isSelected
+              ? colorScheme.primary
+              : colorScheme.outlineVariant.withValues(alpha: 0.6),
+          width: isSelected ? 2 : 1,
+        ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => widget.onOpenItem(item),
+        onTap: () {
+          if (_isSelectionMode) {
+            _toggleItemSelection(item);
+          } else {
+            widget.onOpenItem(item);
+          }
+        },
+        onLongPress: () => _toggleItemSelection(item),
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisAlignment: _isSelectionMode ? MainAxisAlignment.spaceBetween : MainAxisAlignment.end,
                 children: [
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    icon: Icon(Icons.info_outline, size: 16, color: colorScheme.onSurfaceVariant),
-                    tooltip: 'Item info',
-                    onPressed: () => _showItemInfoBottomSheet(item),
-                  ),
-                  const SizedBox(width: 4),
-                  PopupMenuButton<String>(
-                    padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.more_horiz, size: 16),
-                    onSelected: (val) => _handleItemAction(item, val),
-                    itemBuilder: (ctx) => const [
-                      PopupMenuItem(value: 'open', child: Text('Open Details')),
-                      PopupMenuItem(value: 'info', child: Text('Item Info')),
-                      PopupMenuItem(value: 'copy', child: Text('Copy to...')),
-                      PopupMenuItem(value: 'move', child: Text('Move to...')),
-                      PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
-                    ],
-                  ),
+                  if (_isSelectionMode)
+                    Icon(
+                      isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                    ),
+                  if (!_isSelectionMode) ...[
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      icon: Icon(Icons.info_outline, size: 16, color: colorScheme.onSurfaceVariant),
+                      tooltip: 'Item info',
+                      onPressed: () => _showItemInfoBottomSheet(item),
+                    ),
+                    const SizedBox(width: 4),
+                    PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(Icons.more_horiz, size: 16),
+                      onSelected: (val) => _handleItemAction(item, val),
+                      itemBuilder: (ctx) => const [
+                        PopupMenuItem(value: 'open', child: Text('Open Details')),
+                        PopupMenuItem(value: 'info', child: Text('Item Info')),
+                        PopupMenuItem(value: 'copy', child: Text('Copy to...')),
+                        PopupMenuItem(value: 'move', child: Text('Move to...')),
+                        PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                      ],
+                    ),
+                  ],
                 ],
               ),
               Container(
@@ -1386,19 +1894,6 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant),
             ),
-            if (widget.onOpenDemoPreview != null && !widget.isDemoPreview) ...[
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                key: const ValueKey('explorer-empty-demo-preview-button'),
-                icon: const Icon(Icons.visibility_outlined, size: 16),
-                label: const Text('Preview Demo Folders & Files'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 36),
-                  visualDensity: VisualDensity.compact,
-                ),
-                onPressed: widget.onOpenDemoPreview,
-              ),
-            ],
           ],
         ),
       ),

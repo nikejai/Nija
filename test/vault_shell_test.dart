@@ -880,7 +880,7 @@ void main() {
     expect(lockCalls, 1);
   });
 
-  testWidgets('demo preview shows demo folders and items in folders tab', (
+  testWidgets('demo preview shows demo folders and items in folders tab in explore demo', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(430, 932);
@@ -891,6 +891,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: VaultAppShell(
+          isExploreDemoSession: true,
           activeVaultName: 'empty.nija',
           recoveryWords: const [
             'anchor',
@@ -932,11 +933,6 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
-
-    // Enable demo preview
-    expect(find.text('View demo preview'), findsOneWidget);
-    await tester.tap(find.text('View demo preview'));
     await tester.pumpAndSettle();
 
     // Open Folders tab
@@ -1001,6 +997,65 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Primary Card'), findsOneWidget);
+  });
+
+  testWidgets('main vault does not show demo preview in folders tab', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultName: 'empty.nija',
+          recoveryWords: const ['anchor', 'apple', 'arrow'],
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData: ({
+            required items,
+            required notes,
+            required customTypeDefinitions,
+          }) async {},
+          onRotateMasterPassword:
+              ({required currentPassword, required newPassword}) async {},
+          onRotateRecoveryPhrase:
+              ({
+                required currentRecoveryPhrase,
+                required newRecoveryPhrase,
+              }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Folders').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Preview Demo Folders & Files'), findsNothing);
+    expect(find.text('Personal'), findsNothing);
+    expect(find.text('Work'), findsNothing);
+    expect(find.text('Finance'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('vault-fab')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('explorer-fab-demo-preview')), findsNothing);
+    expect(find.text('Demo Folders Preview'), findsNothing);
   });
 
   testWidgets('demo preview does not replace real all-items data', (

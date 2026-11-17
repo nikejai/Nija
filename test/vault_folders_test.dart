@@ -459,6 +459,7 @@ void main() {
       void Function(String id, bool cascade)? onDeleteFolder,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onMoveItem,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onCopyItem,
+      ValueChanged<Map<String, dynamic>>? onDeleteItem,
     }) {
       String? currentFolderId;
       final createFolderCb = onCreateFolder ?? (_, _, _) {};
@@ -486,7 +487,7 @@ void main() {
                   onDeleteFolder: onDeleteFolder ?? (_, _) {},
                   onMoveItem: onMoveItem ?? (_, _) {},
                   onCopyItem: onCopyItem ?? (_, _) {},
-                  onDeleteItem: (_) {},
+                  onDeleteItem: onDeleteItem ?? (_) {},
                 ),
                 floatingActionButton: FloatingActionButton.small(
                   key: const ValueKey('vault-fab'),
@@ -657,11 +658,21 @@ void main() {
       expect(find.text('Invoices'), findsOneWidget);
       expect(find.text('Personal'), findsOneWidget);
 
+      await tester.tap(find.byKey(const ValueKey('explorer-search-toggle')));
+      await tester.pumpAndSettle();
+
       await tester.enterText(find.byKey(const ValueKey('explorer-search-input')), 'Invo');
       await tester.pumpAndSettle();
 
       expect(find.text('Invoices'), findsOneWidget);
       expect(find.text('Personal'), findsNothing);
+
+      // Collapse search resets filter
+      await tester.tap(find.byKey(const ValueKey('explorer-search-collapse')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Invoices'), findsOneWidget);
+      expect(find.text('Personal'), findsOneWidget);
     });
 
     testWidgets('renames a folder via popup menu', (tester) async {
@@ -953,6 +964,310 @@ void main() {
       expect(find.text('Date'), findsOneWidget);
       expect(find.text('Folder'), findsOneWidget);
       expect(find.text('Default'), findsWidgets);
+    });
+
+    testWidgets('multi-selection mode: long-press enters selection, toggle select all, and cancel', (tester) async {
+      final item1 = {
+        'id': 'item-doc-1',
+        'title': 'Passport Scan',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final item2 = {
+        'id': 'item-doc-2',
+        'title': 'Tax Return 2025',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Finance',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        items: [item1, item2],
+      ));
+      await tester.pumpAndSettle();
+
+      // Open Finance folder
+      await tester.tap(find.text('Finance'));
+      await tester.pumpAndSettle();
+      expect(find.text('Passport Scan'), findsOneWidget);
+      expect(find.text('Tax Return 2025'), findsOneWidget);
+
+      // Long press first item to enter selection mode
+      await tester.longPress(find.text('Passport Scan'));
+      await tester.pumpAndSettle();
+
+      // Selection header appears with count 1
+      expect(find.byKey(const ValueKey('explorer-selection-header')), findsOneWidget);
+      expect(find.text('1 selected'), findsOneWidget);
+      expect(find.byKey(const ValueKey('explorer-selection-bottom-bar')), findsOneWidget);
+
+      // Tap second item to select it
+      await tester.tap(find.text('Tax Return 2025'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 selected'), findsOneWidget);
+
+      // Tap Select All to toggle selection (all are selected, so it deselects all)
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-select-all')));
+      await tester.pumpAndSettle();
+      expect(find.text('Select items'), findsOneWidget);
+
+      // Tap Select All again (none selected, so it selects all 2)
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-select-all')));
+      await tester.pumpAndSettle();
+      expect(find.text('2 selected'), findsOneWidget);
+
+      // Cancel button exits selection mode
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-cancel')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('explorer-selection-header')), findsNothing);
+      expect(find.byKey(const ValueKey('explorer-selection-bottom-bar')), findsNothing);
+    });
+
+    testWidgets('multi-selection joint move: moves multiple items to selected folder', (tester) async {
+      final item1 = {
+        'id': 'item-doc-1',
+        'title': 'Passport Scan',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final item2 = {
+        'id': 'item-doc-2',
+        'title': 'Tax Return 2025',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Finance',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+      final folder2 = VaultFolder(
+        id: 'f2',
+        name: 'Archive',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      final movedItems = <Map<String, dynamic>>[];
+      final targetFolderIds = <String?>[];
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1, folder2],
+        items: [item1, item2],
+        onMoveItem: (item, target) {
+          movedItems.add(item);
+          targetFolderIds.add(target);
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      // Open Finance folder
+      await tester.tap(find.text('Finance'));
+      await tester.pumpAndSettle();
+
+      // Enter selection mode via multi-select header toggle button
+      await tester.tap(find.byKey(const ValueKey('explorer-multi-select-toggle')));
+      await tester.pumpAndSettle();
+
+      // Select both items
+      await tester.tap(find.text('Passport Scan'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Tax Return 2025'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 selected'), findsOneWidget);
+
+      // Trigger Joint Move from top header or bottom bar
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-move')));
+      await tester.pumpAndSettle();
+
+      // Dialog opens showing target folders
+      expect(find.text('Move 2 items to...'), findsOneWidget);
+      expect(find.text('Archive'), findsOneWidget);
+
+      // Select Archive folder
+      await tester.tap(find.text('Archive'));
+      await tester.pumpAndSettle();
+
+      expect(movedItems.length, 2);
+      expect(movedItems.map((i) => i['id']), containsAll(['item-doc-1', 'item-doc-2']));
+      expect(targetFolderIds, ['f2', 'f2']);
+      // Selection mode exited after action
+      expect(find.byKey(const ValueKey('explorer-selection-header')), findsNothing);
+    });
+
+    testWidgets('multi-selection joint copy: copies multiple items to selected folder', (tester) async {
+      final item1 = {
+        'id': 'item-doc-1',
+        'title': 'Passport Scan',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final item2 = {
+        'id': 'item-doc-2',
+        'title': 'Tax Return 2025',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Finance',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      final copiedItems = <Map<String, dynamic>>[];
+      final targetFolderIds = <String?>[];
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        items: [item1, item2],
+        onCopyItem: (item, target) {
+          copiedItems.add(item);
+          targetFolderIds.add(target);
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Finance'));
+      await tester.pumpAndSettle();
+
+      // Long press to enter selection
+      await tester.longPress(find.text('Passport Scan'));
+      await tester.pumpAndSettle();
+
+      // Select second item
+      await tester.tap(find.text('Tax Return 2025'));
+      await tester.pumpAndSettle();
+
+      // Tap Copy on bottom selection bar
+      await tester.tap(find.byKey(const ValueKey('explorer-bottom-copy')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Copy 2 items to...'), findsOneWidget);
+      await tester.tap(find.text('Default Folder'));
+      await tester.pumpAndSettle();
+
+      expect(copiedItems.length, 2);
+      expect(copiedItems.map((i) => i['id']), containsAll(['item-doc-1', 'item-doc-2']));
+      expect(targetFolderIds, [null, null]);
+    });
+
+    testWidgets('multi-selection joint delete: deletes multiple items after confirmation', (tester) async {
+      final item1 = {
+        'id': 'item-doc-1',
+        'title': 'Passport Scan',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final item2 = {
+        'id': 'item-doc-2',
+        'title': 'Tax Return 2025',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Finance',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      final deletedItems = <Map<String, dynamic>>[];
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        items: [item1, item2],
+        onDeleteItem: (item) {
+          deletedItems.add(item);
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Finance'));
+      await tester.pumpAndSettle();
+
+      // Long press item1
+      await tester.longPress(find.text('Passport Scan'));
+      await tester.pumpAndSettle();
+
+      // Tap item2
+      await tester.tap(find.text('Tax Return 2025'));
+      await tester.pumpAndSettle();
+
+      // Tap delete on header
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-delete')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete 2 items?'), findsOneWidget);
+      expect(find.text('Are you sure you want to delete these 2 encrypted items? This action cannot be undone.'), findsOneWidget);
+
+      // Confirm delete
+      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+      await tester.pumpAndSettle();
+
+      expect(deletedItems.length, 2);
+      expect(deletedItems.map((i) => i['id']), containsAll(['item-doc-1', 'item-doc-2']));
+    });
+
+    testWidgets('multi-selection works seamlessly in Grid View', (tester) async {
+      final item1 = {
+        'id': 'item-grid-1',
+        'title': 'Bank Statement',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final item2 = {
+        'id': 'item-grid-2',
+        'title': 'Medical Bill',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Records',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        items: [item1, item2],
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Records'));
+      await tester.pumpAndSettle();
+
+      // Switch to Grid view
+      await tester.tap(find.byIcon(Icons.grid_view));
+      await tester.pumpAndSettle();
+
+      // Long press on grid tile
+      await tester.longPress(find.text('Bank Statement'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 selected'), findsOneWidget);
+
+      // Tap on second grid tile
+      await tester.tap(find.text('Medical Bill'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 selected'), findsOneWidget);
+
+      // Cancel exits mode
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-cancel')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('explorer-selection-header')), findsNothing);
     });
   });
 
