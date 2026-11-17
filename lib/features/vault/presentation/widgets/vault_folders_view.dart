@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -1769,43 +1770,70 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       items: [...widget.items, ...widget.notes],
     );
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // Left Pane: Folder Tree (Scrollable horizontally and vertically for deep nesting)
-        Container(
-          width: widget.isWide ? 280 : 180,
-          decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
-          ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: 320,
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                children: [
-                  // Root Tree Entry
-                  _buildTreeFolderTile(
-                    title: 'Root',
-                    folderId: null,
-                    isSelected: _currentFolderId == null,
-                    hasChildren: tree.isNotEmpty,
-                    level: 0,
+    final hasContent = _childFolders.isNotEmpty || _currentItems.isNotEmpty;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        // In portrait view, take 20% of the screen space for folder hierarchy
+        final treeWidth = widget.isWide ? 280.0 : (totalWidth * 0.20);
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Left Pane: Folder Tree (Scrollable horizontally and vertically for deep nesting)
+            Container(
+              key: const ValueKey('explorer-tree-left-pane'),
+              width: treeWidth,
+              decoration: BoxDecoration(
+                border: Border(right: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: 320,
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                    children: [
+                      // Root Tree Entry
+                      _buildTreeFolderTile(
+                        title: 'Root',
+                        folderId: null,
+                        isSelected: _currentFolderId == null,
+                        hasChildren: tree.isNotEmpty,
+                        level: 0,
+                      ),
+                      for (final node in tree)
+                        ..._renderTreeNode(node, 1),
+                    ],
                   ),
-                  for (final node in tree)
-                    ..._renderTreeNode(node, 1),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
 
-        // Right Pane: Contents of the active folder
-        Expanded(
-          child: _buildListView(context),
-        ),
-      ],
+            // Right Pane: Contents of the active folder (horizontally scrollable in portrait to view all item details)
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, rightConstraints) {
+                  final availableWidth = rightConstraints.maxWidth;
+                  final minContentWidth = (widget.isWide || !hasContent)
+                      ? availableWidth
+                      : math.max(availableWidth, 420.0);
+
+                  return SingleChildScrollView(
+                    key: const ValueKey('explorer-tree-right-scroll'),
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: minContentWidth,
+                      child: _buildListView(context),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1847,55 +1875,60 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final folderColor = folder != null ? resolveFolderColor(folder) : const Color(0xFFEAB308);
 
     return InkWell(
+      key: ValueKey('explorer-tree-tile-${folderId ?? "root"}'),
       onTap: () => _navigateToFolder(folderId),
       onLongPress: folder != null ? () => _showFolderActionsBottomSheet(folder) : null,
       borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: EdgeInsets.only(left: 4.0 + (level * 14.0), right: 6, top: 6, bottom: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          children: [
-            if (hasChildren && folderId != null)
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    if (isExpanded) {
-                      _expandedTreeFolderIds.remove(folderId);
-                    } else {
-                      _expandedTreeFolderIds.add(folderId);
-                    }
-                  });
-                },
-                child: Icon(
-                  isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-                  size: 16,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              )
-            else
-              const SizedBox(width: 16),
-            const SizedBox(width: 4),
-            Icon(
-              isSelected ? Icons.folder_open : Icons.folder,
-              size: 18,
-              color: folderColor,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  color: isSelected ? colorScheme.primary : colorScheme.onSurface,
-                ),
-                overflow: TextOverflow.ellipsis,
+      child: Tooltip(
+        message: title,
+        waitDuration: const Duration(milliseconds: 500),
+        child: Container(
+          padding: EdgeInsets.only(left: 4.0 + (level * 14.0), right: 6, top: 6, bottom: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            children: [
+              if (hasChildren && folderId != null)
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (isExpanded) {
+                        _expandedTreeFolderIds.remove(folderId);
+                      } else {
+                        _expandedTreeFolderIds.add(folderId);
+                      }
+                    });
+                  },
+                  child: Icon(
+                    isExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                    size: 16,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                const SizedBox(width: 16),
+              const SizedBox(width: 4),
+              Icon(
+                isSelected ? Icons.folder_open : Icons.folder,
+                size: 18,
+                color: folderColor,
               ),
-            ),
-          ],
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                    color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

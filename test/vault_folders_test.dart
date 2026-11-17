@@ -645,6 +645,71 @@ void main() {
       expect(find.byType(GridView), findsNothing);
     });
 
+    testWidgets('tree view in portrait mode allocates 20% width to tree and enables horizontal scrolling on right pane', (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Work Documents',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+      final item1 = {
+        'id': 'item-1',
+        'title': 'Quarterly Financial Statement 2026.pdf',
+        'type': 'Document',
+        'folderId': 'f1',
+        'size': 2400000,
+        'createdAt': '2026-11-15T10:00:00Z',
+      };
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        items: [item1],
+        isWide: false,
+      ));
+      await tester.pumpAndSettle();
+
+      // Switch to Tree view
+      await tester.tap(find.byTooltip('Tree view'));
+      await tester.pumpAndSettle();
+
+      // Tap on folder1 in tree pane by tapping its folder icon inside its tree tile
+      final folderIconFinder = find.descendant(
+        of: find.byKey(const ValueKey('explorer-tree-tile-f1')),
+        matching: find.byIcon(Icons.folder),
+      );
+      expect(folderIconFinder, findsOneWidget);
+      await tester.tap(folderIconFinder);
+      await tester.pumpAndSettle();
+
+      // Verify left pane takes 20% of 400px = 80px width
+      final leftPaneFinder = find.byKey(const ValueKey('explorer-tree-left-pane'));
+      expect(leftPaneFinder, findsOneWidget);
+      final leftPaneSize = tester.getSize(leftPaneFinder);
+      expect(leftPaneSize.width, closeTo(80.0, 0.1));
+
+      // Verify right pane has horizontal scroll view
+      final rightScrollFinder = find.byKey(const ValueKey('explorer-tree-right-scroll'));
+      expect(rightScrollFinder, findsOneWidget);
+
+      // Verify right pane content has min width of 420px (card has 420 - 24 = 396px), enabling horizontal scroll
+      final itemCardFinder = find.byKey(const ValueKey('explorer-item-card-item-1'));
+      expect(itemCardFinder, findsOneWidget);
+      final itemCardSize = tester.getSize(itemCardFinder);
+      expect(itemCardSize.width, equals(396.0));
+
+      // Test horizontal drag on right scroll view
+      await tester.drag(rightScrollFinder, const Offset(-100, 0));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('filters items in folder using explorer search box', (tester) async {
       final folder1 = VaultFolder(
         id: 'f1',
