@@ -812,6 +812,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
       onMoveItem: _moveItemToFolder,
       onCopyItem: _copyItemToFolder,
       onDeleteItem: _deleteItemFromExplorer,
+      onMoveItems: _moveItemsToFolder,
+      onCopyItems: _copyItemsToFolder,
+      onDeleteItems: _deleteItemsFromExplorer,
     );
   }
 
@@ -941,7 +944,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         newName: newName,
       );
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
   }
 
   void _updateFolderColor(String folderId, String? color) {
@@ -952,7 +955,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         color: color,
       );
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
   }
 
   void _moveFolder(String folderId, String? newParentId) {
@@ -963,7 +966,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         newParentId: newParentId,
       );
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
   }
 
   void _deleteFolder(String folderId, bool cascade) {
@@ -978,7 +981,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _items.clear();
       _items.addAll(res.items);
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
   }
 
   void _moveItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
@@ -997,7 +1000,29 @@ class _VaultAppShellState extends State<VaultAppShell> {
         }
       }
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
+  }
+
+  void _moveItemsToFolder(List<Map<String, dynamic>> items, String? targetFolderId) {
+    if (items.isEmpty) return;
+    _updateState(() {
+      for (final item in items) {
+        final updated = _folderManager.moveItemToFolder(
+          item: item,
+          targetFolderId: targetFolderId,
+        );
+        final idx = _items.indexWhere((i) => i['id'] == item['id']);
+        if (idx >= 0) {
+          _items[idx] = updated;
+        } else {
+          final noteIdx = _notes.indexWhere((n) => n['id'] == item['id']);
+          if (noteIdx >= 0) {
+            _notes[noteIdx] = updated;
+          }
+        }
+      }
+    });
+    _schedulePersistVaultData();
   }
 
   void _copyItemToFolder(Map<String, dynamic> item, String? targetFolderId) {
@@ -1012,7 +1037,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
         _items.add(copy);
       }
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
+  }
+
+  void _copyItemsToFolder(List<Map<String, dynamic>> items, String? targetFolderId) {
+    if (items.isEmpty) return;
+    _updateState(() {
+      for (final item in items) {
+        final copy = _folderManager.copyItemToFolder(
+          item: item,
+          targetFolderId: targetFolderId,
+        );
+        if (item['type'] == 'Secure Note' || item.containsKey('delta')) {
+          _notes.add(copy);
+        } else {
+          _items.add(copy);
+        }
+      }
+    });
+    _schedulePersistVaultData();
   }
 
   void _deleteItemFromExplorer(Map<String, dynamic> item) {
@@ -1021,7 +1064,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _items.removeWhere((i) => i['id'] == itemId);
       _notes.removeWhere((n) => n['id'] == itemId);
     });
-    _persistVaultDataUnchecked();
+    _schedulePersistVaultData();
+  }
+
+  void _deleteItemsFromExplorer(List<Map<String, dynamic>> items) {
+    if (items.isEmpty) return;
+    final idsToDelete = items.map((i) => i['id']).toSet();
+    _updateState(() {
+      _items.removeWhere((i) => idsToDelete.contains(i['id']));
+      _notes.removeWhere((n) => idsToDelete.contains(n['id']));
+    });
+    _schedulePersistVaultData();
   }
 
   Future<void> _openUploadDocumentToFolder(String? folderId) async {

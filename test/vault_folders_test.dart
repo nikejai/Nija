@@ -448,6 +448,7 @@ void main() {
 
   group('VaultFoldersView UI & Explorer Operations', () {
     Widget buildTestFoldersView({
+      bool isWide = false,
       List<VaultFolder> folders = const [],
       List<Map<String, dynamic>> items = const [],
       List<Map<String, dynamic>> notes = const [],
@@ -460,6 +461,9 @@ void main() {
       void Function(Map<String, dynamic> item, String? targetFolderId)? onMoveItem,
       void Function(Map<String, dynamic> item, String? targetFolderId)? onCopyItem,
       ValueChanged<Map<String, dynamic>>? onDeleteItem,
+      void Function(List<Map<String, dynamic>> items, String? targetFolderId)? onMoveItems,
+      void Function(List<Map<String, dynamic>> items, String? targetFolderId)? onCopyItems,
+      void Function(List<Map<String, dynamic>> items)? onDeleteItems,
     }) {
       String? currentFolderId;
       final createFolderCb = onCreateFolder ?? (_, _, _) {};
@@ -472,7 +476,7 @@ void main() {
             home: Builder(
               builder: (ctx) => Scaffold(
                 body: VaultFoldersView(
-                  isWide: false,
+                  isWide: isWide,
                   folders: folders,
                   items: items,
                   notes: notes,
@@ -488,6 +492,9 @@ void main() {
                   onMoveItem: onMoveItem ?? (_, _) {},
                   onCopyItem: onCopyItem ?? (_, _) {},
                   onDeleteItem: onDeleteItem ?? (_) {},
+                  onMoveItems: onMoveItems,
+                  onCopyItems: onCopyItems,
+                  onDeleteItems: onDeleteItems,
                 ),
                 floatingActionButton: FloatingActionButton.small(
                   key: const ValueKey('vault-fab'),
@@ -1268,6 +1275,136 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('explorer-selection-header')), findsNothing);
+    });
+
+    testWidgets('multi-selection batch operations: calls onMoveItems, onCopyItems, onDeleteItems in bulk', (tester) async {
+      final item1 = {'id': 'i1', 'title': 'Item 1', 'folderId': 'f1'};
+      final item2 = {'id': 'i2', 'title': 'Item 2', 'folderId': 'f1'};
+      final folder1 = VaultFolder(id: 'f1', name: 'Source', createdAt: '2026-11-15T10:00:00Z', updatedAt: '2026-11-15T10:00:00Z');
+      final folder2 = VaultFolder(id: 'f2', name: 'Dest', createdAt: '2026-11-15T10:00:00Z', updatedAt: '2026-11-15T10:00:00Z');
+
+      List<Map<String, dynamic>>? movedBatch;
+      String? movedTarget;
+      List<Map<String, dynamic>>? copiedBatch;
+      String? copiedTarget;
+      List<Map<String, dynamic>>? deletedBatch;
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1, folder2],
+        items: [item1, item2],
+        onMoveItems: (items, target) {
+          movedBatch = items;
+          movedTarget = target;
+        },
+        onCopyItems: (items, target) {
+          copiedBatch = items;
+          copiedTarget = target;
+        },
+        onDeleteItems: (items) {
+          deletedBatch = items;
+        },
+      ));
+      await tester.pumpAndSettle();
+
+      // Open Source folder
+      await tester.tap(find.text('Source'));
+      await tester.pumpAndSettle();
+
+      // Select both items via multi-select toggle and tap
+      await tester.tap(find.byKey(const ValueKey('explorer-multi-select-toggle')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Item 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Item 2'));
+      await tester.pumpAndSettle();
+
+      // Test batch move
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-move')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dest'));
+      await tester.pumpAndSettle();
+
+      expect(movedBatch, isNotNull);
+      expect(movedBatch!.length, 2);
+      expect(movedBatch!.map((i) => i['id']), containsAll(['i1', 'i2']));
+      expect(movedTarget, 'f2');
+
+      // Re-enter selection for copy
+      await tester.tap(find.byKey(const ValueKey('explorer-multi-select-toggle')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Item 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Item 2'));
+      await tester.pumpAndSettle();
+
+      // Test batch copy
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-copy')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dest'));
+      await tester.pumpAndSettle();
+
+      expect(copiedBatch, isNotNull);
+      expect(copiedBatch!.length, 2);
+      expect(copiedBatch!.map((i) => i['id']), containsAll(['i1', 'i2']));
+      expect(copiedTarget, 'f2');
+
+      // Re-enter selection for delete
+      await tester.tap(find.byKey(const ValueKey('explorer-multi-select-toggle')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Item 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Item 2'));
+      await tester.pumpAndSettle();
+
+      // Test batch delete
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-delete')));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete 2 items?'), findsOneWidget);
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      expect(deletedBatch, isNotNull);
+      expect(deletedBatch!.length, 2);
+      expect(deletedBatch!.map((i) => i['id']), containsAll(['i1', 'i2']));
+    });
+
+    testWidgets('multi-selection header on narrow 360px screen does not overflow', (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final items = List.generate(
+        15,
+        (i) => {'id': 'item-$i', 'title': 'Important Document #$i', 'folderId': 'f1'},
+      );
+      final folder1 = VaultFolder(id: 'f1', name: 'Work', createdAt: '2026-11-15T10:00:00Z', updatedAt: '2026-11-15T10:00:00Z');
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1],
+        items: items,
+        isWide: false,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Work'));
+      await tester.pumpAndSettle();
+
+      // Enter selection mode
+      await tester.tap(find.byKey(const ValueKey('explorer-multi-select-toggle')));
+      await tester.pumpAndSettle();
+
+      // Tap select all twice to select all 15 items ("15 selected")
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-select-all')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('15 selected'), findsOneWidget);
+      expect(find.byKey(const ValueKey('explorer-selection-header')), findsOneWidget);
+
+      // Verify no RenderFlex overflow exception was logged during pump
+      expect(tester.takeException(), isNull);
     });
   });
 

@@ -199,6 +199,9 @@ class VaultFoldersView extends StatefulWidget {
     required this.onMoveItem,
     required this.onCopyItem,
     required this.onDeleteItem,
+    this.onMoveItems,
+    this.onCopyItems,
+    this.onDeleteItems,
     this.isDemoPreview = false,
     this.onExitDemoPreview,
     this.onFolderChanged,
@@ -221,6 +224,9 @@ class VaultFoldersView extends StatefulWidget {
   final void Function(Map<String, dynamic> item, String? targetFolderId) onMoveItem;
   final void Function(Map<String, dynamic> item, String? targetFolderId) onCopyItem;
   final ValueChanged<Map<String, dynamic>> onDeleteItem;
+  final void Function(List<Map<String, dynamic>> items, String? targetFolderId)? onMoveItems;
+  final void Function(List<Map<String, dynamic>> items, String? targetFolderId)? onCopyItems;
+  final void Function(List<Map<String, dynamic>> items)? onDeleteItems;
   final bool isDemoPreview;
   final VoidCallback? onExitDemoPreview;
   final ValueChanged<String?>? onFolderChanged;
@@ -368,11 +374,15 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 title: const Text('Default Folder'),
                 subtitle: const Text('Move to default vault location'),
                 onTap: () {
-                  for (final item in selected) {
-                    widget.onMoveItem(item, null);
-                  }
                   Navigator.pop(ctx);
                   _exitSelectionMode();
+                  if (widget.onMoveItems != null) {
+                    widget.onMoveItems!(selected, null);
+                  } else {
+                    for (final item in selected) {
+                      widget.onMoveItem(item, null);
+                    }
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Moved ${selected.length} items to Default Folder.')),
                   );
@@ -383,11 +393,15 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
                   title: Text(target.name),
                   onTap: () {
-                    for (final item in selected) {
-                      widget.onMoveItem(item, target.id);
-                    }
                     Navigator.pop(ctx);
                     _exitSelectionMode();
+                    if (widget.onMoveItems != null) {
+                      widget.onMoveItems!(selected, target.id);
+                    } else {
+                      for (final item in selected) {
+                        widget.onMoveItem(item, target.id);
+                      }
+                    }
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Moved ${selected.length} items to "${target.name}".')),
                     );
@@ -420,11 +434,15 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 title: const Text('Default Folder'),
                 subtitle: const Text('Copy to default vault location'),
                 onTap: () {
-                  for (final item in selected) {
-                    widget.onCopyItem(item, null);
-                  }
                   Navigator.pop(ctx);
                   _exitSelectionMode();
+                  if (widget.onCopyItems != null) {
+                    widget.onCopyItems!(selected, null);
+                  } else {
+                    for (final item in selected) {
+                      widget.onCopyItem(item, null);
+                    }
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Copied ${selected.length} items to Default Folder.')),
                   );
@@ -435,11 +453,15 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   leading: const Icon(Icons.folder, color: Color(0xFFEAB308)),
                   title: Text(target.name),
                   onTap: () {
-                    for (final item in selected) {
-                      widget.onCopyItem(item, target.id);
-                    }
                     Navigator.pop(ctx);
                     _exitSelectionMode();
+                    if (widget.onCopyItems != null) {
+                      widget.onCopyItems!(selected, target.id);
+                    } else {
+                      for (final item in selected) {
+                        widget.onCopyItem(item, target.id);
+                      }
+                    }
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Copied ${selected.length} items to "${target.name}".')),
                     );
@@ -475,11 +497,15 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               minimumSize: const Size(64, 38),
             ),
             onPressed: () {
-              for (final item in selected) {
-                widget.onDeleteItem(item);
-              }
               Navigator.pop(ctx);
               _exitSelectionMode();
+              if (widget.onDeleteItems != null) {
+                widget.onDeleteItems!(selected);
+              } else {
+                for (final item in selected) {
+                  widget.onDeleteItem(item);
+                }
+              }
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Deleted ${selected.length} items.')),
               );
@@ -794,46 +820,48 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               onPressed: _exitSelectionMode,
             ),
             const SizedBox(width: 8),
-            Text(
-              count == 0 ? 'Select items' : '$count selected',
-              key: const ValueKey('explorer-selection-count'),
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-                color: colorScheme.onSurface,
+            Expanded(
+              child: Text(
+                count == 0 ? 'Select items' : '$count selected',
+                key: const ValueKey('explorer-selection-count'),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: colorScheme.onSurface,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Spacer(),
-            TextButton.icon(
+            IconButton(
               key: const ValueKey('explorer-selection-select-all'),
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              ),
-              icon: Icon(allSelected ? Icons.deselect : Icons.select_all, size: 16),
-              label: Text(
-                allSelected ? 'Deselect All' : 'Select All',
-                style: const TextStyle(fontSize: 12),
-              ),
+              icon: Icon(allSelected ? Icons.deselect : Icons.select_all, size: 20),
+              tooltip: allSelected ? 'Deselect All' : 'Select All',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: _selectAllItems,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 2),
             IconButton(
               key: const ValueKey('explorer-selection-move'),
               icon: const Icon(Icons.drive_file_move_outlined, size: 20),
               tooltip: 'Move selected',
               visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: count == 0 ? null : _moveSelectedItems,
             ),
+            const SizedBox(width: 2),
             IconButton(
               key: const ValueKey('explorer-selection-copy'),
               icon: const Icon(Icons.content_copy_outlined, size: 20),
               tooltip: 'Copy selected',
               visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: count == 0 ? null : _copySelectedItems,
             ),
+            const SizedBox(width: 2),
             IconButton(
               key: const ValueKey('explorer-selection-delete'),
               icon: Icon(
@@ -843,6 +871,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               ),
               tooltip: 'Delete selected',
               visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: count == 0 ? null : _deleteSelectedItems,
             ),
@@ -870,6 +899,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     );
 
     final viewSegmented = SegmentedButton<ExplorerViewMode>(
+      showSelectedIcon: false,
       segments: const [
         ButtonSegment(
           value: ExplorerViewMode.list,
