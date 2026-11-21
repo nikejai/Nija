@@ -10,7 +10,12 @@ class BiometricCredentialStore {
     : _webQuickUnlock = webQuickUnlock ?? webQuickUnlockVault;
 
   static const _storageKey = 'nija_biometric_credentials_v1';
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.passcode,
+    ),
+  );
   final WebQuickUnlockVault _webQuickUnlock;
 
   Future<void> saveMasterPassword({

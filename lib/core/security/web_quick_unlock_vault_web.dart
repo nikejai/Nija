@@ -11,7 +11,7 @@ class WebQuickUnlockVaultWeb extends WebQuickUnlockVault {
   static const _dbName = 'nija_quick_unlock';
   static const _storeName = 'records';
   static const _dbVersion = 1;
-  static const _recordVersion = 4;
+  static const _recordVersion = 5;
 
   String? _authenticatedVaultId;
   String? _authenticatedPrfKeyBase64Url;

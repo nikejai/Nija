@@ -7,12 +7,14 @@ abstract class VaultPortabilityAdapter {
   Future<String?> exportVaultToLocal({
     required String suggestedName,
     required String content,
+    Future<bool> Function(String destinationPath)? streamWriter,
   });
   Future<bool> backupVaultToCloud({
     required String vaultId,
     required String suggestedName,
     required String content,
     bool forceAccountChooser = false,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   });
   Future<bool> backupVaultStreamToCloud({
     required String vaultId,
@@ -22,6 +24,7 @@ abstract class VaultPortabilityAdapter {
     String mimeType = 'application/octet-stream',
     Map<String, String>? extraProperties,
     bool forceAccountChooser = false,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   });
   Future<List<CloudVaultBackupFile>> listCloudBackups({
     bool forceAccountChooser = false,

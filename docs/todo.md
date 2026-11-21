@@ -664,5 +664,330 @@ Work these items strictly one at a time. Each item should be fully implemented, 
 - [ ] **Rich Metadata Inspector Drawer/Sheet**: Provide an item/file metadata panel showing cryptographic integrity hash, encryption algorithm, size breakdown, parent folder path, tags, and custom metadata key-value pairs.
 
 
+## Section 20: Independent Analysis v1 — Pre-Release Findings & Solutions
+
+Pre-release review conducted across all four requested perspectives (**User**, **Technical Validator & Tester**, **Performance Test Expert**, **Security Expert**).
+- **Baseline Static Check (`flutter analyze`)**: 0 issues.
+- **Baseline Test Run (`flutter test`)**: 248 passed, **2 failed**:
+  - `test/unlock_flow_regression_test.dart:89` (`lock flow opens themed unlock screen after vault selection`)
+  - `test/vault_persistence_test.dart:356` (`mobile-like private store persistence private store commit happens before snapshot write on persist`)
+
+---
+
+### A) Findings as a Technical Validator & Tester (Data Integrity, State & Test Coverage)
+
+- [x] **20.1 Fix stale `.nija` snapshot lockout after password rotation, recovery, or profile migration**
+  - **Finding**: In `lib/application/services/default_vault_service.dart` (lines 36–37, 634–636), `_syncSnapshotOnPersist` now defaults to `false` when `privateVaultStore is FilePrivateVaultStore`. `createVault` writes `nija_vault.nija` at `revision: 1`, but subsequent `persistVaultPayload`, `rotateMasterPassword`, `resetMasterPasswordAfterRecovery`, and `migrateToBalancedProfile` calls never update that primary `.nija` snapshot. On cold app restart (`_handleToVaultStoreId` empty), `_readMigratedVaultFile` (lines 1461–1479) checks `_privateVaultStore.vaultExists(filePath)` (false, because the working store is keyed by `vaultId`), falls back to `_readSnapshotFile(filePath)`, and reads the **stale** `kdf` salt and `encryptedVaultKey`—permanently locking the user out of their new password/profile on the default vault path. Also causes `test/vault_persistence_test.dart:356` to fail (`revision` stays `1` instead of `2`).
+  - **Solution**: On cold lookup in `_readMigratedVaultFile` / `unlockVault`, resolve the `vaultId` from the `.nija` file header (or registry/cache) and prefer `_privateVaultStore.readHeader(vaultId)` whenever the working store exists; and keep the primary snapshot header/file synchronized (or explicitly test-contracted) on key-wrapping mutations (`rotateMasterPassword`, `resetMasterPasswordAfterRecovery`, `migrateToBalancedProfile`). Add cold-restart regression tests with `FilePrivateVaultStore`.
+
+- [x] **20.2 Fix double-persistence & double revision increment on every vault save**
+  - **Finding**: `VaultAppShell._persistVaultDataUnchecked` (`lib/features/vault/presentation/vault_app_shell.dart:2974-2985`) calls `await widget.onPersistVaultData(...)` and then immediately calls `await widget.onPersistFolders!(...)`. In `lib/features/onboarding/presentation/onboarding_flow.dart` (lines 424–430), `onPersistFolders` invokes `_persistVaultData(...)` a second time. Every single item/note/folder save encrypts all core sections twice, commits twice, and increments `revision` by 2.
+  - **Solution**: Include `folders` directly in `onPersistVaultData` (or remove the redundant `onPersistFolders` invocation when `onPersistVaultData` already commits `_folders`) so every mutation performs one atomic commit.
+
+- [x] **20.3 Flush pending debounced writes on lock, vault switch, and dispose**
+  - **Finding**: Explorer operations (`_renameFolder`, `_moveFolder`, `_deleteFolder`, `_moveItemToFolder`, `_copyItemToFolder`, `_deleteItemFromExplorer`) use `_schedulePersistVaultData()` (400ms `Timer`). `VaultAppShell.dispose()` (`vault_app_shell.dart:504`) cancels `_persistDebounceTimer` without flushing. Locking, switching vaults, or closing the app within 400ms silently drops those edits.
+  - **Solution**: Add an explicit `_flushPendingPersist()` helper invoked before `_lockVaultSession`, `_switchVaultFromApp`, `_handleExitFromAppShell`, and on `dispose` / app-background transitions.
+
+- [x] **20.4 Fix uncancellable recursive `Timer` leak in `AutomatedBackupService.scheduleDailyBackup`**
+  - **Finding**: `AutomatedBackupService.scheduleDailyBackup` (`lib/application/services/automated_backup_service.dart:226-243`) returns the Day-1 `Timer`, which `VaultAppShell` stores in `_midnightBackupTimer`. When Day 1 fires, the callback calls `scheduleDailyBackup(...)` recursively without updating `_midnightBackupTimer`. After the first execution, disabling automated backups, changing backup time, or locking/disposing `VaultAppShell` cannot cancel the background timer.
+  - **Solution**: Return or update a mutable timer handle (e.g., `ScheduledBackupHandle` holding the active `Timer` with `.cancel()`), and cancel it cleanly in `VaultAppShell.dispose()`, `_setAutomatedBackupEnabled(false)`, and `_setAutomatedBackupTime`.
+
+- [x] **20.5 Sync `initialFolders` and `guardianProfile` in `VaultAppShell.didUpdateWidget`**
+  - **Finding**: `VaultAppShell.didUpdateWidget` (`vault_app_shell.dart:447-500`) refreshes `_items`, `_notes`, and `_customTypeDefinitions`, but ignores changes to `widget.initialFolders` and `widget.guardianProfile`.
+  - **Solution**: Update `_folders` (when `!listEquals` on serialized/ID forms) and `_activeGuardianProfile` in `didUpdateWidget` when parent state changes.
+
+- [x] **20.6 Fix Mobile ↔ Web NIJA V2 backup/restore & local `.nija` import incompatibility**
+  - **Finding**:
+    1. Mobile `_backupCurrentVaultToCloud` (`onboarding_flow.dart:4281`) exports binary NIJA V2 containers (`StreamingVaultContainer.packPrivateStoreToFile`), whereas `GoogleDriveVaultPortability._downloadDriveFileContent` (`lib/infrastructure/adapters/google_drive_vault_portability.dart:650`) calls `utf8.decode(bytes)` (throwing `FormatException` on binary NIJA V2) and Web's `DefaultVaultService.importNijaFile` only parses JSON snapshots.
+    2. `VaultPortabilityAdapterImpl.importVaultFromLocal` (`lib/infrastructure/adapters/vault_portability_io.dart:30`) reads selected files with `File(path).readAsString()`, crashing with UTF-8 `FormatException` when importing a binary NIJA V2 `.nija` file locally.
+    3. `GoogleDriveVaultPortability._listAllCloudBackups` (`google_drive_vault_portability.dart:475-486`) parses `revision` from `appProperties` while ignoring `vaultVersionId` and `updatedAt` in `appProperties`, forcing `hydrateCloudBackupContent` to download and `utf8.decode` the file (which fails for NIJA V2). As a result, Settings shows `"Never backed up"` / `"None"` even after mobile cloud backups.
+  - **Solution**: Read local/cloud files as bytes (`Uint8List`) and dispatch on `StreamingVaultContainer.isContainerBytes` before UTF-8 decoding; add an in-memory NIJA V2 container unpacker for Web (`Uint8List` stream/slice) and pass file paths directly to `importNijaFile` on native IO; populate `versionId` and `updatedAt` from `file.appProperties` in `_listAllCloudBackups`.
+
+- [x] **20.7 Fix `NetworkConnectivityService` fail-open on errors**
+  - **Finding**: `NetworkConnectivityService.isWifiConnected()` and `hasInternetConnection()` (`lib/infrastructure/services/network_connectivity_service.dart:35-38, 55-58`) catch platform exceptions and `return true`, allowing "Back up over Wi-Fi only" to upload over metered cellular if connectivity inspection errors.
+  - **Solution**: Fail closed (`return false`) in `isWifiConnected()` when `_cloudBackupWifiOnly` cannot confirm Wi-Fi/Ethernet, and surface a clear status message if connectivity cannot be verified.
+
+- [x] **20.8 Remove dead feature overrides, debug prints, and placeholder platform identifiers**
+  - **Finding**:
+    - `onboarding_flow.dart:4619,4622` contains dead `AppFeatures.supportsCloudBackup || true` and `defaultTargetPlatform == TargetPlatform.android && true` expressions.
+    - `vault_app_shell.dart:3277` contains stray `debugPrint('--> error in _handleLocalBackupNow: $e\n$st');` inside the cloud backup catch block.
+    - `GoogleOAuthConfig.nativeServerClientId` (`lib/core/config/google_oauth_config.dart:19-22`) defaults to `''` with no release-build verification check.
+    - Placeholder `com.example.*` identifiers remain in `ios/Runner.xcodeproj/project.pbxproj` (`com.example.nija`), `ios/Runner/Info.plist` (`com.example.nija.secret`), `linux/CMakeLists.txt` (`com.example.nija`), and `windows/runner/Runner.rc` (`com.example`).
+  - **Solution**: Clean up dead `|| true` / `&& true` logic and stray `debugPrint`; replace all `com.example.*` identifiers with `com.nija.*`; and add a release check for OAuth configuration if native Drive sync is enabled.
+
+- [x] **20.9 Expand pre-release test coverage for uncovered critical paths**
+  - **Finding**: Missing automated tests for: (a) malformed headers, truncated streams, oversized `nameLen`/`dataLen`, and `../` path traversal in `StreamingVaultContainer`; (b) cold `DefaultVaultService` reload after `rotateMasterPassword`, `resetMasterPasswordAfterRecovery`, and `migrateToBalancedProfile` with `FilePrivateVaultStore`; (c) Mobile NIJA V2 backup → Web restore round-trip; and (d) locking/disposing `VaultAppShell` immediately after a debounced explorer edit.
+  - **Solution**: Add dedicated unit, widget, and integration tests covering all four scenarios before release.
+
+---
+
+### B) Findings as a User (UX, Flows, Copy & Navigation)
+
+- [x] **20.10 Fix system/Android Back navigation on Unlock screen (`test/unlock_flow_regression_test.dart`)**
+  - **Finding**: In `onboarding_flow.dart` (`_handleRootBackPress`, lines 632–676), `OnboardingStep.unlock` is not handled and falls through to `_confirmQuitApplication()`, whereas `UnlockScreen`'s top-left back button calls `_goBackFromUnlock()` (navigating to `selectVault`). This makes system back inconsistent with the UI back button and causes `test/unlock_flow_regression_test.dart:89` to fail.
+  - **Solution**: Handle `OnboardingStep.unlock` in `_handleRootBackPress` by calling `_goBackFromUnlock()`, returning cleanly to `KnownVaultSelectionScreen` (or cancelling an active import credential prompt).
+
+- [x] **20.11 Fix local snapshot vault keying so backups persist across edits**
+  - **Finding**: `VaultAppShell` (`vault_app_shell.dart:3106, 3155, 3214`) keys `AutomatedBackupService` snapshots by `widget.activeVaultVersionId` instead of the vault's stable `vaultId`. Because `vaultVersionId` mutates to a new UUID on every save (`_nextMutationHeader:1912`), every item/note/folder edit makes previous snapshots disappear from Settings (`0/2` again) and leaves unpruned snapshot directories orphaned on disk forever. Also `didUpdateWidget` does not refresh `_localSnapshots` when the vault changes.
+  - **Solution**: Pass the stable `vaultId` into `VaultAppShell`, key `AutomatedBackupService` folders by `vaultId`, migrate/clean up any stale `nija_snapshots/` subdirectories from earlier builds, and refresh snapshots in `didUpdateWidget`.
+
+- [x] **20.12 Fix Web local backup silent failure & misleading Settings UI**
+  - **Finding**: On Web (`kIsWeb`), `AutomatedBackupService._resolveSnapshotsDirectory` (`automated_backup_service.dart:24`) uses `Directory('/tmp')` and calls `dart:io` `createSync`/`writeAsStringSync`, which throws `UnsupportedError` (caught and returning `null`). `_handleLocalBackupNow` gives no error or feedback when `snapshot == null`, yet Settings still renders the Local Backup toggle, time picker, and `Back up now` button on Web.
+  - **Solution**: Either store rolling snapshots in Web IndexedDB (`nijaWriteIndexedText`) with clear size awareness, or hide/disable the `dart:io` rolling-snapshot controls on Web (`!kIsWeb`) and direct Web users to explicit `.nija` file export / Cloud backup.
+
+- [x] **20.13 Stop scheduled backups from interrupting users & remove double busy overlays**
+  - **Finding**:
+    1. `_runAutomatedBackup()` (`vault_app_shell.dart:3268`) calls `widget.onBackupToCloud()`, which triggers `_backupCurrentVaultToCloud()` (`onboarding_flow.dart:4230`), throwing up a blocking modal progress dialog (or a Google Sign-In popup) mid-session while the user is editing or viewing secrets.
+    2. Manual `_handleBackupNow()` (`vault_app_shell.dart:3317`) wraps `widget.onBackupToCloud()` in `_runWithBusy(...)`, stacking **two** modal busy overlays (`VaultAppShell._buildBusyOverlay` + `OnboardingFlow` busy `Stack` overlay) simultaneously.
+  - **Solution**: Run scheduled automated cloud backups silently in the background (skipping if no valid Drive session exists rather than popping sign-in UI, and surfacing non-blocking status/banner on completion or failure). Give busy-overlay ownership to a single layer during manual cloud backup.
+
+- [x] **20.14 Implement or remove Settings "Clear Data" stub & persist language preference**
+  - **Finding**:
+    1. Settings -> Data -> **Clear Data** (`lib/features/vault/presentation/widgets/vault_settings_view.dart:398-407`) is still a stub showing `"Settings coming soon."`.
+    2. `_languageMode` in `lib/app/app.dart` is not persisted to `SharedPreferences` (unlike `_themeMode` and `_autoLockSeconds`), so selecting Español (`es`) resets to `'system'` on app restart.
+    3. `vault_settings_view.dart:457` and `vault_app_shell.dart:2150` hardcode `Version 1.0.0`, while `pubspec.yaml` specifies `version: 0.1.1+2`.
+    4. `onboarding_flow.dart:3678` displays developer setup instructions (*"add http://localhost and http://localhost:5173 to Authorized JavaScript origins in Google Cloud Console"*) inside an end-user SnackBar.
+  - **Solution**: Implement **Clear Data** behind explicit master-password + destructive confirmation (wiping local working stores, snapshots, PIN/biometric enrollments, and `SharedPreferences` caches) or remove the row prior to release; persist `_languageMode` in `SharedPreferences`; display the actual build version from `pubspec.yaml`; and replace the `localhost` SnackBar copy with user-appropriate sign-in guidance.
+
+- [x] **20.15 Standardize password whitespace handling & keep recovery note synchronized**
+  - **Finding**: `SetupScreen` passes untrimmed `_passwordController.text` on vault creation; `_unlockWithPassword` does not trim; while `_showMandatoryMasterPasswordReset` and `_RotateMasterPasswordDialog` call `.trim()`. Also, `_rotateRecoveryPhrase` updates `_recoveryWords` in memory without updating `note-recovery-phrase` inside the vault, leaving the old phrase in Notes.
+  - **Solution**: Standardize password whitespace behavior across create, unlock, rotate, and reset (preserving exact entered characters or trimming consistently with clear UI validation), and update/remove `note-recovery-phrase` when the recovery phrase is rotated.
+
+---
+
+### C) Findings as a Performance Test Expert
+
+- [x] **20.16 Eliminate full-vault document chunk reads/rewrites/`fsync` on every metadata save**
+  - **Finding**: `DefaultVaultService._commitPayload` (`default_vault_service.dart:1605-1623`) calls `_readExistingWorkingSections(vaultStoreId)`, reading every file in `vaults/<vaultId>/` (including all multi-MB `document_*_chunk_*.enc` files) into memory. `FilePrivateVaultStore.commitVault` (`private_vault_store.dart:305-312`) then writes **every** section—including unchanged document chunks—to `.tmp` with `flush: true` (`fsync`) and renames it. Combined with `NoteEditorScreen`'s 1s autosave and the double-persist bug (`20.2`), a vault with 200 MB of documents triggers ~400 MB of reads, ~400 MB of writes, and dozens of `fsync` calls per typing pause.
+  - **Solution**: Restrict `persistVaultPayload` to writing only core metadata/payload sections (`header.json`, `manifest.enc`, `items.enc`, `notes.enc`, `settings.enc`, `tags.enc`) and deleting only orphaned `document_*` files identified from `describeVault` filenames—never reading or rewriting unchanged document chunks.
+
+- [x] **20.17 Stream local snapshots and local exports instead of materializing full vault JSON in RAM**
+  - **Finding**: `AutomatedBackupService.createLocalSnapshot` (`automated_backup_service.dart:113`) uses synchronous `writeAsStringSync`, `listSync`, and `deleteSync` on the UI thread. Both `_handleLocalBackupNow` / `_runAutomatedBackup` and `OnboardingFlow._exportCurrentVaultToLocal` (`onboarding_flow.dart:4190`) call `readRawVaultFile`, loading every document chunk into RAM, base64-encoding (+33% expansion), and `jsonEncode`-ing the entire vault into one giant string rather than using `StreamingVaultContainer` (`vaultService.exportVault`). On vaults up to `VaultLimits` (1 GB), this causes OOM crashes on mobile and browser tab crashes on Web.
+  - **Solution**: Route native local snapshots and `_exportCurrentVaultToLocal` through `StreamingVaultContainer.packPrivateStoreToFile` (`vaultService.exportVault`) for bounded < 15 MB streaming I/O, and replace `*Sync` file operations in `AutomatedBackupService` with async I/O / background isolate execution.
+
+- [x] **20.18 Replace per-chunk `compute()` isolate spawning & base64 marshaling with a persistent worker**
+  - **Finding**: `SecureCryptoAdapter.encrypt`/`decrypt` (`secure_crypto_adapter.dart:43,71`) and `DefaultVaultService.readVaultDocument` (`default_vault_service.dart:806,825`) invoke Flutter's `compute()` for every payload > 512 bytes, spawning and tearing down a fresh Dart isolate per chunk/section and base64-encoding binary `List<int>` payloads into JSON strings (`vault_document_isolate.dart`) across the isolate boundary.
+  - **Solution**: Maintain a persistent long-lived crypto worker isolate on native platforms communicating via `SendPort`/`ReceivePort` with `TransferableTypedData` / `Uint8List` (zero base64/JSON overhead).
+
+- [x] **20.19 Offload large JSON encode/decode and cache per-entry search text**
+  - **Finding**: `jsonEncode`/`jsonDecode` + `utf8.encode`/`utf8.decode` for `items.enc` and `notes.enc` execute synchronously on the main UI isolate. Additionally, `VaultAppShell._dashboardInputSignature` (`vault_app_shell.dart:1744-1779`) re-hashes every field of every entry on rebuilds, and `_entrySearchText` (`vault_app_shell.dart:1846-1877`) dynamically concatenates and lowercases all fields, tags, and Quill deltas across all entries during search.
+  - **Solution**: Cache normalized search strings per entry ID (invalidating only on entry edit/version change), keep `_dashboardInputSignature` O(1) via revision/mutation counters, and move large `items`/`notes` JSON serialization onto the background worker isolate.
+
+---
+
+### D) Findings as a Security Expert
+
+- [x] **20.20 Patch `StreamingVaultContainer` path traversal & unbounded header allocation**
+  - **Finding**: `StreamingVaultContainer.unpackStreamToPrivateStore` (`lib/infrastructure/adapters/streaming_vault_container.dart:165-174`) reads `nameLen` and `fileName` from an untrusted binary `.nija` stream and passes `fileName` straight to `FilePrivateVaultStore.writeSectionStream` (`private_vault_store.dart:271`), which opens `File('${dir.path}${Platform.pathSeparator}$fileName')` with **no path-traversal validation** (`../`, `/`, `\`, absolute paths) and **no upper bound** on `nameLen` before `readExact(nameLen)`. A malicious `.nija` file can overwrite arbitrary files in the app container or crash the app with a multi-GB allocation.
+  - **Solution**: Validate `nameLen > 0 && nameLen <= 255`, `dataLen <= VaultLimits.maxVaultBytes`, and enforce a strict section filename allowlist/regex (`^[A-Za-z0-9._-]+$` with no `..`, `/`, `\`, or `.tmp` suffix) in both `StreamingVaultContainer` and `FilePrivateVaultStore`.
+
+- [x] **20.21 Fix Web quick-unlock cryptographic weakness (WebAuthn PRF must wrap master password directly)**
+  - **Finding**: On Web (`onboarding_flow.dart:918-924, 1322-1326`), `WebQuickUnlockVaultWeb` (WebAuthn PRF) only encrypts the 6-digit PIN, while `PinCredentialStore` stores `AES-GCM(PBKDF2(PIN), masterPassword)` in `localStorage` (`SharedPreferences`). Any attacker with access to `localStorage` (e.g., via XSS or browser profile access) can offline brute-force all $10^6$ 6-digit PINs against PBKDF2-HMAC-SHA256 to recover the **master password**, bypassing WebAuthn PRF entirely.
+  - **Solution**: Store `AES-GCM(PRF_key, masterPassword)` directly in `WebQuickUnlockVaultWeb` (IndexedDB) so Web biometric/passkey unlock never places a PIN-wrapped master password in `localStorage`, and remove the mandatory PIN dependency from Web biometric enrollment.
+
+- [x] **20.22 Move native PIN storage to `FlutterSecureStorage`, add attempt rate-limiting, and tighten native biometric storage**
+  - **Finding**:
+    1. `PinCredentialStore` (`lib/core/security/pin_credential_store.dart`) persists wrapped master passwords in plaintext `SharedPreferences` (`nija_pin_unlock_v1`) with **zero attempt throttling, backoff, or wipe-after-N-failures**.
+    2. `BiometricCredentialStore` (`lib/core/security/biometric_credential_store.dart:13`) instantiates `const FlutterSecureStorage()` with default options (no `AndroidOptions(encryptedSharedPreferences: true)` or Keychain/Keystore biometric-bound access control), meaning device unlock or backup extraction can expose stored credentials without biometric hardware enforcement.
+  - **Solution**: Migrate native `PinCredentialStore` records to `FlutterSecureStorage`, enforce a persistent failed-PIN attempt counter with exponential backoff and automatic PIN removal after 5 consecutive failures (falling back to master password), and configure explicit hardened `AndroidOptions` / `IOSOptions` (ideally hardware-backed biometric-bound keys) on `BiometricCredentialStore`.
+
+- [x] **20.23 Enforce master password policy & review Argon2id KDF parameters**
+  - **Finding**: `VaultValidators.isStrongEnoughMasterPassword` (`>= 10` chars, letter + digit) is only displayed as guidance text in `_PasswordStrengthMeter` and is **never enforced** in `SetupScreen._canCreateVault`, `_showMandatoryMasterPasswordReset`, or `_RotateMasterPasswordDialog`—users can set `"1"` as a master password. Combined with `Falcon` (`4096 KB`, `1` iteration) and `Owl` (`8192 KB`, `2` iterations) falling below OWASP Argon2id minimums (19–46 MiB), weak passwords are vulnerable to offline cracking if a `.nija` file is exfiltrated.
+  - **Solution**: Enforce `VaultValidators.isStrongEnoughMasterPassword` on vault creation, master password rotation, and recovery password reset; evaluate raising default `Owl` (and minimum `Falcon`) Argon2id memory/iteration parameters to meet OWASP guidance while benchmarking target mobile unlock latency.
+
+- [x] **20.24 Generate cryptographically random Argon2id salts & fix cipher header metadata**
+  - **Finding**:
+    1. `DefaultVaultService` (`default_vault_service.dart:116-118, 311, 361, 414, 468, 485`) derives Argon2id salts from predictable UTC timestamp strings (`utf8.encode('salt-$now-${guardian.id}')`) instead of `Random.secure()`.
+    2. `GuardianProfiles` (`lib/core/config/guardian_profiles.dart`) sets `cipher: 'xchacha20-poly1305'`, writing `'xchacha20-poly1305'` into `.nija` headers while `SecureCryptoAdapter` (`secure_crypto_adapter.dart:12`) encrypts with `AesGcm.with256bits()`.
+  - **Solution**: Generate 16 cryptographically random bytes via `_randomBytes(16)` for all password and recovery KDF salts. Align `GuardianProfiles.cipher` to `'aes-256-gcm'` (while preserving compatibility when reading legacy headers).
+
+- [x] **20.25 Harden Android manifest, screen-capture protection, temp file cleanup & intent filtering**
+  - **Finding**:
+    1. `android/app/src/main/AndroidManifest.xml` omits `android:allowBackup="false"` and `dataExtractionRules`, permitting Android Auto Backup to upload `SharedPreferences` (`nija_pin_unlock_v1`) and vault metadata.
+    2. `android/app/src/main/kotlin/com/nija/MainActivity.kt` does not set `WindowManager.LayoutParams.FLAG_SECURE`, exposing passwords and recovery phrases to screenshots, screen recording, and OS app-switcher thumbnails.
+    3. `MainActivity.openDocument` (`MainActivity.kt:115-138`) writes decrypted document bytes to `cacheDir/nija_document_open` and leaves the most recently viewed file on disk until another document is opened.
+    4. `MainActivity.captureSecretFromIntent` (`MainActivity.kt:140-156`) accepts generic `application/octet-stream` and `text/plain` `ACTION_VIEW` intents without strictly requiring `.nijas`.
+  - **Solution**: Add `android:allowBackup="false"` + `dataExtractionRules`; enable `FLAG_SECURE` in `MainActivity.kt`; delete `nija_document_open` cache files in `onStop`/`onDestroy` (or after viewer return); and tighten `captureSecretFromIntent` MIME/extension checks.
+
+- [x] **20.26 Route all sensitive copies through `SecureClipboard` & clear session caches**
+  - **Finding**:
+    1. `RecoveryScreen` (`onboarding_flow.dart:5885`), `password_generator_sheet.dart:344`, `add_vault_item_screen.dart:787`, and `encrypted_secret_viewer.dart:42,57` call `Clipboard.setData(...)` directly, bypassing `SecureClipboard.copySensitive` (20s auto-clear).
+    2. `_passwordController.text` and `DefaultVaultService._unlockedSessions` (`default_vault_service.dart:2012-2024`) retain the raw master password string in memory for the entire unlocked session even after `vaultKey` is unwrapped, and `_manifestChunksCache` is never cleared on `clearUnlockedSession`.
+  - **Solution**: Route all secret/password/recovery-phrase clipboard copies through `SecureClipboard.copySensitive`; clear `_manifestChunksCache` in `clearUnlockedSession`; and avoid retaining raw password strings in `_UnlockedVaultSession` once `vaultKey` is unwrapped.
+
+- [x] **20.27 Strengthen recovery dictionary entropy, review plaintext recovery note & tighten Web CSP**
+  - **Finding**:
+    1. `RecoveryPhraseDictionary` (`lib/core/config/recovery_phrase_dictionary.dart`) contains only ~112 words (vs. 2048 in BIP-39), giving 12-word recovery phrases ~80.8 bits of entropy and 4-word + 2-digit `PasswordGenerator.generatePassphrase()` only ~33.8 bits.
+    2. `OnboardingFlow` / `VaultAppShell` automatically seed the user's 12-word recovery phrase into a plaintext vault note (`note-recovery-phrase`), increasing exposure if an unlocked session is compromised, and `RecoveryScreen` uses `SelectableText`.
+    3. `web/index.html` and `web/_headers` allow `'unsafe-inline'` in `script-src` and `style-src` CSP directives, weakening XSS defense-in-depth on Web.
+  - **Solution**: Expand `RecoveryPhraseDictionary` to a standard 2048-word BIP-39 wordlist (keeping legacy word acceptance for existing vaults); make seeding `note-recovery-phrase` opt-in rather than automatic; and work toward removing `'unsafe-inline'` from `script-src` in `web/index.html` / `web/_headers` (moving inline bootstrap/scripts to external hashed/strict files).
+
+
+## Section 21: Independent Review v2 — Pre-Release Findings & Solutions
+
+Second-pass pre-release review conducted after completing Section 20 across all four perspectives (**User**, **Technical Validator & Tester**, **Performance Test Expert**, **Security Expert**).
+- **Baseline Static Check (`flutter analyze`)**: 0 issues.
+- **Baseline Test Run (`flutter test`)**: 256 / 256 tests passing.
+
+---
+
+### A) Findings as a User
+
+- [x] **21.1 Fix local snapshot restore not updating UI & overwriting disk before confirmation**
+  - **Finding**: In `lib/features/vault/presentation/vault_app_shell.dart` (`_confirmRestoreSnapshot`, line 3598), restoring a local snapshot calls `widget.onRestoreRawVaultContent!(content)` → `OnboardingFlow._restoreVaultFromRawContent` (`lib/features/onboarding/presentation/onboarding_flow.dart:4509`). That method:
+    1. Passes `storageId: _vaultFilePath` and `stageRawContent: true`, overwriting `_vaultFilePath` on disk immediately before password verification, replacement confirmation, or conflict resolution.
+    2. Passes `continueToUnlock: false`, so `_loadVaultData(...)` is never called after import. The user still sees pre-restore items/notes/folders in the UI, and their next edit overwrites the restored snapshot with stale in-memory state.
+    3. Also breaks if the local snapshot is stored as a binary NIJA V2 container (`readSnapshotContent` reads UTF-8 string).
+  - **Solution**: Stage snapshot restores in a temporary path (not `_vaultFilePath`), support both NIJA V2 binary containers and JSON snapshots, and reload `_loadVaultData(password)` + `_refreshVaultSize()` + `_refreshLocalSnapshots()` on successful restore.
+
+- [x] **21.2 Fix `Settings -> Security & Encryption` showing `"Unknown"` / `"Unavailable"` in release builds**
+  - **Finding**: `OnboardingFlow` (`lib/features/onboarding/presentation/onboarding_flow.dart:482`) passes `onReadVaultInternals: kDebugMode && !_isExploreDemoSession ? _readVaultInternals : null`. Because `kDebugMode` is `false` in release builds, `_SecurityEncryptionSheet` (`lib/features/vault/presentation/widgets/vault_settings_widgets.dart:614`) receives `null` and displays `"Unknown"` for `Format`, `Format version`, `Schema version`, `Storage layout`, `Created`, `Updated`, `Revision`, and `"Unavailable"` for `Recovery key wrapper`.
+  - **Solution**: Provide a dedicated lightweight `onReadSecurityMetadata` callback (enabled in release builds too) that reads only `header.json` via `readVaultHeader` without exposing debug file trees or reading encrypted sections.
+
+- [x] **21.3 Complete "Clear Data" across snapshots, `SharedPreferences`, Web IndexedDB & re-auth**
+  - **Finding**: `OnboardingFlow._clearAllLocalVaultData` (`lib/features/onboarding/presentation/onboarding_flow.dart:4460`) deletes `vaults/<vaultId>` and `_vaultFilePath`, but:
+    1. Leaves `nija_snapshots/<vaultId>` (local rolling snapshots) on disk.
+    2. Leaves `SharedPreferences` keys (`nija_pref_*`, `nija_device_id_v1`, theme/language/auto-lock prefs) intact.
+    3. On Web (`if (!kIsWeb)`), skips deleting the vault from IndexedDB (`nija_vault`), so "Clear Data" leaves the Web vault intact.
+    4. Executes immediately on confirmation without requiring master-password verification.
+  - **Solution**: Require master-password verification before wiping; delete `nija_snapshots/<vaultId>`, clear `nija_*` `SharedPreferences` keys, delete IndexedDB vault entries on Web, and reset all in-memory state.
+
+- [x] **21.4 Fix Web local import of Mobile NIJA V2 `.nija` files (`FileReader.readAsText` corruption)**
+  - **Finding**: `web/nija_browser_bridge.js` (`pickTextFile`, line 113) reads selected files with `FileReader.readAsText(file)`. When a Web user picks a binary NIJA V2 `.nija` file exported from Android/iOS/Desktop, non-UTF-8 bytes are corrupted into `U+FFFD` replacement characters before Dart sees them.
+  - **Solution**: Read `.nija` files with `FileReader.readAsArrayBuffer(file)` (returning bytes or base64 to Dart), check `StreamingVaultContainer.isContainerBytes`, and convert via `StreamingVaultContainer.containerBytesToJsonSnapshot` when NIJA V2 is detected.
+
+---
+
+### B) Findings as a Technical Validator & Tester
+
+- [x] **21.5 Wire `createLocalSnapshotFromFileWriter` into `VaultAppShell` local backups**
+  - **Finding**: `AutomatedBackupService.createLocalSnapshotFromFileWriter` (`lib/application/services/automated_backup_service.dart:109`) is currently dead code; `VaultAppShell._handleLocalBackupNow` (line 3264) and `_runAutomatedBackup` (line 3290) still call `widget.onReadRawVaultContent!()`.
+  - **Solution**: Pass an `onExportVaultToPath` callback from `OnboardingFlow` to `VaultAppShell` (calling `_vaultService.exportVault`) and invoke `createLocalSnapshotFromFileWriter` on non-web platforms.
+
+- [x] **21.6 Use streaming `exportVault` for desktop/native `_exportCurrentVaultToLocal`**
+  - **Finding**: `OnboardingFlow._exportCurrentVaultToLocal` (`lib/features/onboarding/presentation/onboarding_flow.dart:4197`) still calls `_vaultService.readRawVaultFile` instead of `_vaultService.exportVault`, even on Desktop where `FilePicker.platform.saveFile` returns a file path directly.
+  - **Solution**: On native desktop (and temp-file-backed mobile flows), export directly with `_vaultService.exportVault(vaultId: ..., destinationPath: ...)` via `StreamingVaultContainer`.
+
+- [x] **21.7 Reconcile `VaultLimits.maxDocumentBytes` (5 MB vs documented 25 MB)**
+  - **Finding**: `VaultLimits.maxDocumentBytes` (`lib/core/config/vault_limits.dart:7`) is `5 * 1024 * 1024` (5 MB), contradicting `docs/todo.md:620` which states the document attachment ceiling was raised to 25 MB.
+  - **Solution**: Align `VaultLimits.maxDocumentBytes` (e.g., `25 * 1024 * 1024` if intended for release) or update the UI copy/docs to match the enforced limit, and verify chunked upload/preview tests at the target ceiling.
+
+- [x] **21.8 Close IndexedDB connections in `web/nija_browser_bridge.js`**
+  - **Finding**: `web/nija_browser_bridge.js` (`openDb`, lines 23–63) opens an `IDBDatabase` connection on every `readIndexedText`, `writeIndexedText`, and `deleteIndexedText` call and never calls `db.close()` after the transaction completes, which can block future `versionchange` upgrades across tabs.
+  - **Solution**: Call `db.close()` in `txn.oncomplete` / `txn.onerror` / `txn.onabort` (or reuse a single cached connection).
+
+- [x] **21.9 Add tests for v2 uncovered flows**
+  - **Finding**: Missing automated tests for `_restoreVaultFromRawContent` (local snapshot restore updating UI & disk), `_clearAllLocalVaultData`, `createLocalSnapshotFromFileWriter`, and `scheduleDailyBackup` handle cancellation.
+  - **Solution**: Add unit and widget tests covering all four paths.
+
+---
+
+### C) Findings as a Performance Test Expert
+
+- [x] **21.10 Eliminate full-vault `readVaultInternals` RAM spike**
+  - **Finding**: `DefaultVaultService.readVaultInternals` (`lib/application/services/default_vault_service.dart:1221`) calls `_snapshotForHandle(filePath)`, reading **every** encrypted section (including all `document_*_chunk_*.enc` files), base64-encoding them, and `jsonEncode`-ing the entire snapshot just to return header metadata and `snapshotBytes`.
+  - **Solution**: Compute `readVaultInternals` from `readVaultHeader` + `describeVault()` file sizes (estimating snapshot bytes from working store byte sizes without reading any document chunk bytes).
+
+- [x] **21.11 Eliminate remaining full-vault `readRawVaultFile` RAM spikes in backup/export**
+  - **Finding**: `VaultAppShell._handleLocalBackupNow`, `_runAutomatedBackup`, and `OnboardingFlow._exportCurrentVaultToLocal` still materialize the entire vault + base64 documents in RAM via `readRawVaultFile`.
+  - **Solution**: Resolved together with `21.5` and `21.6` by streaming via `StreamingVaultContainer.packPrivateStoreToFile`.
+
+- [x] **21.12 Offload large `items.enc` / `notes.enc` JSON serialization to background isolate**
+  - **Finding**: While AES-GCM crypto uses the persistent worker isolate (`vault_document_isolate_worker_io.dart`), `jsonEncode`/`jsonDecode` and `utf8.encode`/`utf8.decode` for `items.enc` and `notes.enc` still run synchronously on the main UI isolate (`DefaultVaultService._payloadFromWorking`, `_sectionsForPayload`).
+  - **Solution**: Move `jsonEncode`/`jsonDecode` + UTF-8 conversion for large section payloads onto the background worker isolate.
+
+---
+
+### D) Findings as a Security Expert
+
+- [x] **21.13 Stop retaining raw plaintext master password in `_UnlockedVaultSession`**
+  - **Finding**: `DefaultVaultService._unlockedSessions` (`lib/application/services/default_vault_service.dart:1834-1884, 2012-2024`) still stores the plaintext `password` string in `_UnlockedVaultSession.password` for the entire unlocked session even after `vaultKey` is unwrapped, and `_passwordController.text` keeps it in UI controller state.
+  - **Solution**: Store a keyed/salted SHA-256 verifier (e.g., `Sha256(kdf.salt + password)`) in `_UnlockedVaultSession` instead of the raw password string, and clear `_passwordController` after unlock (relying on `vaultKey` in `_unlockedSessions` for session persistence).
+
+- [x] **21.14 Make `note-recovery-phrase` seeding opt-in & harden `RecoveryScreen`**
+  - **Finding**: `OnboardingFlow` (`lib/features/onboarding/presentation/onboarding_flow.dart:2303-2351`) and `VaultAppShell` (`lib/features/vault/presentation/vault_app_shell.dart:380-386`) automatically seed the 12-word recovery phrase as a plaintext note inside the vault, and `RecoveryScreen` exposes the phrase in `SelectableText`.
+  - **Solution**: Make saving the recovery phrase as an in-vault note opt-in (default off with clear offline-storage guidance) and review `SelectableText` usage on `RecoveryScreen`.
+
+- [x] **21.15 Enforce master-password re-authentication on "Clear Data" & complete Web/snapshot wipe**
+  - **Finding**: Linked to `21.3`: `_clearAllLocalVaultData` does not require master-password confirmation before wiping, and leaves `nija_snapshots/<vaultId>`, `SharedPreferences` keys, and Web IndexedDB vault records behind.
+  - **Solution**: Prompt for master password (or explicit destructive verification) before wiping and ensure complete removal across all local stores (native files, snapshots, `SharedPreferences`, and Web IndexedDB).
+
+- [x] **21.16 Tighten Web CSP to remove `'unsafe-inline'` in `script-src`**
+  - **Finding**: `web/index.html:26` and `web/_headers:2` include `'unsafe-inline'` in `script-src` and `style-src`, reducing XSS defense-in-depth for a browser-hosted password manager.
+  - **Solution**: Move any inline scripts/styles to external files or explicit SHA-256 CSP hashes so `'unsafe-inline'` can be removed from `script-src`.
+
+- [x] **21.17 Upgrade native biometric storage to hardware-bound biometric ACLs**
+  - **Finding**: `BiometricCredentialStore` (`lib/core/security/biometric_credential_store.dart:13`) uses `AndroidOptions(encryptedSharedPreferences: true)` and `KeychainAccessibility.unlocked_this_device`, which protects credentials when the device is locked, but does not cryptographically bind key release to `BiometricPrompt` `CryptoObject` / Keychain `biometryCurrentSet`.
+  - **Solution**: Evaluate migrating native biometric secret wrapping to a biometric-bound Android Keystore / iOS Keychain `biometryCurrentSet` item so OS-level unlock alone cannot release the stored master password.
+
+- [x] **21.18 Review `Falcon` and `Owl` Argon2id memory parameters against OWASP minimums**
+  - **Finding**: `GuardianProfiles` (`lib/core/config/guardian_profiles.dart`) configures `Falcon` (`4096 KB`, `1` iter) and `Owl` (`8192 KB`, `2` iters), which remain below OWASP Argon2id minimums (19–46 MiB).
+  - **Solution**: Benchmark 19 MiB+ Argon2id parameters on target low/mid-end Android/iOS/Web devices and raise `Owl` (default) / `Falcon` minimums if unlock latency remains acceptable.
+
+
+## Section 22: Independent Review v3 — E2E, Stress & Web/Android Release Findings & Solutions
+
+Third-pass pre-release review with live **E2E UI/UX flow & stress testing** targeting **Web** and **Android** release readiness.
+- **Baseline**: `flutter analyze` (0 issues), `flutter test` (259 / 259 passing).
+- **Stress Benchmark (500 items, 100 notes, 50 folders, 15 MB chunked documents with real Argon2id + AES-256-GCM + `FilePrivateVaultStore`)**:
+  - `createVault` (19 MiB Owl): 386 ms
+  - `persistVaultDocumentStream` (15 MB / 15 chunks): 2,440 ms
+  - `persistVaultPayload` (500 items): 463 ms; second `persistVaultPayload`: 303 ms
+  - `readVaultInternals`: 4 ms; `exportVault` (NIJA V2): 55 ms
+  - Cold `unlockVault` + `readVaultPayload`: 211 ms; `readVaultDocument` (5 MB): 479 ms
+
+---
+
+### A) UI/UX & User Findings (Web & Android)
+
+- [x] **22.1 Fix 58 px `RenderFlex` horizontal overflow in `AddVaultItemScreen` and `DocumentUploadScreen` folder dropdowns**
+  - **Finding**: On a `430×932` mobile viewport, `DropdownButtonFormField<String>` in `lib/features/vault/presentation/add_vault_item_screen.dart:625` (`item-folder-dropdown-default`) overflows horizontally by 58 px because `isExpanded: true` is missing and the `'Create new folder...'` `Row` item sizes the dropdown wider than its `Row`/`Expanded` container. The same missing `isExpanded: true` exists in `lib/features/vault/presentation/document_upload_screen.dart:297` (`document-folder-dropdown-$_selectedFolderId`).
+  - **Solution**: Set `isExpanded: true` on both `DropdownButtonFormField<String>` widgets and verify zero layout overflow in mobile (`430×932`) widget tests.
+
+- [x] **22.2 Add inline master-password requirement hint on `SetupScreen`**
+  - **Finding**: In `SetupScreen` (`lib/features/onboarding/presentation/onboarding_flow.dart:5671`), `create-encrypted-vault-button` remains disabled until `VaultValidators.isStrongEnoughMasterPassword` passes (`>= 10` chars with letters and numbers), but `SetupScreen` does not show inline validation feedback on the password field, leaving users unsure why the button is disabled for passwords like `"password1"`.
+  - **Solution**: Display inline `helperText` (`'Use 10+ characters with letters and numbers'`) when the entered password is non-empty and does not yet satisfy `VaultValidators.isStrongEnoughMasterPassword`.
+
+- [x] **22.3 Clarify Web Cloud Backup & export-only storage behavior**
+  - **Finding**: Local rolling snapshots are intentionally hidden on Web (`!kIsWeb`), and Web users only see the `Web storage` row under Settings -> Data. Adding a brief note under Web Cloud Backup/Settings clarifies that automatic local rolling snapshots are mobile/desktop-only.
+  - **Solution**: Keep Web storage guidance clear and verify Web build (`flutter build web`) compiles cleanly without `dart:io` or `dart:isolate` errors.
+
+---
+
+### B) Technical Validator & Tester Findings (Web & Android)
+
+- [x] **22.4 Update stale `integration_test/` selectors and verify Android/Web targets**
+  - **Finding**: `integration_test/e2e_full_flow_test.dart` references outdated UI labels (`'Choose Guardian'`, `'Vault'`, `'Types'`) and omits `firstInstallWalkthroughCompletedOverride`. Additionally, `flutter test -d macos` is blocked on machines without Xcode, whereas **Web** and **Android** are the active release targets.
+  - **Solution**: Update `integration_test/e2e_full_flow_test.dart` selectors to match current UI (`'Create your vault'`, `'Home'`, `'All Items'`, `'Folders'`, `'Settings'`) and verify Web (`flutter build web`) and Android (`flutter build apk --debug`) builds pass cleanly.
+
+- [x] **22.5 Verify Google OAuth release configuration for Android & Web**
+  - **Finding**: `GoogleOAuthConfig.nativeServerClientId` (`lib/core/config/google_oauth_config.dart:19-22`) defaults to `''`. Android Drive backup/restore requires the installed build's SHA-1 fingerprint and OAuth client configured in Google Cloud Console (`NIJA_GOOGLE_NATIVE_SERVER_ID` / `NIJA_GOOGLE_WEB_CLIENT_ID`).
+  - **Solution**: Document and verify `--dart-define` / OAuth client setup in release build checks.
+
+---
+
+### C) Performance Test Findings
+
+- [x] **22.6 Avoid one-off `compute()` isolate spawn jitter on medium JSON payloads & keep `_dashboardInputSignature` `O(1)` at 5,000+ items**
+  - **Finding**: `DefaultVaultService._decryptSection` and `_encryptJson` spawn one-off `compute()` isolates for payloads > 32 KB / > 50 items instead of reusing the persistent worker or raising the threshold to avoid spawn jitter on 1s note autosaves. `VaultAppShell._dashboardInputSignature` (`vault_app_shell.dart:1750`) also hashes `_items` and `_notes` on builds (fast at 500 items, linear at 5,000+ items).
+  - **Solution**: Raise the JSON `compute()` threshold to avoid spawning isolates for small/medium payloads (~100 KB / 200 entries) and invalidate `_dashboardDataCache` explicitly on in-place item/type mutations so `_dashboardInputSignature` stays `O(1)`.
+
+---
+
+### D) Security Findings (Web & Android)
+
+- [x] **22.7 Evaluate Web CSP `script-src` `'unsafe-inline'` removal**
+  - **Finding**: `web/index.html:26` and `web/_headers:2` removed `'unsafe-inline'` from `style-src` via `web/nija_boot.css`, while `script-src` retains `'unsafe-inline'` for Flutter's `flutter_bootstrap.js` loader.
+  - **Solution**: Evaluate nonce/hash-based `flutter_bootstrap.js` configuration for hosting environments where strict `script-src` without `'unsafe-inline'` is supported.
+
+- [x] **22.8 Evaluate Android Keystore `BiometricPrompt` `CryptoObject` binding & opt-in recovery note**
+  - **Finding**: `BiometricCredentialStore` (`lib/core/security/biometric_credential_store.dart:13`) uses `AndroidOptions(encryptedSharedPreferences: true)` rather than a hardware `BiometricPrompt` `CryptoObject` key, and `RecoveryScreen` (`onboarding_flow.dart`) defaults `saveCopyInVault` to `true` for test compatibility.
+  - **Solution**: Consider defaulting `saveCopyInVault` to `false` on new installs and migrating Android biometric credential wrapping to a `CryptoObject`-bound Keystore key in a future native security update.
+
+
+
+
+
+
 
 

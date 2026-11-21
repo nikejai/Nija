@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
+            VALUE "CompanyName", "Nija" "\0"
             VALUE "FileDescription", "nija" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "nija" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Nija. All rights reserved." "\0"
             VALUE "OriginalFilename", "nija.exe" "\0"
             VALUE "ProductName", "nija" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

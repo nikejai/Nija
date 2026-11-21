@@ -15,4 +15,8 @@ class WebVaultStorageAdapter implements VaultStorageAdapter {
   }) async {
     throw UnsupportedError('WebVaultStorageAdapter is only available on web.');
   }
+
+  Future<void> delete({required String filePath}) async {
+    throw UnsupportedError('WebVaultStorageAdapter is only available on web.');
+  }
 }

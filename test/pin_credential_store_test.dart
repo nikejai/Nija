@@ -43,4 +43,46 @@ void main() {
       isNull,
     );
   });
+
+  test('enforces cooldown after 3 failures and wipes PIN after 5 failures', () async {
+    var currentTime = DateTime(2026, 11, 19, 12, 0, 0);
+    final store = PinCredentialStore(now: () => currentTime);
+
+    await store.saveMasterPassword(
+      vaultId: 'vault-rate',
+      pin: '654321',
+      password: 'master-secret',
+    );
+
+    for (var i = 0; i < PinCredentialStore.cooldownThreshold; i++) {
+      expect(
+        await store.readMasterPassword(vaultId: 'vault-rate', pin: '000000'),
+        isNull,
+      );
+    }
+
+    // Even the correct PIN is blocked during the 30-second cooldown.
+    expect(
+      await store.readMasterPassword(vaultId: 'vault-rate', pin: '654321'),
+      isNull,
+    );
+
+    // Advance past cooldown and fail 2 more times (total 5 failures -> wipe).
+    currentTime = currentTime.add(const Duration(seconds: 31));
+    expect(
+      await store.readMasterPassword(vaultId: 'vault-rate', pin: '000000'),
+      isNull,
+    );
+    currentTime = currentTime.add(const Duration(seconds: 31));
+    expect(
+      await store.readMasterPassword(vaultId: 'vault-rate', pin: '000000'),
+      isNull,
+    );
+
+    expect(await store.hasPin(vaultId: 'vault-rate'), isFalse);
+    expect(
+      await store.readMasterPassword(vaultId: 'vault-rate', pin: '654321'),
+      isNull,
+    );
+  });
 }

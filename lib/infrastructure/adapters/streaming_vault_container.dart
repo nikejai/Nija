@@ -15,6 +15,24 @@ class StreamingVaultContainer {
 
   /// Magic identifier: 'N', 'I', 'J', 'A', version 2, minor 0.
   static const List<int> magicBytes = <int>[0x4E, 0x49, 0x4A, 0x41, 0x02, 0x00];
+  static const int maxSectionNameBytes = 255;
+  static const int maxSectionDataBytes = 1024 * 1024 * 1024;
+  static const int maxPeekHeaderBytes = 1024 * 1024;
+  static final RegExp _safeSectionNamePattern = RegExp(r'^[A-Za-z0-9._-]+$');
+
+  static bool isValidSectionFileName(String fileName) {
+    if (fileName.isEmpty ||
+        fileName == '.' ||
+        fileName == '..' ||
+        fileName.contains('..') ||
+        fileName.contains('/') ||
+        fileName.contains('\\') ||
+        fileName.endsWith('.tmp')) {
+      return false;
+    }
+    if (utf8.encode(fileName).length > maxSectionNameBytes) return false;
+    return _safeSectionNamePattern.hasMatch(fileName);
+  }
 
   /// Checks if [bytes] start with the NIJA V2 magic header.
   static bool isContainerBytes(List<int> bytes) {
@@ -161,12 +179,21 @@ class StreamingVaultContainer {
           // End of container sentinel reached
           break;
         }
+        if (nameLen > maxSectionNameBytes) {
+          throw const FormatException('Section name exceeds maximum length.');
+        }
 
         final nameBytes = await reader.readExact(nameLen);
         final fileName = utf8.decode(nameBytes);
+        if (!isValidSectionFileName(fileName)) {
+          throw FormatException('Invalid section name: $fileName');
+        }
 
         final dataLenBytes = await reader.readExact(8);
         final dataLen = ByteData.sublistView(dataLenBytes).getUint64(0, Endian.big);
+        if (dataLen > maxSectionDataBytes) {
+          throw const FormatException('Section payload exceeds maximum size.');
+        }
 
         // Stream exactly dataLen bytes into the target section
         final dataStream = reader.sliceStream(dataLen);
@@ -177,6 +204,91 @@ class StreamingVaultContainer {
     } finally {
       await reader.cancel();
     }
+  }
+
+  /// Peeks and parses the [VaultFile] header from the prefix of [bytes].
+  static VaultFile? peekHeaderFromBytes(Uint8List bytes) {
+    try {
+      if (!isContainerBytes(bytes)) return null;
+      var offset = magicBytes.length;
+      if (offset + 4 > bytes.length) return null;
+      final nameLen = ByteData.sublistView(bytes, offset, offset + 4).getUint32(0, Endian.big);
+      offset += 4;
+      if (nameLen == 0 || nameLen > maxSectionNameBytes || offset + nameLen > bytes.length) {
+        return null;
+      }
+      final fileName = utf8.decode(bytes.sublist(offset, offset + nameLen));
+      offset += nameLen;
+      if (fileName != 'header.json' || offset + 8 > bytes.length) return null;
+      final dataLen = ByteData.sublistView(bytes, offset, offset + 8).getUint64(0, Endian.big);
+      offset += 8;
+      if (dataLen > maxPeekHeaderBytes || offset + dataLen > bytes.length) {
+        return null;
+      }
+      final jsonString = utf8.decode(bytes.sublist(offset, offset + dataLen));
+      final decoded = Map<String, dynamic>.from(jsonDecode(jsonString) as Map);
+      return VaultFile.fromJson(decoded);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Unpacks a NIJA V2 binary container from [bytes] into a JSON snapshot string
+  /// suitable for JSON-based importers (e.g. Web).
+  static String containerBytesToJsonSnapshot(Uint8List bytes) {
+    if (!isContainerBytes(bytes)) {
+      throw const FormatException('Not a valid NIJA V2 streaming container.');
+    }
+    var offset = magicBytes.length;
+    VaultFile? header;
+    String? encryptedManifest;
+    final encryptedSections = <String, String>{};
+
+    while (true) {
+      if (offset + 4 > bytes.length) {
+        throw const FormatException('Unexpected end of NIJA V2 container.');
+      }
+      final nameLen = ByteData.sublistView(bytes, offset, offset + 4).getUint32(0, Endian.big);
+      offset += 4;
+      if (nameLen == 0) break;
+      if (nameLen > maxSectionNameBytes || offset + nameLen > bytes.length) {
+        throw const FormatException('Invalid section name length.');
+      }
+      final fileName = utf8.decode(bytes.sublist(offset, offset + nameLen));
+      offset += nameLen;
+      if (!isValidSectionFileName(fileName) || offset + 8 > bytes.length) {
+        throw FormatException('Invalid section name: $fileName');
+      }
+      final dataLen = ByteData.sublistView(bytes, offset, offset + 8).getUint64(0, Endian.big);
+      offset += 8;
+      if (dataLen > maxSectionDataBytes || offset + dataLen > bytes.length) {
+        throw const FormatException('Invalid section payload length.');
+      }
+      final sectionBytes = bytes.sublist(offset, offset + dataLen);
+      offset += dataLen;
+
+      if (fileName == 'header.json') {
+        final decoded = Map<String, dynamic>.from(
+          jsonDecode(utf8.decode(sectionBytes)) as Map,
+        );
+        header = VaultFile.fromJson(decoded);
+      } else if (fileName == 'manifest.enc') {
+        encryptedManifest = base64Encode(sectionBytes);
+      } else {
+        encryptedSections[fileName] = base64Encode(sectionBytes);
+      }
+    }
+
+    if (header == null) {
+      throw const FormatException('NIJA V2 container missing header.json.');
+    }
+    final snapshot = header.copyWith(
+      formatVersion: 2,
+      encryptedPayload: null,
+      encryptedManifest: encryptedManifest,
+      encryptedSections: encryptedSections,
+    );
+    return jsonEncode(snapshot.toJson());
   }
 
   /// Peeks and parses the [VaultFile] header from the first bytes of a container [sourceFile]
@@ -193,7 +305,7 @@ class StreamingVaultContainer {
         final nameLenBytes = raf.readSync(4);
         if (nameLenBytes.length < 4) return null;
         final nameLen = ByteData.sublistView(nameLenBytes).getUint32(0, Endian.big);
-        if (nameLen == 0) return null;
+        if (nameLen == 0 || nameLen > maxSectionNameBytes) return null;
 
         final nameBytes = raf.readSync(nameLen);
         final fileName = utf8.decode(nameBytes);
@@ -202,6 +314,7 @@ class StreamingVaultContainer {
         final dataLenBytes = raf.readSync(8);
         if (dataLenBytes.length < 8) return null;
         final dataLen = ByteData.sublistView(dataLenBytes).getUint64(0, Endian.big);
+        if (dataLen > maxPeekHeaderBytes) return null;
 
         final headerBytes = raf.readSync(dataLen);
         final jsonString = utf8.decode(headerBytes);

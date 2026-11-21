@@ -251,5 +251,95 @@ void main() {
       expect(importRes.status, ImportStatus.imported);
       expect(importRes.vaultId, 'legacy-id');
     });
+
+    test('rejects path-traversal section filenames in container stream', () async {
+      final unpackStore = FilePrivateVaultStore(
+        baseDirectory: Directory('${tempDir.path}/traversal_out'),
+      );
+      final maliciousName = utf8.encode('../escaped.txt');
+      final payload = utf8.encode('pwned');
+      final bytes = BytesBuilder();
+      bytes.add(StreamingVaultContainer.magicBytes);
+      final meta = ByteData(4 + maliciousName.length + 8);
+      meta.setUint32(0, maliciousName.length, Endian.big);
+      for (var i = 0; i < maliciousName.length; i++) {
+        meta.setUint8(4 + i, maliciousName[i]);
+      }
+      meta.setUint64(4 + maliciousName.length, payload.length, Endian.big);
+      bytes.add(meta.buffer.asUint8List());
+      bytes.add(payload);
+      bytes.add(Uint8List(4));
+
+      await expectLater(
+        StreamingVaultContainer.unpackStreamToPrivateStore(
+          stream: Stream<List<int>>.value(bytes.toBytes()),
+          store: unpackStore,
+          targetStoreId: 'target-vault',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+      expect(File('${tempDir.path}/traversal_out/vaults/escaped.txt').existsSync(), isFalse);
+    });
+
+    test('rejects oversized section name length before allocating buffer', () async {
+      final unpackStore = FilePrivateVaultStore(
+        baseDirectory: Directory('${tempDir.path}/oversized_out'),
+      );
+      final bytes = BytesBuilder();
+      bytes.add(StreamingVaultContainer.magicBytes);
+      final nameLen = ByteData(4)..setUint32(0, 1024 * 1024, Endian.big);
+      bytes.add(nameLen.buffer.asUint8List());
+
+      await expectLater(
+        StreamingVaultContainer.unpackStreamToPrivateStore(
+          stream: Stream<List<int>>.value(bytes.toBytes()),
+          store: unpackStore,
+          targetStoreId: 'target-vault',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('containerBytesToJsonSnapshot converts NIJA V2 bytes for Web import', () async {
+      final store = FilePrivateVaultStore(baseDirectory: tempDir);
+      final service = DefaultVaultService(
+        storageAdapter: const FileVaultStorageAdapter(),
+        cryptoAdapter: PrototypeCryptoAdapter(),
+        privateVaultStore: store,
+      );
+      const password = 'Password123';
+      const phrase = 'word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12';
+      await service.createVault(
+        filePath: '${tempDir.path}/mobile.nija',
+        vaultId: 'mobile-to-web-id',
+        vaultName: 'Mobile Vault',
+        guardianProfileId: GuardianProfiles.owl.id,
+        password: password,
+        recoveryPhrase: phrase,
+      );
+      final exportPath = '${tempDir.path}/mobile_export.nija';
+      await service.exportVault(
+        vaultId: 'mobile-to-web-id',
+        destinationPath: exportPath,
+      );
+      final bytes = await File(exportPath).readAsBytes();
+      final peeked = StreamingVaultContainer.peekHeaderFromBytes(bytes);
+      expect(peeked?.vaultId, 'mobile-to-web-id');
+
+      final jsonSnapshot = StreamingVaultContainer.containerBytesToJsonSnapshot(bytes);
+      final webStorage = InMemoryVaultStorageAdapter();
+      await webStorage.write(filePath: 'web_import.nija', content: jsonSnapshot);
+      final webService = DefaultVaultService(
+        storageAdapter: webStorage,
+        cryptoAdapter: PrototypeCryptoAdapter(),
+        privateVaultStore: InMemoryPrivateVaultStore(),
+      );
+      final importRes = await webService.importNijaFile(
+        filePath: 'web_import.nija',
+        unlockCredential: password,
+      );
+      expect(importRes.status, ImportStatus.imported);
+      expect(importRes.vaultId, 'mobile-to-web-id');
+    });
   });
 }

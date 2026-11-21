@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nija/application/services/vault_merge_helper.dart';
+import 'package:nija/core/localization/app_strings.dart';
 import 'package:nija/domain/models/vault_payload.dart';
 
 class VaultMergeScreen extends StatefulWidget {
@@ -160,7 +161,7 @@ class _VaultMergeScreenState extends State<VaultMergeScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           onPressed: () => _selectAll(VaultMergeSource.current),
-                          child: const Text('Accept all from current'),
+                          child: Text(AppStrings.acceptAllFromCurrent),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -348,7 +349,7 @@ class _VaultMergeScreenState extends State<VaultMergeScreen> {
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Vault merge'),
+        title: Text(AppStrings.vaultMerge),
         content: const Text(
           'Nothing is changed until you tap Apply Merge. Imported-only entries '
           'are added automatically. Conflicts and possible deletions need a '
@@ -357,7 +358,7 @@ class _VaultMergeScreenState extends State<VaultMergeScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
+            child: Text(AppStrings.ok),
           ),
         ],
       ),
@@ -405,7 +406,7 @@ class _VaultMergeScreenState extends State<VaultMergeScreen> {
               ),
               const SizedBox(height: 12),
               _MergeVersionPreview(
-                title: 'Current vault',
+                title: AppStrings.currentVault,
                 entry: entry.current,
                 kind: entry.kind,
               ),
@@ -533,7 +534,7 @@ class _MergeEntryCard extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: _MergeChoiceRow(
-                    title: 'Current Vault',
+                    title: AppStrings.currentVault,
                     subtitle: _metadataLine(entry.current!),
                     selected: selected == VaultMergeSource.current,
                     onTap: () => onSelected(VaultMergeSource.current),

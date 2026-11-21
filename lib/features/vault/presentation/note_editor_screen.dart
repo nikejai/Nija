@@ -234,7 +234,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
               const Spacer(),
               IconButton(
                 key: const ValueKey('note-favorite-button'),
-                tooltip: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
+                tooltip: _isFavorite
+                    ? AppStrings.removeFromFavorites
+                    : AppStrings.addToFavorites,
                 icon: Icon(
                   _isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
                   color: _isFavorite ? const Color(0xFFF59E0B) : colorScheme.onSurfaceVariant,
@@ -246,7 +248,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 },
               ),
               IconButton(
-                tooltip: 'Collapse',
+                tooltip: AppStrings.collapse,
                 icon: Icon(
                   Icons.keyboard_arrow_up,
                   size: 20,
@@ -274,7 +276,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                     height: 1.2,
                   ),
                   decoration: InputDecoration(
-                    hintText: 'Title',
+                    hintText: AppStrings.titleLabel,
                     hintStyle: TextStyle(
                       color: colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
                       fontSize: 22,
@@ -297,7 +299,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 IconButton(
                   key: const ValueKey('note-title-clear-button'),
                   icon: Icon(Icons.cancel, size: 20, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7)),
-                  tooltip: 'Clear title',
+                  tooltip: AppStrings.clearTitle,
                   onPressed: () {
                     _titleController.clear();
                     setState(() {});
@@ -429,12 +431,12 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                       ),
                     ),
                     IconButton(
-                      tooltip: 'Undo',
+                      tooltip: AppStrings.undo,
                       icon: const Icon(Icons.undo, size: 20),
                       onPressed: () => _quillController.undo(),
                     ),
                     IconButton(
-                      tooltip: 'Redo',
+                      tooltip: AppStrings.redo,
                       icon: const Icon(Icons.redo, size: 20),
                       onPressed: () => _quillController.redo(),
                     ),
@@ -451,7 +453,13 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                           borderRadius: BorderRadius.circular(18),
                         ),
                       ),
-                      child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                      child: Text(
+                        AppStrings.save,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -810,7 +818,7 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
           if (_isRecoveryNote && _revealed)
             IconButton(
               icon: const Icon(Icons.visibility_off_outlined),
-              tooltip: 'Hide phrase',
+              tooltip: AppStrings.hidePhrase,
               onPressed: () => setState(() => _revealed = false),
             ),
           if (widget.onShareMenu != null)
@@ -927,7 +935,7 @@ class _NoteViewScreenState extends State<NoteViewScreen> {
                                 Icons.visibility_outlined,
                                 size: 18,
                               ),
-                              label: const Text('Reveal Recovery Phrase'),
+                              label: Text(AppStrings.revealRecoveryPhrase),
                             ),
                           ],
                         ),

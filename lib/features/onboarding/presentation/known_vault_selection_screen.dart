@@ -235,7 +235,7 @@ class _KnownVaultHeader extends StatelessWidget {
           ),
           IconButton(
             key: const ValueKey('known-vault-theme-toggle'),
-            tooltip: 'Change theme',
+            tooltip: AppStrings.changeTheme,
             onPressed: onThemeModeChanged == null
                 ? null
                 : () => onThemeModeChanged!(

@@ -24,11 +24,19 @@
     return new Promise(function (resolve, reject) {
       var txn = db.transaction(storeName, 'readonly');
       var request = txn.objectStore(storeName).get(key);
+      var settled = false;
+      txn.oncomplete = function () { db.close(); };
+      txn.onabort = function () { db.close(); };
       request.onsuccess = function () {
+        if (settled) return;
+        settled = true;
         var value = request.result;
         resolve(typeof value === 'string' && value.length > 0 ? value : null);
       };
       request.onerror = function () {
+        if (settled) return;
+        settled = true;
+        db.close();
         reject(request.error || new Error('indexeddb_read_failed'));
       };
     });
@@ -39,10 +47,18 @@
     return new Promise(function (resolve, reject) {
       var txn = db.transaction(storeName, 'readwrite');
       var request = txn.objectStore(storeName).put(value, key);
+      var settled = false;
+      txn.oncomplete = function () { db.close(); };
+      txn.onabort = function () { db.close(); };
       request.onsuccess = function () {
+        if (settled) return;
+        settled = true;
         resolve(true);
       };
       request.onerror = function () {
+        if (settled) return;
+        settled = true;
+        db.close();
         reject(request.error || new Error('indexeddb_write_failed'));
       };
     });
@@ -53,10 +69,18 @@
     return new Promise(function (resolve, reject) {
       var txn = db.transaction(storeName, 'readwrite');
       var request = txn.objectStore(storeName).delete(key);
+      var settled = false;
+      txn.oncomplete = function () { db.close(); };
+      txn.onabort = function () { db.close(); };
       request.onsuccess = function () {
+        if (settled) return;
+        settled = true;
         resolve(true);
       };
       request.onerror = function () {
+        if (settled) return;
+        settled = true;
+        db.close();
         reject(request.error || new Error('indexeddb_delete_failed'));
       };
     });
@@ -105,12 +129,35 @@
         }
         var reader = new FileReader();
         reader.onload = function () {
+          var buf = reader.result;
+          if (buf instanceof ArrayBuffer) {
+            var bytes = new Uint8Array(buf);
+            if (
+              bytes.length >= 6 &&
+              bytes[0] === 0x4E &&
+              bytes[1] === 0x49 &&
+              bytes[2] === 0x4A &&
+              bytes[3] === 0x41 &&
+              bytes[4] === 0x02 &&
+              bytes[5] === 0x00
+            ) {
+              var binary = '';
+              var chunk = 0x8000;
+              for (var i = 0; i < bytes.length; i += chunk) {
+                binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+              }
+              finish({ name: file.name, content: '__nija_v2_b64__:' + btoa(binary) });
+              return;
+            }
+            finish({ name: file.name, content: new TextDecoder('utf-8').decode(bytes) });
+            return;
+          }
           finish({ name: file.name, content: String(reader.result || '') });
         };
         reader.onerror = function () {
           finish(null);
         };
-        reader.readAsText(file);
+        reader.readAsArrayBuffer(file);
       });
       input.addEventListener('cancel', function () {
         finish(null);

@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import '../../../core/security/secure_clipboard.dart';
 import '../../../core/config/vault_limits.dart';
 import '../../../core/localization/app_strings.dart';
 import '../../../domain/models/vault_folder.dart';
@@ -521,7 +521,11 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
     final categoryIcon = _iconForItemType(_type, widget.customTypeDefinitions);
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.initialItem == null ? 'New $_type' : 'Edit item'),
+        title: Text(
+          widget.initialItem == null
+              ? AppStrings.newItemOfType(_type)
+              : AppStrings.editItem,
+        ),
         leading: TextButton(
           onPressed: () => Navigator.of(context).maybePop(),
           style: TextButton.styleFrom(
@@ -529,7 +533,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          child: const Text('Cancel'),
+          child: Text(AppStrings.cancel),
         ),
         leadingWidth: 86,
         actions: [const SizedBox.shrink()],
@@ -611,8 +615,8 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                     _syncControllers();
                                   });
                                 },
-                                decoration: const InputDecoration(
-                                  labelText: 'Category',
+                                decoration: InputDecoration(
+                                  labelText: AppStrings.categoryLabel,
                                 ),
                               ),
                               const SizedBox(height: 10),
@@ -624,12 +628,16 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                     key: const ValueKey('item-folder-selector'),
                                     child: DropdownButtonFormField<String>(
                                       key: ValueKey('item-folder-dropdown-$_selectedFolderId'),
+                                      isExpanded: true,
                                       initialValue: _selectedFolderId,
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.normal,
-                                        color: colorScheme.onSurface,
-                                      ),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.normal,
+                                            color: colorScheme.onSurface,
+                                          ),
                                       items: _folderDropdownItems,
                                       onChanged: (value) async {
                                         if (value == null) return;
@@ -643,7 +651,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                         });
                                       },
                                       decoration: InputDecoration(
-                                        labelText: 'Folder',
+                                        labelText: AppStrings.folderLabel,
                                         prefixIcon: Icon(
                                           _selectedFolderId == 'default'
                                               ? Icons.folder_special
@@ -660,7 +668,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                 const SizedBox(width: 8),
                                 IconButton.outlined(
                                   key: const ValueKey('item-create-folder-button'),
-                                  tooltip: 'Create new folder',
+                                  tooltip: AppStrings.createNewFolder,
                                   icon: const Icon(Icons.create_new_folder_outlined, size: 20),
                                   onPressed: _promptCreateFolder,
                                 ),
@@ -784,11 +792,10 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                                   borderRadius:
                                                       BorderRadius.circular(12),
                                                   onTap: () async {
-                                                    await Clipboard.setData(
-                                                      ClipboardData(
-                                                        text: controller.text,
-                                                      ),
-                                                    );
+                                                    await SecureClipboard.shared
+                                                        .copySensitive(
+                                                          controller.text,
+                                                        );
                                                   },
                                                   child: const Padding(
                                                     padding: EdgeInsets.all(4),
@@ -821,7 +828,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                                 style: FilledButton.styleFrom(
                                   backgroundColor: const Color(0xFF10B981),
                                 ),
-                                child: const Text('Save'),
+                                child: Text(AppStrings.save),
                               ),
                             ),
                           ],
@@ -861,10 +868,10 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                 controller: _tagDraftController,
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => _commitTagDraft(),
-                decoration: const InputDecoration(
-                  labelText: 'Tags',
-                  hintText: 'Add tag',
-                  helperText: 'Press add after each tag',
+                decoration: InputDecoration(
+                  labelText: AppStrings.tagsLabel,
+                  hintText: AppStrings.addTag,
+                  helperText: AppStrings.pressAddAfterEachTag,
                 ),
               ),
             ),
@@ -874,7 +881,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
               child: IconButton.filledTonal(
                 onPressed: _commitTagDraft,
                 icon: const Icon(Icons.add),
-                tooltip: 'Add tag',
+                tooltip: AppStrings.addTag,
               ),
             ),
           ],
@@ -1007,7 +1014,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                       _attachmentErrorText = null;
                     }),
                     icon: const Icon(Icons.close),
-                    tooltip: 'Remove document',
+                    tooltip: AppStrings.removeDocument,
                   ),
                 ),
               );
@@ -1229,7 +1236,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                 key: const ValueKey('identity-add-photo'),
                 onPressed: _pickIdPhoto,
                 icon: const Icon(Icons.add_photo_alternate_outlined),
-                label: const Text('Add photo'),
+                label: Text(AppStrings.addPhoto),
               ),
             ],
           ),
@@ -1264,7 +1271,7 @@ class _AddVaultItemScreenState extends State<AddVaultItemScreen> {
                       onPressed: () =>
                           setState(() => _idPhotos.removeAt(index)),
                       icon: const Icon(Icons.delete_outline),
-                      tooltip: 'Remove photo',
+                      tooltip: AppStrings.removePhoto,
                     ),
                   ],
                 ),
@@ -1368,7 +1375,7 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
     }).toList();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Item'),
+        title: Text(AppStrings.newItem),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).maybePop(),
@@ -1377,7 +1384,7 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: const Text('Cancel'),
+            child: Text(AppStrings.cancel),
           ),
         ],
       ),
@@ -1396,8 +1403,8 @@ class _NewItemCategoryScreenState extends State<NewItemCategoryScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
                     child: TextField(
-                      decoration: const InputDecoration(
-                        hintText: 'Search category...',
+                      decoration: InputDecoration(
+                        hintText: AppStrings.searchCategoryHint,
                         prefixIcon: Icon(Icons.search),
                       ),
                       onChanged: (value) => setState(() => _query = value),
@@ -1626,14 +1633,14 @@ List<_CategoryOption> _buildCategoryOptions(
   final note = _CategoryOption(
     kind: 'note',
     type: 'Notes',
-    subtitle: 'Secure notes and memos',
+    subtitle: AppStrings.secureNotesAndMemos,
     icon: Icons.note_add_outlined,
     color: const Color(0xFFFBBF24),
   );
   final documents = _CategoryOption(
     kind: 'document',
     type: 'Documents',
-    subtitle: 'Encrypted files up to 25 MB',
+    subtitle: AppStrings.encryptedFilesUpTo25Mb,
     icon: Icons.description_outlined,
     color: const Color(0xFFFB7185),
   );
@@ -1653,7 +1660,7 @@ List<_CategoryOption> _buildCategoryOptions(
         (definition) => _CategoryOption(
           kind: 'item',
           type: definition['name']?.toString() ?? 'Custom',
-          subtitle: 'Create your own template',
+          subtitle: AppStrings.createYourOwnTemplate,
           icon: _iconForCustomTemplateKey(definition['iconKey']?.toString()),
           color: _colorForCustomTemplateColorKey(
             definition['colorKey']?.toString(),

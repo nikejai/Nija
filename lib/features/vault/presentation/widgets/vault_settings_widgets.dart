@@ -109,6 +109,7 @@ class _RotateMasterPasswordDialogState
   bool get _canSubmit {
     return _currentController.text.trim().isNotEmpty &&
         _nextController.text.trim().isNotEmpty &&
+        VaultValidators.isStrongEnoughMasterPassword(_nextController.text) &&
         _nextController.text == _confirmController.text;
   }
 
@@ -116,15 +117,15 @@ class _RotateMasterPasswordDialogState
     if (!_canSubmit) return;
     Navigator.of(
       context,
-    ).pop((_currentController.text.trim(), _nextController.text.trim()));
+    ).pop((_currentController.text, _nextController.text));
   }
 
   @override
   Widget build(BuildContext context) {
-    final nextPassword = _nextController.text.trim();
+    final nextPassword = _nextController.text;
     final canSubmit = _canSubmit;
     return AlertDialog(
-      title: const Text('Rotate master password'),
+      title: Text(AppStrings.rotateMasterPassword),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -133,8 +134,8 @@ class _RotateMasterPasswordDialogState
               controller: _currentController,
               obscureText: true,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Current master password',
+              decoration: InputDecoration(
+                labelText: AppStrings.currentMasterPassword,
               ),
             ),
             const SizedBox(height: 10),
@@ -142,8 +143,8 @@ class _RotateMasterPasswordDialogState
               controller: _nextController,
               obscureText: true,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'New master password',
+              decoration: InputDecoration(
+                labelText: AppStrings.newMasterPassword,
               ),
             ),
             const SizedBox(height: 10),
@@ -155,7 +156,7 @@ class _RotateMasterPasswordDialogState
               onChanged: (_) => setState(() {}),
               onSubmitted: (_) => _submit(),
               decoration: InputDecoration(
-                labelText: 'Confirm new master password',
+                labelText: AppStrings.confirmNewMasterPassword,
                 helperText: _confirmController.text.isEmpty || canSubmit
                     ? null
                     : 'Passwords do not match',
@@ -167,11 +168,11 @@ class _RotateMasterPasswordDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(AppStrings.cancel),
         ),
         ElevatedButton(
           onPressed: canSubmit ? _submit : null,
-          child: const Text('Rotate'),
+          child: Text(AppStrings.rotate),
         ),
       ],
     );
@@ -217,7 +218,7 @@ class _RotateRecoveryPhraseDialogState
   Widget build(BuildContext context) {
     final canSubmit = _canSubmit;
     return AlertDialog(
-      title: const Text('Rotate recovery phrase'),
+      title: Text(AppStrings.rotateRecoveryPhrase),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -226,8 +227,8 @@ class _RotateRecoveryPhraseDialogState
               controller: _currentController,
               obscureText: true,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Current recovery phrase',
+              decoration: InputDecoration(
+                labelText: AppStrings.currentRecoveryPhrase,
               ),
             ),
             const SizedBox(height: 10),
@@ -235,8 +236,8 @@ class _RotateRecoveryPhraseDialogState
               controller: _nextController,
               obscureText: true,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'New recovery phrase',
+              decoration: InputDecoration(
+                labelText: AppStrings.newRecoveryPhrase,
               ),
             ),
             const SizedBox(height: 10),
@@ -246,7 +247,7 @@ class _RotateRecoveryPhraseDialogState
               onChanged: (_) => setState(() {}),
               onSubmitted: (_) => _submit(),
               decoration: InputDecoration(
-                labelText: 'Confirm recovery phrase',
+                labelText: AppStrings.confirmRecoveryPhrase,
                 helperText: _confirmController.text.isEmpty || canSubmit
                     ? null
                     : 'Recovery phrases do not match',
@@ -258,11 +259,11 @@ class _RotateRecoveryPhraseDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(AppStrings.cancel),
         ),
         ElevatedButton(
           onPressed: canSubmit ? _submit : null,
-          child: const Text('Rotate'),
+          child: Text(AppStrings.rotate),
         ),
       ],
     );
@@ -352,7 +353,6 @@ class _SettingsRow extends StatelessWidget {
     this.trailing,
     this.onTap,
     this.iconColor,
-    this.danger = false,
   });
 
   final IconData icon;
@@ -363,15 +363,12 @@ class _SettingsRow extends StatelessWidget {
   final Widget? trailing;
   final VoidCallback? onTap;
   final Color? iconColor;
-  final bool danger;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final effectiveIconColor = iconColor ?? theme.colorScheme.primary;
-    final effectiveTitleColor = danger
-        ? theme.colorScheme.error
-        : theme.colorScheme.onSurface;
+    final effectiveTitleColor = theme.colorScheme.onSurface;
 
     return Material(
       color: Colors.transparent,
@@ -680,7 +677,7 @@ class _SecurityEncryptionSheet extends StatelessWidget {
                       key: const ValueKey('security-encryption-sheet'),
                       children: [
                         _SecurityTextSection(
-                          title: 'How vault unlock works',
+                          title: AppStrings.howVaultUnlockWorks,
                           body:
                               'Your master password is used only to derive an unlock key. Argon2id derives password and recovery keys, then the derived key unwraps the random vault key. Vault contents are encrypted with authenticated encryption. Nija does not store your master password or raw vault key, and cannot recover a lost recovery phrase.',
                         ),
@@ -696,7 +693,7 @@ class _SecurityEncryptionSheet extends StatelessWidget {
                         else
                           const SizedBox.shrink(),
                         _SecurityRowsSection(
-                          title: 'Vault format',
+                          title: AppStrings.vaultFormat,
                           rows: model.formatRows,
                         ),
                         const SizedBox(height: 12),
@@ -1084,7 +1081,7 @@ class _AutoLockSecondsSheetState extends State<_AutoLockSecondsSheet> {
                 ),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(_roundedSeconds),
-                  child: const Text('Done'),
+                  child: Text(AppStrings.done),
                 ),
               ],
             ),
@@ -1195,7 +1192,7 @@ class _RenameVaultDialogState extends State<_RenameVaultDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Rename vault'),
+      title: Text(AppStrings.renameVault),
       content: Form(
         key: _formKey,
         child: TextFormField(
@@ -1214,9 +1211,9 @@ class _RenameVaultDialogState extends State<_RenameVaultDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(AppStrings.cancel),
         ),
-        FilledButton(onPressed: _submit, child: const Text('Rename')),
+        FilledButton(onPressed: _submit, child: Text(AppStrings.rename)),
       ],
     );
   }

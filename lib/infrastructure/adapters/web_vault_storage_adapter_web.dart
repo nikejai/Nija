@@ -64,4 +64,14 @@ class WebVaultStorageAdapter implements VaultStorageAdapter {
     );
     _removeLegacyLocalStorage(filePath);
   }
+
+  Future<void> delete({required String filePath}) async {
+    await nijaDeleteIndexedText(
+      dbName: _dbName,
+      storeName: _storeName,
+      key: filePath,
+      version: _dbVersion,
+    );
+    _removeLegacyLocalStorage(filePath);
+  }
 }

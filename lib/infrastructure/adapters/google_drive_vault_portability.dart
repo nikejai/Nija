@@ -7,6 +7,7 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 
 import '../../core/config/google_oauth_config.dart';
+import 'streaming_vault_container.dart';
 import 'vault_portability_model.dart';
 
 const _appDataFolderId = 'appDataFolder';
@@ -79,6 +80,7 @@ class GoogleDriveVaultPortability {
     required String suggestedName,
     required String content,
     bool forceAccountChooser = false,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) async {
     final session = await _openDriveSession(
       forceAccountChooser: forceAccountChooser,
@@ -92,6 +94,7 @@ class GoogleDriveVaultPortability {
         vaultId: vaultId,
         suggestedName: suggestedName,
         content: content,
+        onProgress: onProgress,
       );
       final legacyId = await _findLegacyDriveFileIdForVault(
         driveApi: driveApi,
@@ -119,6 +122,7 @@ class GoogleDriveVaultPortability {
     String mimeType = 'application/octet-stream',
     Map<String, String>? extraProperties,
     bool forceAccountChooser = false,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) async {
     final session = await _openDriveSession(
       forceAccountChooser: forceAccountChooser,
@@ -127,7 +131,16 @@ class GoogleDriveVaultPortability {
 
     try {
       final driveApi = session.driveApi;
-      final media = drive.Media(stream, lengthBytes);
+      Stream<List<int>> uploadStream = stream;
+      if (onProgress != null && lengthBytes > 0) {
+        var bytesSent = 0;
+        uploadStream = stream.map((chunk) {
+          bytesSent += chunk.length;
+          onProgress(bytesSent, lengthBytes);
+          return chunk;
+        });
+      }
+      final media = drive.Media(uploadStream, lengthBytes);
       final existingId = await _findDriveFileIdInAppDataForVault(
         driveApi: driveApi,
         vaultId: vaultId,
@@ -396,8 +409,10 @@ class GoogleDriveVaultPortability {
     required String vaultId,
     required String suggestedName,
     required String content,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) async {
     final bytes = utf8.encode(content);
+    onProgress?.call(bytes.length ~/ 2, bytes.length);
     final media = drive.Media(Stream<List<int>>.value(bytes), bytes.length);
     final existingId = await _findDriveFileIdInAppDataForVault(
       driveApi: driveApi,
@@ -411,11 +426,13 @@ class GoogleDriveVaultPortability {
 
     if (existingId != null) {
       await driveApi.files.update(meta, existingId, uploadMedia: media);
+      onProgress?.call(bytes.length, bytes.length);
       return;
     }
 
     meta.parents = <String>[_appDataFolderId];
     await driveApi.files.create(meta, uploadMedia: media);
+    onProgress?.call(bytes.length, bytes.length);
   }
 
   Future<CloudVaultBackupFile?> _findCloudBackupForVault({
@@ -457,6 +474,8 @@ class GoogleDriveVaultPortability {
           continue;
         }
         final revision = int.tryParse(file.appProperties?['revision'] ?? '') ?? 0;
+        final versionId = file.appProperties?['vaultVersionId']?.trim() ?? '';
+        final updatedAt = file.appProperties?['updatedAt']?.trim() ?? '';
         final backup = CloudVaultBackupFile(
           storageId: 'gdrive_$driveFileId.nija',
           label: file.name ?? 'Google Drive backup',
@@ -464,6 +483,8 @@ class GoogleDriveVaultPortability {
           fileName: file.name ?? '',
           modifiedAt: file.modifiedTime?.toLocal(),
           revision: revision,
+          versionId: versionId,
+          updatedAt: updatedAt,
           driveFileId: driveFileId,
           listedVaultId: propertyVaultId,
         );
@@ -631,7 +652,11 @@ class GoogleDriveVaultPortability {
       await for (final chunk in media.stream.timeout(_driveDownloadTimeout)) {
         bytes.addAll(chunk);
       }
-      return utf8.decode(bytes);
+      final rawBytes = Uint8List.fromList(bytes);
+      if (StreamingVaultContainer.isContainerBytes(rawBytes)) {
+        return StreamingVaultContainer.containerBytesToJsonSnapshot(rawBytes);
+      }
+      return utf8.decode(rawBytes);
     } catch (error) {
       debugLogCloudError('GoogleDriveDownload(${file.name ?? id})', error);
       return null;

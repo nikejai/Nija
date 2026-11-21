@@ -13,6 +13,7 @@ import 'package:nija/features/vault/presentation/widgets/vault_entry_list.dart';
 import 'package:nija/infrastructure/adapters/secret_share_model.dart';
 import 'package:nija/infrastructure/adapters/secret_share_portability_base.dart';
 import 'package:nija/infrastructure/adapters/vault_portability_model.dart';
+import 'package:nija/infrastructure/services/network_connectivity_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -5205,6 +5206,600 @@ void main() {
         findsNothing,
       );
     },
+  );
+
+  testWidgets(
+    'local backup section is named Local Backup and supports manual backup and time setting',
+    (tester) async {
+      final uniqueVaultId = 'vault-local-${DateTime.now().microsecondsSinceEpoch}';
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'nija_pref_automated_backup_enabled_v1': true,
+        'nija_pref_automated_backup_hour_v1': 2,
+        'nija_pref_automated_backup_minute_v1': 30,
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: VaultAppShell(
+            initialItems: const [],
+            initialNotes: const [],
+            initialCustomTypeDefinitions: const [],
+            recoveryWords: const [
+              'anchor',
+              'apple',
+              'arrow',
+              'atlas',
+              'beacon',
+              'breeze',
+              'canyon',
+              'cedar',
+              'cobalt',
+              'ember',
+              'harbor',
+              'willow',
+            ],
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            biometricEnabled: false,
+            onBiometricChanged: (_) {},
+            onPersistVaultData: ({
+              required items,
+              required notes,
+              required customTypeDefinitions,
+            }) async {},
+            onRotateMasterPassword: ({
+              required currentPassword,
+              required newPassword,
+            }) async {},
+            onRotateRecoveryPhrase: ({
+              required currentRecoveryPhrase,
+              required newRecoveryPhrase,
+            }) async {},
+            onExportVault: () async {},
+            onImportVault: () async {},
+            onBackupToCloud: () async {},
+            onRestoreFromCloud: () async {},
+            onReadCloudBackupAccount: () async => null,
+            onChangeCloudBackupAccount: () async => false,
+            onLockNow: () {},
+            activeVaultName: 'Test Vault',
+            activeVaultVersionId: uniqueVaultId,
+            expandedVaultStorageEntitled: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+
+      final localBackupSection = find.text('Local Backup');
+      await tester.scrollUntilVisible(localBackupSection, 200);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Local Backup'), findsOneWidget);
+      expect(find.text('Daily automated backup at 2:30 AM'), findsOneWidget);
+      expect(find.text('Backup time'), findsOneWidget);
+      expect(find.text('2:30 AM'), findsOneWidget);
+      final backupNowButton = find.byKey(const ValueKey('settings-local-backup-now'));
+      await tester.scrollUntilVisible(backupNowButton, 200);
+      await tester.pumpAndSettle();
+      expect(backupNowButton, findsOneWidget);
+
+      expect(find.text('0/2'), findsOneWidget);
+
+      // Tap Back up now under Local Backup
+      await tester.tap(backupNowButton);
+      await pumpUntilFound(tester, find.text('1/2'));
+
+      expect(find.text('1/2'), findsOneWidget);
+      expect(find.textContaining('Local backup created'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'cloud backup with Wi-Fi only enabled blocks backup when not connected to Wi-Fi',
+    (tester) async {
+      NetworkConnectivityService.testWifiOverride = false;
+      var backupCalls = 0;
+
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'nija_pref_cloud_backup_enabled_v1': true,
+        'nija_pref_cloud_backup_wifi_only_v1': true,
+        'nija_pref_cloud_backup_revision_v1': 1,
+        'nija_pref_cloud_backup_version_id_v1': 'v-1234',
+        'nija_pref_cloud_backup_updated_at_v1': '2026-11-15T10:00:00Z',
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: VaultAppShell(
+            initialItems: const [],
+            initialNotes: const [],
+            initialCustomTypeDefinitions: const [],
+            recoveryWords: const [
+              'anchor',
+              'apple',
+              'arrow',
+              'atlas',
+              'beacon',
+              'breeze',
+              'canyon',
+              'cedar',
+              'cobalt',
+              'ember',
+              'harbor',
+              'willow',
+            ],
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            biometricEnabled: false,
+            onBiometricChanged: (_) {},
+            onPersistVaultData: ({
+              required items,
+              required notes,
+              required customTypeDefinitions,
+            }) async {},
+            onRotateMasterPassword: ({
+              required currentPassword,
+              required newPassword,
+            }) async {},
+            onRotateRecoveryPhrase: ({
+              required currentRecoveryPhrase,
+              required newRecoveryPhrase,
+            }) async {},
+            onExportVault: () async {},
+            onImportVault: () async {},
+            onBackupToCloud: () async => backupCalls++,
+            onRestoreFromCloud: () async {},
+            onReadCloudBackupAccount: () async => 'user@example.com',
+            onChangeCloudBackupAccount: () async => false,
+            onLockNow: () {},
+            activeVaultName: 'Test Vault',
+            activeVaultVersionId: 'vault-wifi-test',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+
+      final cloudBackupNow = find.byKey(const ValueKey('settings-cloud-backup-now'));
+      await tester.scrollUntilVisible(cloudBackupNow, 200);
+      await tester.pumpAndSettle();
+
+      // Tap backup now while Wi-Fi is disconnected
+      await tester.tap(cloudBackupNow);
+      await tester.pumpAndSettle();
+
+      expect(backupCalls, 0);
+      expect(
+        find.textContaining('"Back up over Wi-Fi only" is enabled, but Wi-Fi is not connected'),
+        findsOneWidget,
+      );
+
+      // Now simulate connecting to Wi-Fi
+      NetworkConnectivityService.testWifiOverride = true;
+      await tester.tap(cloudBackupNow);
+      await tester.pumpAndSettle();
+
+      expect(backupCalls, 1);
+      NetworkConnectivityService.testWifiOverride = null;
+    },
+  );
+
+  testWidgets('pending debounced explorer writes flush before locking vault', (
+    tester,
+  ) async {
+    var persistCalls = 0;
+    List<Map<String, dynamic>>? persistedFolders;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          initialItems: const [
+            {'id': 'item-1', 'type': 'Login', 'title': 'Bank'},
+          ],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          initialFolders: const [
+            {
+              'id': 'folder-1',
+              'name': 'Finance',
+              'createdAt': '2026-01-01T00:00:00Z',
+              'updatedAt': '2026-01-01T00:00:00Z',
+            },
+          ],
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData: ({
+            required items,
+            required notes,
+            required customTypeDefinitions,
+          }) async {
+            persistCalls++;
+          },
+          onSyncFolders: (folders) {
+            persistedFolders = folders;
+          },
+          onRotateMasterPassword: ({
+            required currentPassword,
+            required newPassword,
+          }) async {},
+          onRotateRecoveryPhrase: ({
+            required currentRecoveryPhrase,
+            required newRecoveryPhrase,
+          }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Folders'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(Card, 'Finance'),
+        matching: find.byIcon(Icons.more_vert),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rename'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Finance'),
+      'Renamed Finance',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+
+    // Immediately trigger lock before the 400ms debounce fires.
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Lock vault'));
+    await tester.pumpAndSettle();
+
+    expect(persistCalls, 1);
+    expect(persistedFolders?.single['name'], 'Renamed Finance');
+  });
+
+  testWidgets('local snapshot restore prefers onRestoreVaultFromFile callback', (
+    tester,
+  ) async {
+    final uniqueVaultId = 'vault-restore-${DateTime.now().microsecondsSinceEpoch}';
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    String? restoredPath;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          activeVaultId: uniqueVaultId,
+          activeVaultName: 'Restore Vault',
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData: ({
+            required items,
+            required notes,
+            required customTypeDefinitions,
+          }) async {},
+          onRotateMasterPassword: ({
+            required currentPassword,
+            required newPassword,
+          }) async {},
+          onRotateRecoveryPhrase: ({
+            required currentRecoveryPhrase,
+            required newRecoveryPhrase,
+          }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+          onRestoreVaultFromFile: (path) async {
+            restoredPath = path;
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pumpAndSettle();
+    final backupNowButton = find.byKey(const ValueKey('settings-local-backup-now'));
+    await tester.scrollUntilVisible(backupNowButton, 200);
+    await tester.ensureVisible(backupNowButton);
+    await tester.pumpAndSettle();
+    await tester.tap(backupNowButton);
+    await pumpUntilFound(tester, find.text('1/2'));
+
+    final localRow = find.byKey(const ValueKey('settings-local-backup-row'));
+    await tester.ensureVisible(localRow);
+    await tester.pumpAndSettle();
+    await tester.tap(localRow);
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Restore'),
+      ).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore Snapshot'));
+    await tester.pumpAndSettle();
+
+    expect(restoredPath, isNotNull);
+    expect(find.text('Snapshot restored successfully.'), findsOneWidget);
+  });
+
+  testWidgets('shell does not seed recovery note when seedRecoveryNoteIfEmpty is false', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          seedRecoveryNoteIfEmpty: false,
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData: ({
+            required items,
+            required notes,
+            required customTypeDefinitions,
+          }) async {},
+          onRotateMasterPassword: ({
+            required currentPassword,
+            required newPassword,
+          }) async {},
+          onRotateRecoveryPhrase: ({
+            required currentRecoveryPhrase,
+            required newRecoveryPhrase,
+          }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Favorites').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Recovery Phrase'), findsNothing);
+  });
+
+  testWidgets('free tier gates automated backup behind paid wall and caps storage at 151 MB', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'nija_pref_automated_backup_enabled_v1': true,
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VaultAppShell(
+          expandedVaultStorageEntitled: false,
+          initialItems: const [],
+          initialNotes: const [],
+          initialCustomTypeDefinitions: const [],
+          recoveryWords: const [
+            'anchor',
+            'apple',
+            'arrow',
+            'atlas',
+            'beacon',
+            'breeze',
+            'canyon',
+            'cedar',
+            'cobalt',
+            'ember',
+            'harbor',
+            'willow',
+          ],
+          languageMode: 'en',
+          onLanguageModeChanged: (_) {},
+          biometricEnabled: false,
+          onBiometricChanged: (_) {},
+          onPersistVaultData: ({
+            required items,
+            required notes,
+            required customTypeDefinitions,
+          }) async {},
+          onRotateMasterPassword: ({
+            required currentPassword,
+            required newPassword,
+          }) async {},
+          onRotateRecoveryPhrase: ({
+            required currentRecoveryPhrase,
+            required newRecoveryPhrase,
+          }) async {},
+          onExportVault: () async {},
+          onImportVault: () async {},
+          onBackupToCloud: () async {},
+          onRestoreFromCloud: () async {},
+          onReadCloudBackupAccount: () async => null,
+          onChangeCloudBackupAccount: () async => false,
+          onLockNow: () {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.settings_outlined));
+    await tester.pumpAndSettle();
+
+    final automatedRow = find.byKey(
+      const ValueKey('settings-automated-backup-master-switch'),
+    );
+    await tester.scrollUntilVisible(automatedRow, 200);
+    await tester.pumpAndSettle();
+    expect(find.text('Available in paid version'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-automated-backup-time-row')),
+      findsNothing,
+    );
+
+    final storageRow = find.byKey(const ValueKey('settings-vault-storage-row'));
+    await tester.scrollUntilVisible(storageRow, 200);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: storageRow,
+        matching: find.textContaining('151 MB'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'settings shows Upgrade to Pro and Restore purchase on Android free tier',
+    (tester) async {
+      var purchaseCalls = 0;
+      var restoreCalls = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: VaultAppShell(
+            activeVaultName: 'Personal',
+            recoveryWords: const ['alpha', 'beta', 'gamma', 'delta'],
+            initialItems: const <Map<String, dynamic>>[],
+            initialNotes: const <Map<String, dynamic>>[],
+            initialCustomTypeDefinitions: const <Map<String, dynamic>>[],
+            languageMode: 'en',
+            onLanguageModeChanged: (_) {},
+            biometricEnabled: false,
+            onBiometricChanged: (_) async {},
+            onPersistVaultData: ({
+              required items,
+              required notes,
+              required customTypeDefinitions,
+              folders = const <Map<String, dynamic>>[],
+              int? vaultSizeBytes,
+            }) async {},
+            onRotateMasterPassword: ({
+              required currentPassword,
+              required newPassword,
+            }) async {},
+            onRotateRecoveryPhrase: ({
+              required currentRecoveryPhrase,
+              required newRecoveryPhrase,
+            }) async {},
+            onExportVault: () async => true,
+            onImportVault: () async => true,
+            onBackupToCloud: () async => true,
+            onRestoreFromCloud: () async => true,
+            onReadCloudBackupAccount: () async => null,
+            onChangeCloudBackupAccount: () async => false,
+            onLockNow: () {},
+            expandedVaultStorageEntitled: false,
+            canPurchaseExpandedVaultStorage: true,
+            onPurchaseExpandedVaultStorage: () async {
+              purchaseCalls++;
+              return true;
+            },
+            onRestorePurchases: () async {
+              restoreCalls++;
+              return true;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+
+      final upgradeRow = find.byKey(const ValueKey('settings-upgrade-pro-row'));
+      await tester.scrollUntilVisible(upgradeRow, 200);
+      await tester.pumpAndSettle();
+      expect(upgradeRow, findsOneWidget);
+      await tester.tap(upgradeRow);
+      await tester.pumpAndSettle();
+      expect(purchaseCalls, 1);
+
+      final restoreRow = find.byKey(
+        const ValueKey('settings-restore-purchase-row'),
+      );
+      await tester.scrollUntilVisible(restoreRow, 200);
+      await tester.pumpAndSettle();
+      expect(restoreRow, findsOneWidget);
+      await tester.tap(restoreRow);
+      await tester.pumpAndSettle();
+      expect(restoreCalls, 1);
+      expect(
+        find.text('Pro upgrade restored from Google Play.'),
+        findsOneWidget,
+      );
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
   );
 }
 

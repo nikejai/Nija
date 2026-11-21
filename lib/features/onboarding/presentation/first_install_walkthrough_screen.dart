@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import '../../../core/localization/app_strings.dart';
 
 import '../../../app/widgets/nija_brand_lockup.dart';
 import 'onboarding_scaffold.dart';
@@ -28,40 +29,25 @@ class _FirstInstallWalkthroughScreenState
 
   static const _pages = <_WalkthroughPageData>[
     _WalkthroughPageData(
-      icon: Icons.lock_outline,
-      title: 'Create or open a vault',
+      icon: Icons.shield_outlined,
+      badge: 'LOCAL-FIRST · ENCRYPTED',
+      title: 'Local-first & Encrypted',
       body:
-          'Start with a new private vault or open one you already saved on this device.',
+          'Your passwords, notes, and documents stay encrypted on your device — no account or cloud required.',
     ),
     _WalkthroughPageData(
       icon: Icons.key_outlined,
-      title: 'Save your recovery phrase',
+      badge: '12-WORD PHRASE',
+      title: 'Your Keys, Your Recovery',
       body:
-          'Your recovery phrase is the offline way back in if you forget the vault password.',
+          'Save your offline recovery phrase once. You stay in complete control — only you can unlock your vault.',
     ),
     _WalkthroughPageData(
-      icon: Icons.fingerprint,
-      title: 'Unlock safely',
+      icon: Icons.cloud_done_outlined,
+      badge: 'LOCAL · GOOGLE DRIVE',
+      title: 'Backup Anywhere',
       body:
-          'Use your password first, then enable biometrics for faster unlocks on trusted devices.',
-    ),
-    _WalkthroughPageData(
-      icon: Icons.inventory_2_outlined,
-      title: 'Add items and documents',
-      body:
-          'Store passwords, notes, identities, documents, and attachments in encrypted vault data.',
-    ),
-    _WalkthroughPageData(
-      icon: Icons.ios_share_outlined,
-      title: 'Share secrets securely',
-      body:
-          'Export password-protected secret files and share them over any channel without exposing the original vault.',
-    ),
-    _WalkthroughPageData(
-      icon: Icons.cloud_upload_outlined,
-      title: 'Back up and recover',
-      body:
-          'Export encrypted vault backups, use cloud backup when available, and recover with your phrase when needed.',
+          'Export portable encrypted .nija files, share password-protected secrets, or sync encrypted backups to Google Drive.',
     ),
   ];
 
@@ -120,7 +106,7 @@ class _FirstInstallWalkthroughScreenState
                 TextButton(
                   key: const ValueKey('first-install-walkthrough-skip'),
                   onPressed: _submitting ? null : () => _finish(widget.onSkip),
-                  child: const Text('Skip'),
+                  child: Text(AppStrings.skip),
                 ),
               ],
             ),
@@ -266,7 +252,26 @@ class _WalkthroughPage extends StatelessWidget {
                       color: colorScheme.primary,
                     ),
                   ),
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 18),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      data.badge,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   Text(
                     data.title,
                     textAlign: TextAlign.center,
@@ -300,11 +305,13 @@ class _WalkthroughPage extends StatelessWidget {
 class _WalkthroughPageData {
   const _WalkthroughPageData({
     required this.icon,
+    required this.badge,
     required this.title,
     required this.body,
   });
 
   final IconData icon;
+  final String badge;
   final String title;
   final String body;
 }

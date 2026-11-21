@@ -82,7 +82,7 @@ class _CustomTemplateManagerScreenState
                   key: const ValueKey('custom-template-add'),
                   onPressed: _addTemplate,
                   icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add'),
+                  label: Text(AppStrings.add),
                   style: FilledButton.styleFrom(
                     backgroundColor: colorScheme.onSurface,
                     foregroundColor: colorScheme.surface,
@@ -153,7 +153,7 @@ class _CustomTemplateManagerScreenState
                                   FilledButton.icon(
                                     onPressed: _addTemplate,
                                     icon: const Icon(Icons.add),
-                                    label: const Text('Add template'),
+                                    label: Text(AppStrings.addTemplate),
                                   ),
                                 ],
                               ),
@@ -222,7 +222,7 @@ class _CustomTemplateManagerScreenState
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           IconButton(
-                                            tooltip: 'Edit template',
+                                            tooltip: AppStrings.editTemplate,
                                             icon: const Icon(
                                               Icons.edit_outlined,
                                             ),
@@ -230,7 +230,7 @@ class _CustomTemplateManagerScreenState
                                                 _editTemplate(index),
                                           ),
                                           IconButton(
-                                            tooltip: 'Delete template',
+                                            tooltip: AppStrings.deleteTemplate,
                                             icon: const Icon(
                                               Icons.delete_outline,
                                             ),
@@ -295,7 +295,7 @@ class _CustomTemplateManagerScreenState
     final name = definition['name']?.toString() ?? 'Custom';
     final confirmed = await showVaultConfirmSheet(
       context: context,
-      title: 'Move to Trash?',
+      title: AppStrings.moveToTrashQuestion,
       message: '"$name" will be moved to trash.\nThis action can be undone.',
       confirmLabel: 'Move to Trash',
       destructive: true,

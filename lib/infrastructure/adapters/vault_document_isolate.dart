@@ -1,7 +1,5 @@
-import 'dart:convert';
-
-import 'package:cryptography/cryptography.dart';
-import 'package:flutter/foundation.dart';
+import 'vault_document_isolate_worker_stub.dart'
+    if (dart.library.io) 'vault_document_isolate_worker_io.dart' as worker;
 
 class VaultDecryptRequest {
   const VaultDecryptRequest({
@@ -29,30 +27,39 @@ Future<List<int>> decryptVaultCipherInBackground({
   required List<int> cipher,
   required List<int> key,
 }) {
-  final request = VaultDecryptRequest(
-    cipherBase64: base64Encode(cipher),
-    keyBase64: base64Encode(key),
-  );
-  return compute(_decryptVaultCipherWorker, request.toJson());
+  return worker.decryptCipherWorker(cipher: cipher, key: key);
 }
 
-Future<List<int>> _decryptVaultCipherWorker(
-  Map<String, Object?> requestJson,
-) async {
-  const nonceLength = 12;
-  const macLength = 16;
-  final request = VaultDecryptRequest.fromJson(requestJson);
-  final cipher = base64Decode(request.cipherBase64);
-  final key = base64Decode(request.keyBase64);
-  if (cipher.length < nonceLength + macLength) {
-    throw StateError('Ciphertext is too short.');
-  }
+class VaultEncryptRequest {
+  const VaultEncryptRequest({
+    required this.plainBase64,
+    required this.keyBase64,
+    required this.nonceBase64,
+  });
 
-  final algorithm = AesGcm.with256bits();
-  final nonce = cipher.sublist(0, nonceLength);
-  final macStart = cipher.length - macLength;
-  final ciphertext = cipher.sublist(nonceLength, macStart);
-  final macBytes = cipher.sublist(macStart);
-  final secretBox = SecretBox(ciphertext, nonce: nonce, mac: Mac(macBytes));
-  return algorithm.decrypt(secretBox, secretKey: SecretKey(key));
+  final String plainBase64;
+  final String keyBase64;
+  final String nonceBase64;
+
+  Map<String, Object> toJson() => <String, Object>{
+    'plainBase64': plainBase64,
+    'keyBase64': keyBase64,
+    'nonceBase64': nonceBase64,
+  };
+
+  factory VaultEncryptRequest.fromJson(Map<String, Object?> json) {
+    return VaultEncryptRequest(
+      plainBase64: json['plainBase64']?.toString() ?? '',
+      keyBase64: json['keyBase64']?.toString() ?? '',
+      nonceBase64: json['nonceBase64']?.toString() ?? '',
+    );
+  }
+}
+
+Future<List<int>> encryptVaultCipherInBackground({
+  required List<int> plain,
+  required List<int> key,
+  required List<int> nonce,
+}) {
+  return worker.encryptCipherWorker(plain: plain, key: key, nonce: nonce);
 }

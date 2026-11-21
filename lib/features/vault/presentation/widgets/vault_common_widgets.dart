@@ -680,7 +680,7 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
                         alignment: Alignment.centerLeft,
                         child: TextButton(
                           onPressed: _reset,
-                          child: const Text('Reset'),
+                          child: Text(AppStrings.reset),
                         ),
                       ),
                     ),
@@ -696,7 +696,7 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
                         alignment: Alignment.centerRight,
                         child: TextButton(
                           onPressed: _apply,
-                          child: const Text('Done'),
+                          child: Text(AppStrings.done),
                         ),
                       ),
                     ),
@@ -712,7 +712,7 @@ class _AllItemsFiltersOverlayState extends State<_AllItemsFiltersOverlay> {
                     TextField(
                       controller: _searchController,
                       decoration: InputDecoration(
-                        hintText: 'Search all items...',
+                        hintText: AppStrings.searchAllItemsHint,
                         prefixIcon: const Icon(Icons.search, size: 20),
                         isDense: true,
                         fillColor: Theme.of(

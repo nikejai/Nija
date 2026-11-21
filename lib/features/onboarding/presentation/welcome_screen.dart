@@ -108,7 +108,7 @@ class _VaultEntrySurface extends StatelessWidget {
               const PwaInstallOfferButton(),
               IconButton(
                 key: const ValueKey('entry-theme-toggle'),
-                tooltip: 'Change theme',
+                tooltip: AppStrings.changeTheme,
                 onPressed: onThemeModeChanged == null
                     ? null
                     : () => onThemeModeChanged!(
@@ -584,6 +584,7 @@ class _EntryActionsPanel extends StatelessWidget {
                 subtitle: AppStrings.createVaultHint,
                 onTap: onCreateVault,
                 showDivider: true,
+                emphasized: true,
               ),
               _EntryAction(
                 key: const ValueKey('entry-open-vault-file'),
@@ -591,14 +592,6 @@ class _EntryActionsPanel extends StatelessWidget {
                 title: 'Open vault file',
                 subtitle: 'Choose an encrypted .nija file from this device.',
                 onTap: onOpenVaultFile,
-                showDivider: true,
-              ),
-              _EntryAction(
-                key: const ValueKey('entry-explore-demo'),
-                leadingIcon: Icons.auto_awesome_outlined,
-                title: AppStrings.exploreDemo,
-                subtitle: AppStrings.exploreDemoHint,
-                onTap: onExploreDemo,
               ),
             ],
           ),
@@ -627,6 +620,13 @@ class _EntryActionsPanel extends StatelessWidget {
               icon: const Icon(Icons.cloud_download_outlined),
               label: Text(AppStrings.restoreFromStorage),
             ),
+          ),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            key: const ValueKey('entry-explore-demo'),
+            onPressed: onExploreDemo,
+            icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+            label: Text(AppStrings.exploreDemo),
           ),
         ],
       ),
@@ -887,6 +887,7 @@ class _EntryAction extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.showDivider = false,
+    this.emphasized = false,
   });
 
   final IconData leadingIcon;
@@ -894,6 +895,7 @@ class _EntryAction extends StatelessWidget {
   final String subtitle;
   final VoidCallback onTap;
   final bool showDivider;
+  final bool emphasized;
 
   @override
   Widget build(BuildContext context) {
@@ -919,12 +921,14 @@ class _EntryAction extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: colorScheme.primary.withValues(alpha: 0.10),
+                  color: emphasized
+                      ? colorScheme.primary
+                      : colorScheme.primary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
                   leadingIcon,
-                  color: colorScheme.primary,
+                  color: emphasized ? colorScheme.onPrimary : colorScheme.primary,
                   size: 20,
                 ),
               ),

@@ -110,7 +110,16 @@ void main() {
     await tester.tap(savedButton);
     await pumpUntilFound(tester, find.text('Open vault'));
     await tester.tap(find.text('Open vault'));
+    await pumpUntilFound(tester, find.text('Home'));
+    await tester.pumpAndSettle();
+    final lockFinder = find.byTooltip('Lock vault').evaluate().isNotEmpty
+        ? find.byTooltip('Lock vault')
+        : find.text('Lock vault').first;
+    await tester.tap(lockFinder);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('known-vault-card-test.nija')));
     await pumpUntilFound(tester, find.text('Unlock vault'));
+    await tester.pumpAndSettle();
   }
 
   testWidgets('first install walkthrough shows pages and continues to welcome', (
@@ -138,29 +147,22 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Create or open a vault'), findsOneWidget);
-    expect(find.text('Step 1 of 6'), findsOneWidget);
+    expect(find.text('Local-first & Encrypted'), findsOneWidget);
+    expect(find.text('Step 1 of 3'), findsOneWidget);
 
-    for (var i = 0; i < 4; i++) {
-      await tester.tap(
-        find.byKey(const ValueKey('first-install-walkthrough-next')),
-      );
-      await tester.pumpAndSettle();
-    }
-
-    expect(find.text('Share secrets securely'), findsOneWidget);
-    expect(
-      find.text(
-        'Export password-protected secret files and share them over any channel without exposing the original vault.',
-      ),
-      findsOneWidget,
-    );
     await tester.tap(
       find.byKey(const ValueKey('first-install-walkthrough-next')),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Back up and recover'), findsOneWidget);
+    expect(find.text('Your Keys, Your Recovery'), findsOneWidget);
+    expect(find.text('Step 2 of 3'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('first-install-walkthrough-next')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Backup Anywhere'), findsOneWidget);
     expect(find.text('Get started'), findsOneWidget);
     await tester.tap(
       find.byKey(const ValueKey('first-install-walkthrough-next')),
@@ -911,6 +913,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Open vault'));
     await tester.pumpAndSettle();
+    final lockFinder = find.byTooltip('Lock vault').evaluate().isNotEmpty
+        ? find.byTooltip('Lock vault')
+        : find.text('Lock vault').first;
+    await tester.tap(lockFinder);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('known-vault-card-test.nija')));
+    await tester.pumpAndSettle();
 
     expect(find.text('Unlock vault'), findsOneWidget);
     expect(find.text('Protected by Owl Guardian'), findsOneWidget);
@@ -996,10 +1005,39 @@ void main() {
       ),
     );
 
-    await goToUnlockScreen(tester);
-    await tester.enterText(find.byType(TextField).first, 'StrongPass123');
-    await tester.tap(find.text('Unlock'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Master password'),
+      'StrongPass123',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Confirm password'),
+      'StrongPass123',
+    );
+    await tester.pumpAndSettle();
+    final createEncryptedVaultButton = find.byKey(
+      const ValueKey('create-encrypted-vault-button'),
+    );
+    await tester.scrollUntilVisible(
+      createEncryptedVaultButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(createEncryptedVaultButton);
+    await pumpUntilFound(tester, find.text('Recovery phrase'));
+    final checkbox = find.byType(CheckboxListTile);
+    await tester.ensureVisible(checkbox);
+    await tester.tap(checkbox);
+    await tester.pumpAndSettle();
+    final savedButton = find.widgetWithText(ElevatedButton, 'I saved my phrase');
+    await tester.ensureVisible(savedButton);
+    await tester.pumpAndSettle();
+    await tester.tap(savedButton);
+    await pumpUntilFound(tester, find.text('Open vault'));
+    await tester.tap(find.text('Open vault'));
+    await pumpUntilFound(tester, find.text('Home'));
 
     await tester.tap(find.byIcon(Icons.grid_view_outlined));
     await tester.pumpAndSettle();
@@ -1267,9 +1305,38 @@ void main() {
       ),
     );
 
-    await goToUnlockScreen(tester);
-    await tester.enterText(find.byType(TextField).first, 'StrongPass123');
-    await tester.tap(find.text('Unlock'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Master password'),
+      'StrongPass123',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Confirm password'),
+      'StrongPass123',
+    );
+    await tester.pumpAndSettle();
+    final createEncryptedVaultButton = find.byKey(
+      const ValueKey('create-encrypted-vault-button'),
+    );
+    await tester.scrollUntilVisible(
+      createEncryptedVaultButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(createEncryptedVaultButton);
+    await pumpUntilFound(tester, find.text('Recovery phrase'));
+    final checkbox = find.byType(CheckboxListTile);
+    await tester.ensureVisible(checkbox);
+    await tester.tap(checkbox);
+    await tester.pumpAndSettle();
+    final savedButton = find.widgetWithText(ElevatedButton, 'I saved my phrase');
+    await tester.ensureVisible(savedButton);
+    await tester.pumpAndSettle();
+    await tester.tap(savedButton);
+    await pumpUntilFound(tester, find.text('Open vault'));
+    await tester.tap(find.text('Open vault'));
     await pumpUntilFound(tester, find.text('Home'));
 
     final reloaded = DefaultVaultService(

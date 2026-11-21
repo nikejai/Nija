@@ -1,6 +1,8 @@
 class AppFeatures {
   AppFeatures._();
 
+  static const String appVersion = '0.1.1+2';
+
   // Build-time flag:
   // flutter run --dart-define=NIJA_PAID_BUILD=true
   static const bool isPaidBuild = bool.fromEnvironment(
@@ -12,6 +14,8 @@ class AppFeatures {
 
   // Cloud backup/restore is free while monetization is deferred.
   static bool get supportsCloudBackup => true;
+
+  static bool get supportsAutomatedBackup => isPaidBuild;
 
   static bool get supportsDebugInternals => isPaidBuild;
 

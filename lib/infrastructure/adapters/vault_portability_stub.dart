@@ -13,6 +13,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
   Future<String?> exportVaultToLocal({
     required String suggestedName,
     required String content,
+    Future<bool> Function(String destinationPath)? streamWriter,
   }) {
     throw UnsupportedError('Vault export is not supported on this platform.');
   }
@@ -23,6 +24,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     required String suggestedName,
     required String content,
     bool forceAccountChooser = true,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) {
     throw UnsupportedError(
       'Cloud vault backup is not supported on this platform.',
@@ -38,6 +40,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     String mimeType = 'application/octet-stream',
     Map<String, String>? extraProperties,
     bool forceAccountChooser = false,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) {
     throw UnsupportedError(
       'Cloud vault backup is not supported on this platform.',

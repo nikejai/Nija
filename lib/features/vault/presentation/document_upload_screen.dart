@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/config/vault_limits.dart';
+import '../../../core/localization/app_strings.dart';
 import '../../../domain/models/vault_folder.dart';
 import 'widgets/vault_create_folder_dialog.dart';
 import 'widgets/vault_page_heading.dart';
@@ -157,7 +158,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Upload Document'),
+        title: Text(AppStrings.uploadDocument),
         leading: TextButton(
           onPressed: _uploading ? null : () => Navigator.of(context).maybePop(),
           style: TextButton.styleFrom(
@@ -165,7 +166,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          child: const Text('Cancel'),
+          child: Text(AppStrings.cancel),
         ),
         leadingWidth: 86,
       ),
@@ -273,8 +274,8 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                               TextField(
                                 controller: _titleController,
                                 enabled: !_uploading,
-                                decoration: const InputDecoration(
-                                  hintText: 'Title',
+                                decoration: InputDecoration(
+                                  hintText: AppStrings.titleLabel,
                                   prefixIcon: Icon(Icons.title),
                                 ),
                               ),
@@ -282,8 +283,8 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                               TextField(
                                 controller: _tagsController,
                                 enabled: !_uploading,
-                                decoration: const InputDecoration(
-                                  hintText: 'Add tags',
+                                decoration: InputDecoration(
+                                  hintText: AppStrings.addTags,
                                   prefixIcon: Icon(Icons.sell_outlined),
                                 ),
                               ),
@@ -295,6 +296,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                                       key: const ValueKey('document-folder-selector'),
                                       child: DropdownButtonFormField<String>(
                                         key: ValueKey('document-folder-dropdown-$_selectedFolderId'),
+                                        isExpanded: true,
                                         initialValue: _selectedFolderId,
                                         style: TextStyle(
                                           fontSize: 14,
@@ -316,7 +318,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                                                 });
                                               },
                                         decoration: InputDecoration(
-                                          labelText: 'Folder',
+                                          labelText: AppStrings.folderLabel,
                                           prefixIcon: Icon(
                                             _selectedFolderId == 'default'
                                                 ? Icons.folder_special
@@ -333,7 +335,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                                   const SizedBox(width: 8),
                                   IconButton.outlined(
                                     key: const ValueKey('document-create-folder-button'),
-                                    tooltip: 'Create new folder',
+                                    tooltip: AppStrings.createNewFolder,
                                     icon: const Icon(Icons.create_new_folder_outlined, size: 20),
                                     onPressed: _uploading ? null : _promptCreateFolder,
                                   ),
@@ -356,8 +358,8 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
                             enabled: !_uploading,
                             minLines: 7,
                             maxLines: 12,
-                            decoration: const InputDecoration(
-                              hintText: 'Description (optional)',
+                            decoration: InputDecoration(
+                              hintText: AppStrings.descriptionOptional,
                               alignLabelWithHint: true,
                             ),
                           ),
@@ -625,7 +627,7 @@ class _SelectedDocumentsList extends StatelessWidget {
                 key: ValueKey('document-upload-remove-$index'),
                 onPressed: onRemove == null ? null : () => onRemove!(index),
                 icon: const Icon(Icons.close),
-                tooltip: 'Remove document',
+                tooltip: AppStrings.removeDocument,
               ),
             ),
           );

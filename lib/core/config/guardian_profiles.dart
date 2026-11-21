@@ -31,10 +31,10 @@ class GuardianProfiles {
     icon: '🦉',
     tagline: 'Balanced everyday protection',
     detail: 'Recommended for most vaults.',
-    memoryKb: 8192,
+    memoryKb: 19456,
     iterations: 2,
     parallelism: 1,
-    cipher: 'xchacha20-poly1305',
+    cipher: 'aes-256-gcm',
   );
 
   static const lion = GuardianProfile(
@@ -43,10 +43,10 @@ class GuardianProfiles {
     icon: '🦁',
     tagline: 'Maximum protection',
     detail: 'For banking, identity, business, and high-value secrets.',
-    memoryKb: 16384,
+    memoryKb: 32768,
     iterations: 3,
     parallelism: 1,
-    cipher: 'xchacha20-poly1305',
+    cipher: 'aes-256-gcm',
   );
 
   static const falcon = GuardianProfile(
@@ -55,10 +55,10 @@ class GuardianProfiles {
     icon: '🦅',
     tagline: 'Fast daily unlock',
     detail: 'For lightweight vaults used many times daily.',
-    memoryKb: 4096,
-    iterations: 1,
+    memoryKb: 12288,
+    iterations: 2,
     parallelism: 1,
-    cipher: 'xchacha20-poly1305',
+    cipher: 'aes-256-gcm',
   );
 
   static const all = [owl, lion, falcon];

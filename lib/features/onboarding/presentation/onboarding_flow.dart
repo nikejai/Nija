@@ -14,11 +14,14 @@ import '../../vault/presentation/widgets/encrypted_secret_viewer.dart';
 import '../../vault/presentation/widgets/nija_pin_dialogs.dart';
 import '../../vault/presentation/widgets/vault_merge_screen.dart';
 import '../../../application/services/vault_merge_helper.dart';
+import '../../../core/security/secure_clipboard.dart';
+import '../../../domain/validators/vault_validators.dart';
 import '../../../core/config/app_features.dart';
 import '../../../core/config/guardian_profiles.dart';
 import '../../../core/config/recovery_phrase_dictionary.dart';
 import '../../../core/config/recovery_phrase_generator.dart';
 import '../../../core/config/vault_limits.dart';
+import '../../../core/entitlements/entitlement_state.dart';
 import '../../../core/localization/app_strings.dart';
 import '../../../core/security/encrypted_share_codec.dart';
 import '../../../core/security/biometric_auth_service.dart';
@@ -107,6 +110,15 @@ class OnboardingFlow extends StatefulWidget {
     this.biometricEnrollmentStore,
     this.firstInstallWalkthroughCompletedOverride,
     this.initialKnownVaults = const <VaultReference>[],
+    this.entitlementState = const EntitlementState.free(),
+    this.canPurchaseExpandedVaultStorage = false,
+    this.purchaseInProgress = false,
+    this.restoreInProgress = false,
+    this.entitlementRefreshInProgress = false,
+    this.entitlementErrorMessage,
+    this.onRefreshEntitlements,
+    this.onRestorePurchases,
+    this.onPurchaseExpandedVaultStorage,
   });
 
   final String languageMode;
@@ -123,6 +135,15 @@ class OnboardingFlow extends StatefulWidget {
   final BiometricEnrollmentStore? biometricEnrollmentStore;
   final bool? firstInstallWalkthroughCompletedOverride;
   final List<VaultReference> initialKnownVaults;
+  final EntitlementState entitlementState;
+  final bool canPurchaseExpandedVaultStorage;
+  final bool purchaseInProgress;
+  final bool restoreInProgress;
+  final bool entitlementRefreshInProgress;
+  final String? entitlementErrorMessage;
+  final Future<void> Function()? onRefreshEntitlements;
+  final Future<bool> Function()? onRestorePurchases;
+  final Future<bool> Function()? onPurchaseExpandedVaultStorage;
 
   @override
   State<OnboardingFlow> createState() => _OnboardingFlowState();
@@ -163,6 +184,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   bool _isBusy = false;
   double _busyProgress = 0;
   String _busyMessage = '';
+  bool _seedRecoveryNoteInVault = false;
   bool _vaultCreatedInSession = false;
   bool _isExploreDemoSession = false;
   List<Map<String, dynamic>> _vaultItems = <Map<String, dynamic>>[];
@@ -325,10 +347,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       ),
       OnboardingStep.recovery => RecoveryScreen(
         words: _recoveryWords,
+        saveCopyInVault: _seedRecoveryNoteInVault,
+        onSaveCopyInVaultChanged: (val) =>
+            setState(() => _seedRecoveryNoteInVault = val),
         onNext: () => setState(() => _step = OnboardingStep.created),
       ),
       OnboardingStep.created => VaultCreatedScreen(
-        onContinue: () => unawaited(_presentUnlockStep()),
+        onContinue: () => unawaited(_continueIntoCreatedVault()),
       ),
       OnboardingStep.selectVault => KnownVaultSelectionScreen(
         knownVaults: _vaultSelectionMode == _VaultSelectionMode.known
@@ -391,6 +416,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       ),
       OnboardingStep.app => VaultAppShell(
         activeVaultName: _activeVaultName,
+        activeVaultId: _activeVaultId ?? '',
+        seedRecoveryNoteIfEmpty:
+            _vaultCreatedInSession && _seedRecoveryNoteInVault,
         vaultSizeBytes: _activeVaultSizeBytes,
         activeVaultRevision: _activeVaultRevision,
         activeVaultVersionId: _activeVaultVersionId,
@@ -420,14 +448,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
                 required customTypeDefinitions,
               }) async {}
             : _persistVaultData,
-        onPersistFolders: _isExploreDemoSession
+        onSyncFolders: _isExploreDemoSession
             ? null
-            : (folders) => _persistVaultData(
-                  items: _vaultItems,
-                  notes: _vaultNotes,
-                  customTypeDefinitions: _customTypeDefinitions,
-                  folders: folders,
-                ),
+            : (folders) {
+                _folders = folders
+                    .map((entry) => Map<String, dynamic>.from(entry))
+                    .toList();
+              },
         onPersistVaultDocument: _isExploreDemoSession
             ? null
             : _persistVaultDocument,
@@ -457,7 +484,19 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             : () => _importVaultFromLocal(continueToUnlock: false),
         onBackupToCloud: _isExploreDemoSession
             ? () async {}
-            : _backupCurrentVaultToCloud,
+            : () => _backupCurrentVaultToCloud(showBusyOverlay: false),
+        onBackupToCloudWithProgress: _isExploreDemoSession
+            ? null
+            : (onProgress) => _backupCurrentVaultToCloud(
+                showBusyOverlay: false,
+                onUiProgress: onProgress,
+              ),
+        onSilentBackupToCloud: _isExploreDemoSession
+            ? null
+            : () => _backupCurrentVaultToCloud(
+                silent: true,
+                showBusyOverlay: false,
+              ),
         onRestoreFromCloud: _isExploreDemoSession
             ? () async {}
             : _restoreCurrentVaultFromCloud,
@@ -475,6 +514,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         onReadVaultInternals: kDebugMode && !_isExploreDemoSession
             ? _readVaultInternals
             : null,
+        onReadSecurityMetadata: _isExploreDemoSession
+            ? null
+            : _readVaultInternals,
         onLockNow: _lockVaultSession,
         onExitRequested: _handleExitFromAppShell,
         onSwitchVault: _isExploreDemoSession
@@ -488,13 +530,50 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         debugInternalsFeatureAvailableOverride: _isExploreDemoSession
             ? false
             : null,
-        expandedVaultStorageEntitled: !_isExploreDemoSession,
+        expandedVaultStorageEntitled:
+            !_isExploreDemoSession &&
+            (AppFeatures.supportsExpandedVaultStorage ||
+                widget.entitlementState.expandedVaultStorage),
+        canPurchaseExpandedVaultStorage:
+            !_isExploreDemoSession && widget.canPurchaseExpandedVaultStorage,
+        purchaseInProgress: !_isExploreDemoSession && widget.purchaseInProgress,
+        restoreInProgress: !_isExploreDemoSession && widget.restoreInProgress,
+        entitlementRefreshInProgress:
+            !_isExploreDemoSession && widget.entitlementRefreshInProgress,
+        entitlementSource: widget.entitlementState.source,
+        entitlementLastVerifiedAt: widget.entitlementState.lastVerifiedAt,
+        entitlementErrorMessage: widget.entitlementErrorMessage,
+        onRefreshEntitlements: _isExploreDemoSession
+            ? null
+            : widget.onRefreshEntitlements,
+        onRestorePurchases: _isExploreDemoSession
+            ? null
+            : widget.onRestorePurchases,
+        onPurchaseExpandedVaultStorage: _isExploreDemoSession
+            ? null
+            : widget.onPurchaseExpandedVaultStorage,
         onReadRawVaultContent: _isExploreDemoSession
             ? null
             : () => _vaultService.readRawVaultFile(filePath: _vaultFilePath),
+        onExportVaultToPath: _isExploreDemoSession || kIsWeb
+            ? null
+            : (destinationPath) async {
+                final vaultId =
+                    (_activeVaultId?.trim().isNotEmpty == true)
+                        ? _activeVaultId!.trim()
+                        : _vaultFilePath;
+                final res = await _vaultService.exportVault(
+                  vaultId: vaultId,
+                  destinationPath: destinationPath,
+                );
+                return res.status == ExportStatus.exported;
+              },
         onRestoreRawVaultContent: _isExploreDemoSession
             ? null
             : (content) => _restoreVaultFromRawContent(content),
+        onRestoreVaultFromFile: _isExploreDemoSession
+            ? null
+            : _restoreVaultFromSnapshotFile,
       ),
     };
 
@@ -634,8 +713,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       if (!mounted) return false;
       final messenger = ScaffoldMessenger.of(context)..removeCurrentSnackBar();
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Please wait for the operation to finish.'),
+        SnackBar(
+          content: Text(AppStrings.pleaseWaitForOperation),
         ),
       );
       return false;
@@ -687,18 +766,18 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Quit Application?'),
-        content: const Text('Are you sure you want to quit the app?'),
+        title: Text(AppStrings.quitApplicationQuestion),
+        content: Text(AppStrings.quitApplicationConfirm),
         actions: [
           TextButton(
             key: const ValueKey('quit-dialog-cancel-button'),
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppStrings.cancel),
           ),
           FilledButton(
             key: const ValueKey('quit-dialog-confirm-button'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Quit'),
+            child: Text(AppStrings.quit),
           ),
         ],
       ),
@@ -900,24 +979,29 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || _vaultFilePath != vaultId) return;
-      String? pin;
-      if (kIsWeb) {
-        pin = await _ensurePinForCurrentVault();
-        if (pin == null || !mounted || _vaultFilePath != vaultId) return;
-      }
       final canUseBiometrics = await _biometricAuthService.canUseBiometrics();
       if (!canUseBiometrics) {
         await _refreshBiometricStateForActiveVault();
         return;
       }
       if (!mounted || _vaultFilePath != vaultId) return;
+      String? webMasterPassword;
+      if (kIsWeb) {
+        webMasterPassword = await _resolveMasterPasswordForBiometricEnrollment();
+        if (webMasterPassword == null ||
+            webMasterPassword.isEmpty ||
+            !mounted ||
+            _vaultFilePath != vaultId) {
+          return;
+        }
+      }
       final shouldEnable = kIsWeb
           ? await showWebBiometricEnableDialog(
               context,
               onConfirm: () async {
                 await _biometricCredentialStore.saveMasterPassword(
                   vaultId: vaultId,
-                  password: pin!,
+                  password: webMasterPassword!,
                   displayName: _activeVaultName,
                   newEnrollment: true,
                 );
@@ -950,7 +1034,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           await _refreshBiometricStateForActiveVault();
           if (!mounted || _vaultFilePath != vaultId) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Biometric unlock enabled.')),
+            SnackBar(content: Text(AppStrings.biometricUnlockEnabled)),
           );
         } else {
           await _enableBiometricForCurrentVault();
@@ -1002,6 +1086,16 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     _activeVaultName = vaultLabel ?? await _resolveVaultLabel(_vaultFilePath);
     _activeVaultId = await _resolveVaultId(_vaultFilePath);
     _activeGuardianProfile = await _resolveGuardianForVault(_vaultFilePath);
+  }
+
+  Future<void> _continueIntoCreatedVault() async {
+    if (_passwordController.text.trim().isEmpty) {
+      await _presentUnlockStep();
+      return;
+    }
+    await _syncUnlockPresentation();
+    if (!mounted) return;
+    await _unlockWithPassword();
   }
 
   Future<void> _presentUnlockStep({
@@ -1061,11 +1155,16 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       final imported = await _vaultPortability.importVaultFromLocal();
       if (imported == null) return null;
       if (!(await _ensureCanAddVaultReference())) return null;
-      final importedPath = await _localPathForImportedVault(imported);
-      await _vaultService.writeRawVaultFile(
-        filePath: importedPath,
-        rawContent: imported.content,
-      );
+      final hasInlineContent = imported.content.isNotEmpty;
+      final importedPath = hasInlineContent
+          ? await _localPathForImportedVault(imported)
+          : imported.storageId;
+      if (hasInlineContent) {
+        await _vaultService.writeRawVaultFile(
+          filePath: importedPath,
+          rawContent: imported.content,
+        );
+      }
       final label = _humanImportLabel(imported);
       await _rememberVaultReference(
         importedPath,
@@ -1160,7 +1259,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to create vault file. ${_errorHint(error)}'),
+          content: Text(AppStrings.failedToCreateVaultFile(_errorHint(error))),
         ),
       );
     }
@@ -1172,8 +1271,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
 
     final importCompleter = _importCredentialCompleter;
     if (importCompleter != null) {
-      final password = _passwordController.text.trim();
-      if (password.isEmpty) return;
+      final password = _passwordController.text;
+      if (password.trim().isEmpty) return;
       _importCredentialCompleter = null;
       if (!importCompleter.isCompleted) {
         importCompleter.complete(
@@ -1211,9 +1310,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           ),
         );
         try {
-          final recoveryPhrase = _recoveryWords.isNotEmpty
-              ? _recoveryWords.join(' ')
-              : null;
+          final recoveryPhrase =
+              _vaultCreatedInSession && _recoveryWords.isNotEmpty
+                  ? _recoveryWords.join(' ')
+                  : null;
           await _vaultService
               .migrateToBalancedProfile(
                 filePath: vaultPath,
@@ -1265,7 +1365,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     } on TimeoutException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unlock timed out. Please try again.')),
+        SnackBar(content: Text(AppStrings.unlockTimedOut)),
       );
     } catch (error, stackTrace) {
       _logOperationError('unlockWithPassword', error, stackTrace);
@@ -1319,22 +1419,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       return;
     }
-    if (kIsWeb) {
-      final password = await _pinCredentialStore.readMasterPassword(
-        vaultId: vaultId,
-        pin: savedPassword,
-      );
-      if (password == null || password.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppStrings.webBiometricUnlockFailed)),
-        );
-        return;
-      }
-      _passwordController.text = password;
-    } else {
-      _passwordController.text = savedPassword;
-    }
+    _passwordController.text = savedPassword;
     await _unlockWithPassword();
   }
 
@@ -1442,7 +1527,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Shared text saved to ${note['title']}')),
+      SnackBar(
+        content: Text(AppStrings.sharedTextSavedTo('${note['title']}')),
+      ),
     );
   }
 
@@ -1715,7 +1802,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     } catch (_) {
       if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to import secret into vault.')),
+        SnackBar(content: Text(AppStrings.failedToImportSecret)),
       );
       return false;
     }
@@ -1747,7 +1834,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (!mounted) return null;
     if (_knownVaults.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No saved vaults found to unlock.')),
+        SnackBar(content: Text(AppStrings.noSavedVaultsFound)),
       );
       return null;
     }
@@ -2141,7 +2228,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     final projected = _activeVaultSizeBytes + bytes;
     final maxVaultBytes = VaultLimits.maxVaultBytesFor(
       currentVaultSizeBytes: _activeVaultSizeBytes,
-      expandedStorageEntitled: true,
+      expandedStorageEntitled: AppFeatures.supportsExpandedVaultStorage,
     );
     if (projected > maxVaultBytes) {
       _showVaultLimitMessage(
@@ -2251,13 +2338,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+                  child: Text(AppStrings.cancel),
                 ),
                 ElevatedButton(
                   onPressed: canContinue
                       ? () => Navigator.of(context).pop(controller.text.trim())
                       : null,
-                  child: const Text('Open'),
+                  child: Text(AppStrings.open),
                 ),
               ],
             );
@@ -2333,6 +2420,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<void> _ensureRecoveryPhraseNoteInVault({
     required String password,
   }) async {
+    if (!_seedRecoveryNoteInVault) return;
     if (_vaultNotes.any(
       (note) => note['id']?.toString() == 'note-recovery-phrase',
     )) {
@@ -2805,7 +2893,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (_vaultCreatedInSession &&
         !listEquals(normalizedRecovery, _recoveryWords)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery phrase order does not match.')),
+        SnackBar(content: Text(AppStrings.recoveryPhraseOrderMismatch)),
       );
       return;
     }
@@ -2839,13 +2927,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     } on TimeoutException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery timed out. Please try again.')),
+        SnackBar(content: Text(AppStrings.recoveryTimedOut)),
       );
     } catch (error, stackTrace) {
       _logOperationError('unlockWithRecoveryPhrase', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery phrase is invalid.')),
+        SnackBar(content: Text(AppStrings.recoveryPhraseInvalid)),
       );
     } finally {
       _stopBusy();
@@ -2858,7 +2946,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Recover vault'),
+          title: Text(AppStrings.recoverVault),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2874,9 +2962,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
                 controller: recoveryController,
                 minLines: 2,
                 maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Recovery phrase',
-                  hintText: '12 words separated by spaces',
+                decoration: InputDecoration(
+                  labelText: AppStrings.recoveryPhrase,
+                  hintText: AppStrings.recoveryPhraseHint,
                 ),
               ),
             ],
@@ -2884,12 +2972,12 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: Text(AppStrings.cancel),
             ),
             ElevatedButton(
               onPressed: () =>
                   Navigator.of(context).pop(recoveryController.text.trim()),
-              child: const Text('Recover'),
+              child: Text(AppStrings.recover),
             ),
           ],
         );
@@ -2914,8 +3002,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   bool _validateRecoveryWords(List<String> normalizedRecovery) {
     if (normalizedRecovery.length != 12) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Recovery phrase must be exactly 12 words.'),
+        SnackBar(
+          content: Text(AppStrings.recoveryPhraseMustBe12Words),
         ),
       );
       return false;
@@ -3135,7 +3223,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppStrings.cancel),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -3580,15 +3668,19 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       final imported = await _vaultPortability.importVaultFromLocal();
       if (imported == null) return;
       if (continueToUnlock && !(await _ensureCanAddVaultReference())) return;
-      final importedPath = await _localPathForImportedVault(imported);
+      final hasInlineContent = imported.content.isNotEmpty;
+      final importedPath = hasInlineContent
+          ? await _localPathForImportedVault(imported)
+          : imported.storageId;
       await _importVaultFile(
         imported: ImportedVaultFile(
           storageId: importedPath,
           label: imported.label,
           content: imported.content,
+          sourceDescription: imported.sourceDescription,
         ),
         continueToUnlock: continueToUnlock,
-        stageRawContent: true,
+        stageRawContent: hasInlineContent,
       );
     } catch (error, stackTrace) {
       if (_isFilePickerCancellation(error)) return;
@@ -3675,8 +3767,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       if (selected != true && mounted) {
         _showOperationSnackBar(
-          'Google sign-in cancelled. If the button fails, add http://localhost '
-          'and http://localhost:5173 to Authorized JavaScript origins in Google Cloud Console.',
+          'Google sign-in cancelled. Please try again and allow Drive access.',
         );
       }
       if (selected != true) return false;
@@ -3694,7 +3785,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       forceAccountChooser: forceAccountChooser,
     );
     if (!selected && mounted) {
-      _showOperationSnackBar('Google account sign-in cancelled.');
+      _showOperationSnackBar(AppStrings.googleSignInCancelled);
     }
     return selected;
   }
@@ -3994,18 +4085,18 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery successful. Vault opened.')),
+        SnackBar(content: Text(AppStrings.recoverySuccessfulVaultOpened)),
       );
     } on TimeoutException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery timed out. Please try again.')),
+        SnackBar(content: Text(AppStrings.recoveryTimedOut)),
       );
     } catch (error, stackTrace) {
       _logOperationError('recoverImportedVault', error, stackTrace);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recovery phrase is invalid.')),
+        SnackBar(content: Text(AppStrings.recoveryPhraseInvalid)),
       );
     } finally {
       _stopBusy();
@@ -4111,7 +4202,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       if (mergedPayload == null) {
         if (!mounted) return;
-        _showOperationSnackBar('Vault merge cancelled.');
+        _showOperationSnackBar(AppStrings.vaultMergeCancelled);
         return;
       }
 
@@ -4123,7 +4214,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       );
       stopMergeBusy();
       if (!mounted) return;
-      _showOperationSnackBar('Vault merged successfully.');
+      _showOperationSnackBar(AppStrings.vaultMergedSuccessfully);
       if (askBackupAfterMerge) {
         await _confirmBackupAfterCloudMerge();
       }
@@ -4131,7 +4222,9 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       stopMergeBusy();
       _logOperationError('reviewAndMergeVaultConflict', error, stackTrace);
       if (!mounted) return;
-      _showOperationSnackBar('Failed to merge vault. ${_errorHint(error)}');
+      _showOperationSnackBar(
+        AppStrings.failedToMergeVault(_errorHint(error)),
+      );
     }
   }
 
@@ -4174,7 +4267,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     required bool setAsActiveLocation,
   }) async {
     final approved = await _requestFileAccessConsent(
-      title: 'Allow vault export',
+      title: AppStrings.allowVaultExport,
       message:
           'Nija needs temporary file access to let you choose where to save your encrypted vault file. '
           'Only the selected output file is written.',
@@ -4187,12 +4280,25 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       if (exportName == null) return;
       await _waitForDialogTeardown();
       if (!mounted) return;
-      final rawContent = await _vaultService.readRawVaultFile(
-        filePath: _vaultFilePath,
-      );
+      final vaultId =
+          (_activeVaultId?.trim().isNotEmpty == true)
+              ? _activeVaultId!.trim()
+              : _vaultFilePath;
+      final rawContent = kIsWeb
+          ? await _vaultService.readRawVaultFile(filePath: _vaultFilePath)
+          : '';
       final exportedPath = await _vaultPortability.exportVaultToLocal(
         suggestedName: exportName,
         content: rawContent,
+        streamWriter: kIsWeb
+            ? null
+            : (destinationPath) async {
+                final res = await _vaultService.exportVault(
+                  vaultId: vaultId,
+                  destinationPath: destinationPath,
+                );
+                return res.status == ExportStatus.exported;
+              },
       );
       if (exportedPath != null &&
           exportedPath.isNotEmpty &&
@@ -4227,13 +4333,23 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
   }
 
-  Future<void> _backupCurrentVaultToCloud() async {
+  Future<void> _backupCurrentVaultToCloud({
+    bool silent = false,
+    bool showBusyOverlay = true,
+    void Function(String message, double progress)? onUiProgress,
+  }) async {
     if (!_cloudBackupFeatureAvailable) {
-      _showOperationSnackBar(AppFeatures.paidUnavailableLabel);
+      if (!silent) {
+        _showOperationSnackBar(AppFeatures.paidUnavailableLabel);
+      }
       return;
     }
     var busyActive = false;
     void startCloudBusy(String message) {
+      if (!silent) {
+        onUiProgress?.call(message, 0.0);
+      }
+      if (!showBusyOverlay || silent) return;
       _startBusy(
         message,
         timeout: const Duration(minutes: 2),
@@ -4241,6 +4357,14 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             'Cloud backup is taking longer than expected. Please check your connection and retry.',
       );
       busyActive = true;
+    }
+
+    void updateCloudBusy(String message, double progress) {
+      if (!silent) {
+        onUiProgress?.call(message, progress);
+      }
+      if (!showBusyOverlay || silent || !busyActive) return;
+      _updateBusyStep(message, progress);
     }
 
     void stopCloudBusy() {
@@ -4254,10 +4378,18 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         'backupCurrentVaultToCloud',
       );
       if (!mounted) return;
-      final signedIn = await _ensureCloudBackupGoogleAccountSelected();
-      if (!signedIn || !mounted) return;
+      if (silent) {
+        final accountLabel = await _readCloudBackupAccountLabel();
+        if (accountLabel == null || accountLabel.trim().isEmpty || !mounted) {
+          return;
+        }
+      } else {
+        final signedIn = await _ensureCloudBackupGoogleAccountSelected();
+        if (!signedIn || !mounted) return;
+      }
 
       startCloudBusy('Preparing cloud backup...');
+      updateCloudBusy('Reading vault metadata...', 0.10);
       final header = await _vaultService.readVaultHeader(
         filePath: _vaultFilePath,
       );
@@ -4273,7 +4405,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         '_',
       );
       final suggestedName = 'backup_${stamp}_$baseName';
-      _updateBusyStep('Sending vault to cloud storage...', 0.50);
+      updateCloudBusy('Packaging encrypted vault...', 0.25);
 
       bool backedUp;
       if (!kIsWeb) {
@@ -4285,6 +4417,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             vaultId: vaultId,
             destinationPath: tempPath,
           );
+          updateCloudBusy('Connecting to Google Drive...', 0.40);
           final stream = tempFile.openRead();
           final length = await tempFile.length();
           backedUp = await _vaultPortability.backupVaultStreamToCloud(
@@ -4298,7 +4431,18 @@ class _OnboardingFlowState extends State<OnboardingFlow>
               'updatedAt': header.updatedAt,
             },
             forceAccountChooser: false,
+            onProgress: (sent, total) {
+              if (!mounted || total <= 0) return;
+              final ratio = (sent / total).clamp(0.0, 1.0);
+              final sentKb = (sent / 1024).toStringAsFixed(0);
+              final totalKb = (total / 1024).toStringAsFixed(0);
+              updateCloudBusy(
+                'Uploading to Google Drive ($sentKb KB / $totalKb KB)...',
+                0.40 + 0.55 * ratio,
+              );
+            },
           );
+          updateCloudBusy('Finalizing cloud backup...', 0.98);
         } finally {
           if (await tempFile.exists()) {
             await tempFile.delete();
@@ -4308,24 +4452,34 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         final rawContent = await _vaultService.readRawVaultFile(
           filePath: _vaultFilePath,
         );
+        updateCloudBusy('Uploading to Google Drive...', 0.60);
         backedUp = await _vaultPortability.backupVaultToCloud(
           vaultId: vaultId,
           suggestedName: suggestedName,
           content: rawContent,
           forceAccountChooser: false,
+          onProgress: (sent, total) {
+            if (!mounted) return;
+            updateCloudBusy('Uploading to Google Drive...', 0.85);
+          },
         );
+        updateCloudBusy('Finalizing cloud backup...', 0.98);
       }
       stopCloudBusy();
       if (!mounted) return;
       if (!backedUp) {
-        _showOperationSnackBar('Cloud backup cancelled.');
+        if (!silent) {
+          _showOperationSnackBar(AppStrings.cloudBackupCancelled);
+        }
         return;
       }
-      _showOperationSnackBar('Cloud backup completed.');
+      if (!silent) {
+        _showOperationSnackBar(AppStrings.cloudBackupCompleted);
+      }
     } catch (error, stackTrace) {
       stopCloudBusy();
       _logOperationError('backupCurrentVaultToCloud', error, stackTrace);
-      if (!mounted) return;
+      if (!mounted || silent) return;
       _showOperationSnackBar(
         'Failed to prepare cloud backup. ${_errorHint(error)}',
       );
@@ -4414,19 +4568,48 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
   }
 
-  Future<bool> _restoreVaultFromRawContent(String rawContent) async {
+  Future<bool> _restoreVaultFromSnapshotFile(String snapshotPath) async {
+    final credential = _passwordController.text.trim();
+    if (credential.isEmpty) return false;
     try {
-      await _importVaultFile(
-        imported: ImportedVaultFile(
-          storageId: _vaultFilePath,
-          label: _activeVaultName,
-          content: rawContent,
-        ),
-        continueToUnlock: false,
-        stageRawContent: true,
+      var result = await _vaultService.importNijaFile(
+        filePath: snapshotPath,
+        unlockCredential: credential,
+        confirmReplace: true,
       );
+      if (result.status == ImportStatus.failed) {
+        return false;
+      }
+      if (result.status == ImportStatus.conflictCreated) {
+        final conflictVaultId = result.conflictVaultId;
+        if (conflictVaultId == null || conflictVaultId.isEmpty) return false;
+        await _reviewAndMergeVaultConflict(
+          conflictVaultId: conflictVaultId,
+          importedPassword: credential,
+        );
+        return true;
+      }
+      await _loadVaultData(credential);
+      await _refreshVaultSize();
       return true;
-    } catch (e) {
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _restoreVaultFromRawContent(String rawContent) async {
+    final credential = _passwordController.text.trim();
+    if (credential.isEmpty) return false;
+    try {
+      final stagingPath = kIsWeb
+          ? 'snapshot_restore_${DateTime.now().millisecondsSinceEpoch}.nija'
+          : '${(await getTemporaryDirectory()).path}/snapshot_restore_${DateTime.now().millisecondsSinceEpoch}.nija';
+      await _vaultService.writeRawVaultFile(
+        filePath: stagingPath,
+        rawContent: rawContent,
+      );
+      return await _restoreVaultFromSnapshotFile(stagingPath);
+    } catch (_) {
       return false;
     }
   }
@@ -4483,7 +4666,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     var credential = _passwordController.text.trim();
     if (credential.isEmpty) {
       final prompted = await _promptImportVaultCredential(
-        title: 'Unlock cloud backup',
+        title: AppStrings.unlockCloudBackup,
         allowRecovery: false,
       );
       if (prompted == null || prompted.password.isEmpty) {
@@ -4506,7 +4689,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     }
     if (result.status == ImportStatus.failed) {
       final prompted = await _promptImportVaultCredential(
-        title: 'Unlock cloud backup',
+        title: AppStrings.unlockCloudBackup,
         message:
             'The cloud backup did not unlock with the active vault password. Enter the password that was valid when it was backed up.',
         allowRecovery: false,
@@ -4561,7 +4744,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       await _refreshVaultSize();
       await _refreshBiometricStateForActiveVault();
       if (!mounted) return _CloudMergeOutcome.cancelled;
-      _showOperationSnackBar('Cloud backup restored.');
+      _showOperationSnackBar(AppStrings.cloudBackupRestored);
       return _CloudMergeOutcome.noMergeNeeded;
     }
     if (result.status == ImportStatus.conflictCreated) {
@@ -4596,11 +4779,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         result.userSafeMessage.contains('Confirm replace');
   }
 
-  bool get _cloudBackupFeatureAvailable =>
-      AppFeatures.supportsCloudBackup || true;
+  bool get _cloudBackupFeatureAvailable => AppFeatures.supportsCloudBackup;
 
   bool get _isPaidAndroidMultiVaultEnabled =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android && true;
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   int get _maxSupportedVaultCount => VaultLimits.maxVaultCountFor(
     isAndroid: !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
@@ -4669,7 +4851,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     final backupNow = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Backup merged vault?'),
+        title: Text(AppStrings.backupMergedVaultQuestion),
         content: const Text(
           'The cloud version was merged into this vault. Back up now so the same conflict is not shown again later.',
         ),
@@ -4787,7 +4969,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+                  child: Text(AppStrings.cancel),
                 ),
                 ElevatedButton(
                   onPressed: canContinue
@@ -4872,7 +5054,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppStrings.cancel),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
@@ -4917,11 +5099,6 @@ class _OnboardingFlowState extends State<OnboardingFlow>
   Future<void> _enableBiometricForCurrentVault() async {
     final vaultId = _vaultFilePath;
     if (kIsWeb) {
-      final pin = await _ensurePinForCurrentVault();
-      if (pin == null || !mounted || _vaultFilePath != vaultId) {
-        await _refreshBiometricStateForActiveVault();
-        return;
-      }
       final webAuthnSupported = await _biometricAuthService
           .canAttemptWebBiometricEnrollment();
       if (!webAuthnSupported) {
@@ -4933,12 +5110,20 @@ class _OnboardingFlowState extends State<OnboardingFlow>
         await _refreshBiometricStateForActiveVault();
         return;
       }
-      if (!mounted || _vaultFilePath != vaultId) return;
+      final masterPassword =
+          await _resolveMasterPasswordForBiometricEnrollment();
+      if (masterPassword == null ||
+          masterPassword.isEmpty ||
+          !mounted ||
+          _vaultFilePath != vaultId) {
+        await _refreshBiometricStateForActiveVault();
+        return;
+      }
       final enabled = await showWebBiometricEnableDialog(
         context,
         onConfirm: () => _biometricCredentialStore.saveMasterPassword(
           vaultId: vaultId,
-          password: pin,
+          password: masterPassword,
           displayName: _activeVaultName,
           newEnrollment: true,
         ),
@@ -5031,28 +5216,6 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     ).showSnackBar(const SnackBar(content: Text('Biometric unlock disabled.')));
   }
 
-  Future<String?> _ensurePinForCurrentVault() async {
-    final vaultId = _vaultFilePath;
-    final hasPin = await _pinCredentialStore.hasPin(vaultId: vaultId);
-    if (!hasPin) {
-      return _setOrChangePinForCurrentVault(returnPin: true);
-    }
-    final pin = await _promptForPin(title: AppStrings.appPinUnlockTitle);
-    if (pin == null || !mounted || _vaultFilePath != vaultId) return null;
-    final password = await _pinCredentialStore.readMasterPassword(
-      vaultId: vaultId,
-      pin: pin,
-    );
-    if (password == null || password.isEmpty) {
-      if (!mounted) return null;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(AppStrings.appPinInvalidMessage)));
-      return null;
-    }
-    return pin;
-  }
-
   Future<String?> _setOrChangePinForCurrentVault({
     bool returnPin = false,
   }) async {
@@ -5112,7 +5275,6 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     if (kIsWeb) {
       final purgedLegacy = await _biometricCredentialStore
           .purgeLegacyWebEnrollment(vaultId: vaultId);
-      final hasPin = await _pinCredentialStore.hasPin(vaultId: vaultId);
       final hasSavedCredential = await _biometricCredentialStore
           .hasStoredCredential(vaultId: vaultId);
       var enrolled = await _biometricEnrollmentStore.isEnrolledForVault(
@@ -5142,9 +5304,8 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           );
       if (!mounted || _vaultFilePath != vaultId) return;
       setState(() {
-        _biometricAvailable = hasPin && canUseBiometrics;
-        _biometricEnabled =
-            hasPin && enrolled && hasSavedCredential && canUseBiometrics;
+        _biometricAvailable = canUseBiometrics;
+        _biometricEnabled = enrolled && hasSavedCredential && canUseBiometrics;
         _biometricUnlockLabel = presentation.label;
         _biometricUnlockIcon = presentation.icon;
       });
@@ -5370,8 +5531,13 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           builder: (context, setLocalState) {
             final newPassword = newPasswordController.text;
             final confirm = confirmPasswordController.text;
+            final strongEnough = VaultValidators.isStrongEnoughMasterPassword(
+              newPassword,
+            );
             final canSubmit =
-                newPassword.trim().isNotEmpty && newPassword == confirm;
+                newPassword.trim().isNotEmpty &&
+                strongEnough &&
+                newPassword == confirm;
 
             return AlertDialog(
               title: const Text('Reset master password'),
@@ -5387,8 +5553,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
                     controller: newPasswordController,
                     obscureText: true,
                     onChanged: (_) => setLocalState(() {}),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'New master password',
+                      helperText: newPassword.isEmpty || strongEnough
+                          ? null
+                          : 'Use 10+ characters with letters and numbers',
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -5409,7 +5578,7 @@ class _OnboardingFlowState extends State<OnboardingFlow>
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop('cancel'),
-                  child: const Text('Cancel'),
+                  child: Text(AppStrings.cancel),
                 ),
                 ElevatedButton(
                   onPressed: canSubmit
@@ -5432,11 +5601,11 @@ class _OnboardingFlowState extends State<OnboardingFlow>
             .resetMasterPasswordAfterRecovery(
               filePath: vaultId,
               recoveryPhrase: recoveryPhrase,
-              newPassword: newPasswordController.text.trim(),
+              newPassword: newPasswordController.text,
               onProgress: _updateBusy,
             )
             .timeout(_vaultOpTimeout);
-        _passwordController.text = newPasswordController.text.trim();
+        _passwordController.text = newPasswordController.text;
         await _resetBiometricForVault(vaultId);
         return true;
       } on TimeoutException {
@@ -5467,7 +5636,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
       confirmPasswordController.dispose();
     }
 
-    return _showMandatoryMasterPasswordReset(recoveryPhrase);
+    return _showMandatoryMasterPasswordReset(
+      recoveryPhrase,
+      filePath: filePath,
+    );
   }
 
   Future<void> _rotateMasterPassword({
@@ -5520,7 +5692,10 @@ class _OnboardingFlowState extends State<OnboardingFlow>
     final vaultId = _vaultFilePath;
     _startBusy('Migrating to Balanced profile (Owl)...');
     try {
-      final recoveryPhrase = _recoveryWords.join(' ');
+      final recoveryPhrase =
+          _vaultCreatedInSession && _recoveryWords.isNotEmpty
+              ? _recoveryWords.join(' ')
+              : null;
       await _vaultService
           .migrateToBalancedProfile(
             filePath: vaultId,
@@ -5591,6 +5766,21 @@ class _OnboardingFlowState extends State<OnboardingFlow>
           .timeout(_vaultOpTimeout);
       if (!mounted) return;
       setState(() => _recoveryWords = normalizedNext);
+      final recNoteIdx = _vaultNotes.indexWhere(
+        (n) => n['id']?.toString() == 'note-recovery-phrase',
+      );
+      if (recNoteIdx >= 0) {
+        final nextNotes = _vaultNotes
+            .map((note) => Map<String, dynamic>.from(note))
+            .toList();
+        nextNotes[recNoteIdx] = _buildRecoveryPhraseNote();
+        await _persistVaultData(
+          items: _vaultItems,
+          notes: nextNotes,
+          customTypeDefinitions: _customTypeDefinitions,
+        );
+      }
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Recovery phrase updated.')));
@@ -5654,7 +5844,10 @@ class _SetupScreenState extends State<SetupScreen> {
     final confirm = _confirmPasswordController.text;
     final hasPassword = password.trim().isNotEmpty;
     final hasConfirm = confirm.trim().isNotEmpty;
-    return hasPassword && hasConfirm && password == confirm;
+    return hasPassword &&
+        hasConfirm &&
+        VaultValidators.isStrongEnoughMasterPassword(password) &&
+        password == confirm;
   }
 
   @override
@@ -5700,6 +5893,12 @@ class _SetupScreenState extends State<SetupScreen> {
               obscureText: _obscurePassword,
               decoration: InputDecoration(
                 labelText: AppStrings.masterPassword,
+                helperText: widget.passwordController.text.isEmpty ||
+                        VaultValidators.isStrongEnoughMasterPassword(
+                          widget.passwordController.text,
+                        )
+                    ? null
+                    : 'Use 10+ characters with letters and numbers',
                 suffixIcon: IconButton(
                   icon: Icon(
                     _obscurePassword
@@ -5807,10 +6006,18 @@ class _SetupScreenState extends State<SetupScreen> {
 }
 
 class RecoveryScreen extends StatelessWidget {
-  const RecoveryScreen({super.key, required this.words, required this.onNext});
+  const RecoveryScreen({
+    super.key,
+    required this.words,
+    required this.onNext,
+    this.saveCopyInVault = true,
+    this.onSaveCopyInVaultChanged,
+  });
 
   final List<String> words;
   final VoidCallback onNext;
+  final bool saveCopyInVault;
+  final ValueChanged<bool>? onSaveCopyInVaultChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -5863,7 +6070,7 @@ class RecoveryScreen extends StatelessWidget {
                           foregroundColor: phraseTextColor,
                         ),
                         onPressed: () async {
-                          await Clipboard.setData(ClipboardData(text: phrase));
+                          await SecureClipboard.shared.copySensitive(phrase);
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(content: Text(AppStrings.recoveryCopied)),
@@ -5897,7 +6104,7 @@ class RecoveryScreen extends StatelessWidget {
                           color: phraseTextColor.withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: SelectableText(
+                        child: Text(
                           '${index + 1}. $word',
                           style: TextStyle(color: phraseTextColor),
                         ),
@@ -5907,14 +6114,26 @@ class RecoveryScreen extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 12),
-            Text(AppStrings.recoveryWarning, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 8),
-            Text(
-              AppStrings.recoverySavedInVault,
-              style: theme.textTheme.bodyMedium,
+            Text(AppStrings.recoveryWarning, style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 4),
+            Material(
+              color: Colors.transparent,
+              child: CheckboxListTile(
+                dense: true,
+                visualDensity: VisualDensity.compact,
+                contentPadding: EdgeInsets.zero,
+                value: saveCopyInVault,
+                onChanged: onSaveCopyInVaultChanged == null
+                    ? null
+                    : (value) => onSaveCopyInVaultChanged!(value ?? true),
+                title: Text(
+                  AppStrings.recoverySavedInVault,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(

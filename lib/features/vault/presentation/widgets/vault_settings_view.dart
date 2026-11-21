@@ -74,21 +74,21 @@ extension _VaultSettingsTab on _VaultAppShellState {
                 ),
                 children: [
                   if (!isWide)
-                    Text('Settings', style: vaultPageHeadingStyle(context)),
+                    Text(AppStrings.settings, style: vaultPageHeadingStyle(context)),
                   if (!isWide) const SizedBox(height: 18),
                   _SettingsSection(
-                    title: 'Account',
+                    title: AppStrings.settingsAccount,
                     children: [
                       _SettingsRow(
                         icon: Icons.dashboard_customize_outlined,
-                        title: 'Nija User',
+                        title: AppStrings.nijaUser,
                         subtitle: _activeVaultName,
                         onTap: () => _showRenameVaultDialog(context),
                       ),
                       _SettingsRow(
                         key: const ValueKey('settings-current-vault-version'),
                         icon: Icons.commit_outlined,
-                        title: 'Current version',
+                        title: AppStrings.currentVersion,
                         subtitle: currentVaultUpdatedLabel == 'Unknown'
                             ? 'Saved vault metadata'
                             : 'Updated $currentVaultUpdatedLabel',
@@ -99,19 +99,19 @@ extension _VaultSettingsTab on _VaultAppShellState {
                     ],
                   ),
                   _SettingsSection(
-                    title: 'Security',
+                    title: AppStrings.settingsSecurityTitle,
                     children: [
                       _SettingsRow(
                         icon: Icons.lock_outline,
-                        title: 'Master Password',
-                        subtitle: 'Change your master password',
+                        title: AppStrings.settingsMasterPassword,
+                        subtitle: AppStrings.changeMasterPasswordSubtitle,
                         onTap: () => _showRotateMasterPasswordDialog(context),
                       ),
                       _SettingsRow(
                         key: const ValueKey('settings-auto-lock-row'),
                         icon: Icons.key_outlined,
                         title: AppStrings.settingsAutoLock,
-                        subtitle: 'Lock Nija automatically',
+                        subtitle: AppStrings.lockNijaAutomatically,
                         value: autoLockLabel,
                         onTap: () => _showAutoLockPicker(context),
                       ),
@@ -154,7 +154,7 @@ extension _VaultSettingsTab on _VaultAppShellState {
                           key: const ValueKey('settings-migrate-to-balanced-row'),
                           icon: Icons.speed_outlined,
                           iconColor: theme.colorScheme.primary,
-                          title: 'Migrate to Balanced Vault',
+                          title: AppStrings.migrateToBalancedVault,
                           subtitle:
                               'Switch from ${_activeGuardianProfile.displayName} to Owl for faster unlock',
                           value: 'Recommended',
@@ -163,46 +163,115 @@ extension _VaultSettingsTab on _VaultAppShellState {
                       _SettingsRow(
                         key: const ValueKey('settings-security-encryption-row'),
                         icon: Icons.shield_outlined,
-                        title: 'Security & Encryption',
-                        subtitle: 'View encryption details and key info',
+                        title: AppStrings.securityAndEncryption,
+                        subtitle: AppStrings.securityAndEncryptionSubtitle,
                         onTap: () => _showSecurityEncryptionSheet(context),
                       ),
                     ],
                   ),
-                  _SettingsSection(
-                    title: 'Backup',
-                    children: [
-                      _SettingsRow(
-                        key: const ValueKey(
-                          'settings-automated-backup-master-switch',
-                        ),
-                        icon: Icons.schedule_outlined,
-                        title: 'Automated backups',
-                        subtitle: 'Daily automated backup at midnight',
-                        trailing: Switch(
+                  if (!kIsWeb)
+                    _SettingsSection(
+                      title: AppStrings.localBackup,
+                      children: [
+                        _SettingsRow(
                           key: const ValueKey(
-                            'settings-automated-backup-switch',
+                            'settings-automated-backup-master-switch',
                           ),
-                          value: _automatedBackupEnabled,
-                          onChanged: _setAutomatedBackupEnabled,
+                          icon: Icons.schedule_outlined,
+                          title: AppStrings.automatedBackups,
+                          subtitle: _automatedBackupFeatureAvailable
+                              ? 'Daily automated backup at ${_formatAutomatedBackupTimeLabel()}'
+                              : AppFeatures.paidUnavailableLabel,
+                          onTap: _automatedBackupFeatureAvailable
+                              ? null
+                              : () {
+                                  if (widget.canPurchaseExpandedVaultStorage) {
+                                    _handlePurchasePro();
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          AppFeatures.paidUnavailableLabel,
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                          trailing: Switch(
+                            key: const ValueKey(
+                              'settings-automated-backup-switch',
+                            ),
+                            value:
+                                _automatedBackupFeatureAvailable &&
+                                _automatedBackupEnabled,
+                            onChanged: _automatedBackupFeatureAvailable
+                                ? _setAutomatedBackupEnabled
+                                : null,
+                          ),
                         ),
-                      ),
-                      _SettingsRow(
-                        key: const ValueKey('settings-local-backup-row'),
-                        icon: Icons.save_outlined,
-                        title: 'Local backup',
-                        subtitle: '2 rolling snapshots · Free version',
-                        detail: _localSnapshotsSummary(),
-                        value: _localSnapshots.isEmpty
-                            ? '0/2'
-                            : '${_localSnapshots.length}/2',
-                        onTap: () => _showLocalSnapshotsDialog(context),
-                      ),
-                    ],
-                  ),
+                        if (_automatedBackupFeatureAvailable &&
+                            _automatedBackupEnabled)
+                          _SettingsRow(
+                            key: const ValueKey(
+                              'settings-automated-backup-time-row',
+                            ),
+                            icon: Icons.access_time_outlined,
+                            title: AppStrings.backupTime,
+                            subtitle:
+                                'Runs daily at ${_formatAutomatedBackupTimeLabel()}',
+                            value: _formatAutomatedBackupTimeLabel(),
+                            onTap: () async {
+                              final selected = await showTimePicker(
+                                context: context,
+                                initialTime: TimeOfDay(
+                                  hour: _automatedBackupHour,
+                                  minute: _automatedBackupMinute,
+                                ),
+                              );
+                              if (selected != null) {
+                                await _setAutomatedBackupTime(
+                                  selected.hour,
+                                  selected.minute,
+                                );
+                              }
+                            },
+                          ),
+                        _SettingsRow(
+                          key: const ValueKey('settings-local-backup-row'),
+                          icon: Icons.save_outlined,
+                          title: AppStrings.localBackupRow,
+                          subtitle: AppStrings.localBackupSubtitle,
+                          detail: _localSnapshotsSummary(),
+                          value: _localSnapshots.isEmpty
+                              ? '0/2'
+                              : '${_localSnapshots.length}/2',
+                          onTap: () => _showLocalSnapshotsDialog(context),
+                        ),
+                        _SettingsActionRow(
+                          children: [
+                            OutlinedButton.icon(
+                              key: const ValueKey('settings-local-backup-now'),
+                              onPressed: _handleLocalBackupNow,
+                              icon: const Icon(Icons.save_outlined),
+                              label: Text(AppStrings.backUpNow),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   _SettingsSection(
-                    title: 'Cloud Backup',
+                    title: AppStrings.cloudBackup,
                     children: [
+                      if (kIsWeb)
+                        _SettingsRow(
+                          key: const ValueKey('settings-web-cloud-backup-note'),
+                          icon: Icons.info_outline,
+                          title: AppStrings.browserBackupScope,
+                          subtitle:
+                              'Local rolling snapshots are mobile/desktop-only',
+                          detail:
+                              'Use Cloud Backup or Export to keep durable backups of your web vault.',
+                        ),
                       _SettingsRow(
                         key: const ValueKey('settings-cloud-backup-switch'),
                         icon: _cloudBackupIcon(),
@@ -232,8 +301,8 @@ extension _VaultSettingsTab on _VaultAppShellState {
                             'settings-cloud-backup-wifi-only-switch',
                           ),
                           icon: Icons.wifi_outlined,
-                          title: 'Back up over Wi-Fi only',
-                          subtitle: 'Avoid mobile data usage',
+                          title: AppStrings.backUpOverWifiOnly,
+                          subtitle: AppStrings.avoidMobileDataUsage,
                           trailing: Switch(
                             key: const ValueKey(
                               'settings-cloud-backup-wifi-switch',
@@ -245,13 +314,13 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         _SettingsRow(
                           key: const ValueKey('settings-cloud-backup-last-at'),
                           icon: Icons.schedule_outlined,
-                          title: 'Last backup',
+                          title: AppStrings.lastBackup,
                           subtitle: _formatCloudBackupLastAt(),
                         ),
                         _SettingsRow(
                           key: const ValueKey('settings-cloud-backup-version'),
                           icon: Icons.cloud_done_outlined,
-                          title: 'Backed up version',
+                          title: AppStrings.backedUpVersion,
                           subtitle:
                               _cloudBackupSummaryRefreshInProgress &&
                                   _cloudBackupUpdatedAt.trim().isEmpty
@@ -285,7 +354,7 @@ extension _VaultSettingsTab on _VaultAppShellState {
                                 ),
                                 onPressed: _handleBackupNow,
                                 icon: const Icon(Icons.backup_outlined),
-                                label: const Text('Backup now'),
+                                label: Text(AppStrings.backUpNow),
                               ),
                             if (_cloudRestoreFeatureAvailable)
                               OutlinedButton.icon(
@@ -295,31 +364,77 @@ extension _VaultSettingsTab on _VaultAppShellState {
                                 onPressed: () =>
                                     _showRestoreOptionsDialog(context),
                                 icon: const Icon(Icons.restore_outlined),
-                                label: const Text('Restore'),
+                                label: Text(AppStrings.restore),
                               ),
                           ],
                         ),
                     ],
                   ),
                   _SettingsSection(
-                    title: 'Storage',
+                    title: AppStrings.storage,
                     children: [
                       _SettingsRow(
                         key: const ValueKey('settings-vault-storage-row'),
                         icon: Icons.storage_outlined,
-                        title: 'Vault storage',
+                        title: AppStrings.vaultStorage,
                         subtitle: vaultUsageLabel,
+                        detail: widget.expandedVaultStorageEntitled
+                            ? (widget.entitlementSource == 'google_play'
+                                  ? 'Pro unlocked (Google Play)'
+                                  : 'Pro unlocked')
+                            : widget.entitlementRefreshInProgress
+                            ? 'Checking Google Play purchase...'
+                            : 'Free plan',
                       ),
+                      if (!widget.expandedVaultStorageEntitled &&
+                          !kIsWeb &&
+                          defaultTargetPlatform == TargetPlatform.android) ...[
+                        _SettingsRow(
+                          key: const ValueKey('settings-upgrade-pro-row'),
+                          icon: Icons.workspace_premium_outlined,
+                          title: 'Upgrade to Pro',
+                          subtitle:
+                              'Unlock ${VaultLimits.formatBytes(VaultLimits.paidVaultBytes)} storage & automated backups',
+                          trailing: widget.purchaseInProgress
+                              ? const SizedBox.square(
+                                  dimension: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : null,
+                          onTap: widget.purchaseInProgress
+                              ? null
+                              : _handlePurchasePro,
+                        ),
+                        _SettingsRow(
+                          key: const ValueKey('settings-restore-purchase-row'),
+                          icon: Icons.restore_outlined,
+                          title: 'Restore purchase',
+                          subtitle: 'Check Google Play for an existing Pro license',
+                          trailing: widget.restoreInProgress
+                              ? const SizedBox.square(
+                                  dimension: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : null,
+                          onTap: widget.restoreInProgress
+                              ? null
+                              : _handleRestorePurchases,
+                        ),
+                      ],
                     ],
                   ),
                   _SettingsSection(
-                    title: 'Data',
+                    title: AppStrings.data,
                     children: [
                       if (kIsWeb)
-                        const _SettingsRow(
-                          key: ValueKey('settings-web-storage-note'),
+                        _SettingsRow(
+                          key: const ValueKey('settings-web-storage-note'),
                           icon: Icons.info_outline,
-                          title: 'Web storage',
+                          title: AppStrings.webStorage,
                           subtitle:
                               'Exported vault files are not updated automatically',
                           detail:
@@ -328,7 +443,7 @@ extension _VaultSettingsTab on _VaultAppShellState {
                       _SettingsRow(
                         key: const ValueKey('settings-import-encrypted-secret'),
                         icon: Icons.file_download_outlined,
-                        title: 'Import',
+                        title: AppStrings.importLabel,
                         subtitle: _importingEncryptedSecret
                             ? 'Importing data...'
                             : 'Import data from a file',
@@ -346,33 +461,19 @@ extension _VaultSettingsTab on _VaultAppShellState {
                       ),
                       _SettingsRow(
                         icon: Icons.file_upload_outlined,
-                        title: 'Export',
-                        subtitle: 'Export data to a file',
+                        title: AppStrings.exportLabel,
+                        subtitle: AppStrings.exportDataToFile,
                         onTap: widget.onExportVault,
                       ),
                       _SettingsRow(
                         icon: Icons.sd_storage_outlined,
-                        title: 'Encrypted export size',
+                        title: AppStrings.encryptedExportSize,
                         subtitle: vaultUsageLabel,
-                      ),
-                      _SettingsRow(
-                        icon: Icons.delete_outline,
-                        iconColor: const Color(0xFFFF5D5D),
-                        title: 'Clear Data',
-                        subtitle: 'Permanently delete all your data',
-                        danger: true,
-                        onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(AppStrings.settingComingSoon),
-                            ),
-                          );
-                        },
                       ),
                     ],
                   ),
                   _SettingsSection(
-                    title: 'Preferences',
+                    title: AppStrings.preferences,
                     children: [
                       if (kIsWeb &&
                           !widget.isExploreDemoSession &&
@@ -389,15 +490,15 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         ),
                       _SettingsRow(
                         icon: Icons.palette_outlined,
-                        title: 'Theme',
-                        subtitle: 'Choose app appearance',
+                        title: AppStrings.theme,
+                        subtitle: AppStrings.chooseAppAppearance,
                         value: themeLabel,
                         onTap: () => _showThemePicker(context),
                       ),
                       _SettingsRow(
                         key: const ValueKey('settings-categories-row'),
                         icon: Icons.folder_outlined,
-                        title: 'Categories',
+                        title: AppStrings.categories,
                         subtitle:
                             '${_customTypeDefinitions.length} custom templates',
                         onTap: () => _showCustomTemplateManager(context),
@@ -411,13 +512,13 @@ extension _VaultSettingsTab on _VaultAppShellState {
                     ],
                   ),
                   _SettingsSection(
-                    title: 'About',
+                    title: AppStrings.about,
                     children: [
                       _SettingsRow(
                         key: const ValueKey('settings-about-nija-row'),
                         icon: Icons.info_outline,
-                        title: 'About Nija',
-                        subtitle: 'Version 1.0.0',
+                        title: AppStrings.aboutNija,
+                        subtitle: AppStrings.versionLabel(AppFeatures.appVersion),
                         onTap: () => _handleAboutNijaTap(context),
                       ),
                       if (_debugInternalsFeatureAvailable &&
@@ -427,8 +528,8 @@ extension _VaultSettingsTab on _VaultAppShellState {
                             'settings-debug-internals-switch',
                           ),
                           icon: Icons.bug_report_outlined,
-                          title: 'Debug internals',
-                          subtitle: 'Show vault internals tab',
+                          title: AppStrings.debugInternals,
+                          subtitle: AppStrings.showVaultInternalsTab,
                           trailing: Switch(
                             value: _debugInternalsEnabled,
                             onChanged: _setDebugInternalsEnabled,
@@ -439,22 +540,22 @@ extension _VaultSettingsTab on _VaultAppShellState {
                         ),
                       _SettingsRow(
                         icon: Icons.verified_user_outlined,
-                        title: 'Privacy Policy',
-                        subtitle: 'Read our privacy policy',
+                        title: AppStrings.privacyPolicy,
+                        subtitle: AppStrings.readOurPrivacyPolicy,
                         onTap: () => _showInfoSheet(
                           context,
-                          title: 'Privacy Policy',
+                          title: AppStrings.privacyPolicy,
                           icon: Icons.verified_user_outlined,
                           sections: _privacyPolicySections(),
                         ),
                       ),
                       _SettingsRow(
                         icon: Icons.description_outlined,
-                        title: 'Terms of Use',
-                        subtitle: 'Read our terms and conditions',
+                        title: AppStrings.termsOfUse,
+                        subtitle: AppStrings.readOurTermsAndConditions,
                         onTap: () => _showInfoSheet(
                           context,
-                          title: 'Terms of Use',
+                          title: AppStrings.termsOfUse,
                           icon: Icons.description_outlined,
                           sections: _termsOfUseSections(),
                         ),
@@ -463,7 +564,7 @@ extension _VaultSettingsTab on _VaultAppShellState {
                   ),
                   const SizedBox(height: 10),
                   ElevatedButton(
-                    onPressed: widget.onLockNow,
+                    onPressed: () => unawaited(_lockWithFlush()),
                     child: Text(AppStrings.lockVaultNow),
                   ),
                 ],

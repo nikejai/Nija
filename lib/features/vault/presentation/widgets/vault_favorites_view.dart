@@ -35,7 +35,7 @@ extension _VaultFavoritesTab on _VaultAppShellState {
           if (!isWide)
             _SectionHeader(
               title: AppStrings.tabNotes,
-              subtitle: 'Starred secrets',
+              subtitle: AppStrings.starredSecrets,
             ),
           if (!isWide) const SizedBox(height: 10),
           if (isWide) ...[
@@ -46,7 +46,7 @@ extension _VaultFavoritesTab on _VaultAppShellState {
                 child: TextField(
                   style: TextStyle(color: colorScheme.onSurface),
                   decoration: InputDecoration(
-                    hintText: 'Search favorites...',
+                    hintText: AppStrings.searchFavoritesHint,
                     hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                     prefixIcon: Icon(
                       Icons.search,
@@ -87,9 +87,9 @@ extension _VaultFavoritesTab on _VaultAppShellState {
           ],
           Expanded(
             child: allFavorites.isEmpty
-                ? const _EmptyState(
-                    title: 'No favorites yet',
-                    subtitle: 'Star items from quick actions to see them here.',
+                ? _EmptyState(
+                    title: AppStrings.noFavoritesYet,
+                    subtitle: AppStrings.noFavoritesYetHint,
                   )
                 : isWide
                 ? _WideAllItemsIndex(

@@ -30,7 +30,7 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>com.example.nija.secret</string>
+			<string>com.nija.secret</string>
 			<key>UTTypeDescription</key>
 			<string>Nija Encrypted Secret File</string>
 			<key>UTTypeConformsTo</key>
@@ -55,7 +55,7 @@
 			<string>Nija Encrypted Secret File</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.example.nija.secret</string>
+				<string>com.nija.secret</string>
 			</array>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../core/config/guardian_profiles.dart';
@@ -33,8 +34,7 @@ class DefaultVaultService implements VaultService {
        _privateVaultStore = privateVaultStore ?? InMemoryPrivateVaultStore(),
        _registryStore = registryStore ?? InMemoryVaultRegistryStore(),
        _deviceId = deviceId,
-       _syncSnapshotOnPersist = syncSnapshotOnPersist ??
-           (privateVaultStore is! FilePrivateVaultStore);
+       _syncSnapshotOnPersist = syncSnapshotOnPersist ?? true;
 
   static const _manifestFile = 'manifest.enc';
   static const _itemsFile = 'items.enc';
@@ -54,6 +54,8 @@ class DefaultVaultService implements VaultService {
   final Map<String, String> _handleToVaultStoreId = <String, String>{};
   final Map<String, _UnlockedVaultSession> _unlockedSessions =
       <String, _UnlockedVaultSession>{};
+  final Map<String, List<String>> _manifestChunksCache =
+      <String, List<String>>{};
 
   @override
   Future<String> readRawVaultFile({required String filePath}) async {
@@ -111,9 +113,9 @@ class DefaultVaultService implements VaultService {
     );
     final guardian = _guardianById(guardianProfileId);
     final now = DateTime.now().toUtc().toIso8601String();
-    final saltBytes = utf8.encode('salt-$now-${guardian.id}');
-    final nonceBytes = utf8.encode('nonce-$now-${guardian.id}');
-    final recoverySaltBytes = utf8.encode('recovery-salt-$now-${guardian.id}');
+    final saltBytes = _randomBytes(16);
+    final nonceBytes = _randomBytes(12);
+    final recoverySaltBytes = _randomBytes(16);
 
     onProgress?.call(
       const VaultOperationProgress(
@@ -305,8 +307,7 @@ class DefaultVaultService implements VaultService {
       cipher: base64Decode(file.encryptedVaultKeyByRecovery),
       key: recoveryKey,
     );
-    final now = DateTime.now().toUtc().toIso8601String();
-    final newSaltBytes = utf8.encode('salt-$now-${file.guardian.profile}');
+    final newSaltBytes = _randomBytes(16);
     final newPasswordKey = await _cryptoAdapter.deriveKey(
       password: newPassword,
       salt: newSaltBytes,
@@ -355,8 +356,7 @@ class DefaultVaultService implements VaultService {
       cipher: base64Decode(file.encryptedVaultKey),
       key: currentMasterKey,
     );
-    final now = DateTime.now().toUtc().toIso8601String();
-    final newSaltBytes = utf8.encode('salt-$now-${file.guardian.profile}');
+    final newSaltBytes = _randomBytes(16);
     final newMasterKey = await _cryptoAdapter.deriveKey(
       password: newPassword,
       salt: newSaltBytes,
@@ -408,10 +408,7 @@ class DefaultVaultService implements VaultService {
       cipher: base64Decode(file.encryptedVaultKeyByRecovery),
       key: currentRecoveryKey,
     );
-    final now = DateTime.now().toUtc().toIso8601String();
-    final newRecoverySaltBytes = utf8.encode(
-      'recovery-salt-$now-${file.guardian.profile}',
-    );
+    final newRecoverySaltBytes = _randomBytes(16);
     final newRecoveryKey = await _cryptoAdapter.deriveKey(
       password: newRecoveryPhrase,
       salt: newRecoverySaltBytes,
@@ -462,8 +459,7 @@ class DefaultVaultService implements VaultService {
     );
 
     final targetProfile = GuardianProfiles.owl;
-    final now = DateTime.now().toUtc().toIso8601String();
-    final newSaltBytes = utf8.encode('salt-$now-${targetProfile.id}');
+    final newSaltBytes = _randomBytes(16);
     final newMasterKey = await _cryptoAdapter.deriveKey(
       password: currentPassword,
       salt: newSaltBytes,
@@ -480,30 +476,44 @@ class DefaultVaultService implements VaultService {
     KdfMetadata? newRecoveryKdf;
 
     if (currentRecoveryPhrase != null && currentRecoveryPhrase.isNotEmpty) {
-      final newRecoverySaltBytes = utf8.encode(
-        'recovery-salt-$now-${targetProfile.id}',
-      );
-      final newRecoveryKey = await _cryptoAdapter.deriveKey(
-        password: currentRecoveryPhrase,
-        salt: newRecoverySaltBytes,
-        memoryKb: targetProfile.memoryKb,
-        iterations: targetProfile.iterations,
-        parallelism: targetProfile.parallelism,
-      );
-      newEncryptedByRecovery = base64Encode(
-        await _cryptoAdapter.encrypt(
-          plain: vaultKey,
-          key: newRecoveryKey,
-        ),
-      );
-      newRecoveryKdf = KdfMetadata(
-        name: file.recoveryKdf.name,
-        version: file.recoveryKdf.version,
-        memoryKb: targetProfile.memoryKb,
-        iterations: targetProfile.iterations,
-        parallelism: targetProfile.parallelism,
-        salt: base64Encode(newRecoverySaltBytes),
-      );
+      var recoveryMatches = false;
+      try {
+        final existingRecoveryKey = await _deriveKey(
+          currentRecoveryPhrase,
+          file.recoveryKdf,
+        );
+        await _cryptoAdapter.decrypt(
+          cipher: base64Decode(file.encryptedVaultKeyByRecovery),
+          key: existingRecoveryKey,
+        );
+        recoveryMatches = true;
+      } catch (_) {
+        recoveryMatches = false;
+      }
+      if (recoveryMatches) {
+        final newRecoverySaltBytes = _randomBytes(16);
+        final newRecoveryKey = await _cryptoAdapter.deriveKey(
+          password: currentRecoveryPhrase,
+          salt: newRecoverySaltBytes,
+          memoryKb: targetProfile.memoryKb,
+          iterations: targetProfile.iterations,
+          parallelism: targetProfile.parallelism,
+        );
+        newEncryptedByRecovery = base64Encode(
+          await _cryptoAdapter.encrypt(
+            plain: vaultKey,
+            key: newRecoveryKey,
+          ),
+        );
+        newRecoveryKdf = KdfMetadata(
+          name: file.recoveryKdf.name,
+          version: file.recoveryKdf.version,
+          memoryKb: targetProfile.memoryKb,
+          iterations: targetProfile.iterations,
+          parallelism: targetProfile.parallelism,
+          salt: base64Encode(newRecoverySaltBytes),
+        );
+      }
     }
 
     final newKdf = KdfMetadata(
@@ -532,7 +542,7 @@ class DefaultVaultService implements VaultService {
       ),
     );
 
-    _rememberUnlockedSession(
+    await _rememberUnlockedSession(
       filePath: filePath,
       password: currentPassword,
       file: file.copyWith(
@@ -560,7 +570,7 @@ class DefaultVaultService implements VaultService {
     VaultProgressCallback? onProgress,
   }) async {
     final file = await _readMigratedVaultFile(filePath: filePath);
-    final cachedPayload = _cachedPayloadFor(
+    final cachedPayload = await _cachedPayloadFor(
       filePath: filePath,
       password: password,
       file: file,
@@ -584,7 +594,7 @@ class DefaultVaultService implements VaultService {
       file: file,
       vaultKey: vaultKey,
     );
-    _rememberUnlockedSession(
+    await _rememberUnlockedSession(
       filePath: filePath,
       password: password,
       file: file,
@@ -622,7 +632,7 @@ class DefaultVaultService implements VaultService {
     );
     await _rememberRegistry(nextHeader, label: _displayLabel(nextHeader));
     _handleToVaultStoreId[filePath] = nextHeader.vaultId;
-    _rememberUnlockedSession(
+    await _rememberUnlockedSession(
       filePath: filePath,
       password: password,
       file: nextHeader,
@@ -838,6 +848,20 @@ class DefaultVaultService implements VaultService {
 
   @override
   Future<int> readVaultSizeBytes({required String filePath}) async {
+    final storeId = _handleToVaultStoreId[filePath] ?? filePath;
+    if (await _privateVaultStore.vaultExists(storeId)) {
+      final desc = await _privateVaultStore.describeVault(storeId);
+      final files = desc['files'];
+      if (files is Map) {
+        var total = 0;
+        for (final val in files.values) {
+          if (val is int) {
+            total += val;
+          }
+        }
+        if (total > 0) return total;
+      }
+    }
     final snapshot = await _snapshotForHandle(filePath);
     return utf8.encode(jsonEncode(snapshot.toJson())).length;
   }
@@ -1211,42 +1235,58 @@ class DefaultVaultService implements VaultService {
   Future<Map<String, dynamic>> readVaultInternals({
     required String filePath,
   }) async {
-    final storeId = _handleToVaultStoreId[filePath] ?? filePath;
-    final snapshot = await _snapshotForHandle(filePath);
+    final header = await _readMigratedVaultFile(filePath: filePath);
+    final storeId = _storeIdFor(filePath, header);
     final structure = await _privateVaultStore.describeVault(storeId);
-    final snapshotBytes = utf8.encode(jsonEncode(snapshot.toJson())).length;
+    final workingBytes = _workingStoreSizeBytes(structure);
+    final files = structure['files'];
+    final sectionSizes = <String, int>{};
+    if (files is Map && files.isNotEmpty) {
+      for (final entry in files.entries) {
+        final name = entry.key.toString();
+        if (name == _headerFile || name.endsWith('.tmp')) continue;
+        final val = entry.value;
+        sectionSizes[name] = val is int ? val : int.tryParse('$val') ?? 0;
+      }
+    } else {
+      for (final entry in header.encryptedSections.entries) {
+        sectionSizes[entry.key] = _base64ByteLength(entry.value);
+      }
+    }
+    final headerJsonBytes = utf8.encode(jsonEncode(header.toJson())).length;
+    final snapshotBytes = workingBytes > 0
+        ? headerJsonBytes + ((workingBytes * 4) ~/ 3)
+        : headerJsonBytes;
     return <String, dynamic>{
-      'format': snapshot.format,
-      'formatVersion': snapshot.formatVersion,
-      'schemaVersion': snapshot.schemaVersion,
-      'storageLayoutVersion': snapshot.storageLayoutVersion,
-      'manifestVersion': snapshot.manifestVersion,
+      'format': header.format,
+      'formatVersion': header.formatVersion,
+      'schemaVersion': header.schemaVersion,
+      'storageLayoutVersion': header.storageLayoutVersion,
+      'manifestVersion': header.manifestVersion,
       'snapshotBytes': snapshotBytes,
-      'workingStoreBytes': _workingStoreSizeBytes(structure),
-      'vaultId': snapshot.vaultId,
-      'vaultVersionId': snapshot.vaultVersionId,
-      'revision': snapshot.revision,
-      'createdAt': snapshot.createdAt,
-      'updatedAt': snapshot.updatedAt,
-      'lastModifiedByDeviceId': snapshot.lastModifiedByDeviceId ?? '',
+      'workingStoreBytes': workingBytes,
+      'vaultId': header.vaultId,
+      'vaultVersionId': header.vaultVersionId,
+      'revision': header.revision,
+      'createdAt': header.createdAt,
+      'updatedAt': header.updatedAt,
+      'lastModifiedByDeviceId': header.lastModifiedByDeviceId ?? '',
       'crypto': <String, dynamic>{
-        'guardianProfile': snapshot.guardian.profile,
-        'kdf': snapshot.kdf.name,
-        'kdfMemoryKb': snapshot.kdf.memoryKb,
-        'kdfIterations': snapshot.kdf.iterations,
-        'kdfParallelism': snapshot.kdf.parallelism,
-        'kdfSaltBytes': _base64ByteLength(snapshot.kdf.salt),
-        'recoveryKdfSaltBytes': _base64ByteLength(snapshot.recoveryKdf.salt),
-        'cipher': snapshot.cipher.name,
-        'cipherNonceBytes': _base64ByteLength(snapshot.cipher.nonce),
-        'encryptedVaultKeyBytes': _base64ByteLength(snapshot.encryptedVaultKey),
+        'guardianProfile': header.guardian.profile,
+        'kdf': header.kdf.name,
+        'kdfMemoryKb': header.kdf.memoryKb,
+        'kdfIterations': header.kdf.iterations,
+        'kdfParallelism': header.kdf.parallelism,
+        'kdfSaltBytes': _base64ByteLength(header.kdf.salt),
+        'recoveryKdfSaltBytes': _base64ByteLength(header.recoveryKdf.salt),
+        'cipher': header.cipher.name,
+        'cipherNonceBytes': _base64ByteLength(header.cipher.nonce),
+        'encryptedVaultKeyBytes': _base64ByteLength(header.encryptedVaultKey),
         'encryptedRecoveryKeyBytes': _base64ByteLength(
-          snapshot.encryptedVaultKeyByRecovery,
+          header.encryptedVaultKeyByRecovery,
         ),
       },
-      'encryptedSections': snapshot.encryptedSections.map(
-        (name, value) => MapEntry<String, int>(name, _base64ByteLength(value)),
-      ),
+      'encryptedSections': sectionSizes,
       'workingStore': structure,
     };
   }
@@ -1308,7 +1348,7 @@ class DefaultVaultService implements VaultService {
     }
     await _rememberRegistry(file, label: _displayLabel(file));
     _handleToVaultStoreId[filePath] = file.vaultId;
-    _rememberUnlockedSession(
+    await _rememberUnlockedSession(
       filePath: filePath,
       password: secret,
       file: file,
@@ -1455,11 +1495,18 @@ class DefaultVaultService implements VaultService {
         final header = await StreamingVaultContainer.peekHeaderFromFile(filePath);
         if (header != null) {
           _handleToVaultStoreId[filePath] = header.vaultId;
+          if (await _privateVaultStore.vaultExists(header.vaultId)) {
+            return _privateVaultStore.readHeader(header.vaultId);
+          }
           return header;
         }
       }
     }
-    return _readSnapshotFile(filePath);
+    final snapshot = await _readSnapshotFile(filePath);
+    if (await _privateVaultStore.vaultExists(snapshot.vaultId)) {
+      return _privateVaultStore.readHeader(snapshot.vaultId);
+    }
+    return snapshot;
   }
 
   Future<VaultFile> _readSnapshotFile(String filePath) async {
@@ -1518,6 +1565,9 @@ class DefaultVaultService implements VaultService {
   ) async {
     final cipher = await _privateVaultStore.readSection(vaultStoreId, fileName);
     final plain = await _cryptoAdapter.decrypt(cipher: cipher, key: vaultKey);
+    if (!kIsWeb && plain.length > 100 * 1024) {
+      return compute(_decodeJsonUtf8, plain);
+    }
     return jsonDecode(utf8.decode(plain));
   }
 
@@ -1586,24 +1636,39 @@ class DefaultVaultService implements VaultService {
       payload: payload,
       vaultKey: vaultKey,
     );
-    final existing = await _readExistingWorkingSections(vaultStoreId);
+    final existingFileNames = await _existingWorkingFileNames(vaultStoreId);
     final referencedDocumentSections = await _referencedDocumentFiles(
+      vaultStoreId: vaultStoreId,
       payload: payload,
-      existingSections: existing,
+      existingFileNames: existingFileNames,
       vaultKey: vaultKey,
     );
-    for (final entry in existing.entries) {
-      if (_isDocumentStorageSection(entry.key) &&
-          !referencedDocumentSections.contains(entry.key)) {
+    final keepExistingFiles = <String>{};
+    for (final name in existingFileNames) {
+      if (sections.containsKey(name) || name == _headerFile) continue;
+      if (_isDocumentStorageSection(name) &&
+          !referencedDocumentSections.contains(name)) {
         continue;
       }
-      sections.putIfAbsent(entry.key, () => entry.value);
+      keepExistingFiles.add(name);
     }
     await _privateVaultStore.commitVault(
       vaultStoreId: vaultStoreId,
       header: header,
       sections: sections,
+      keepExistingFiles: keepExistingFiles,
     );
+  }
+
+  Future<Set<String>> _existingWorkingFileNames(String vaultStoreId) async {
+    if (!await _privateVaultStore.vaultExists(vaultStoreId)) {
+      return <String>{};
+    }
+    final structure = await _privateVaultStore.describeVault(vaultStoreId);
+    final files = Map<String, dynamic>.from(
+      structure['files'] as Map? ?? const <String, dynamic>{},
+    );
+    return files.keys.where((name) => name != _headerFile).toSet();
   }
 
   Future<Map<String, Uint8List>> _readExistingWorkingSections(
@@ -1677,8 +1742,11 @@ class DefaultVaultService implements VaultService {
   }
 
   Future<Uint8List> _encryptJson(dynamic value, List<int> vaultKey) async {
+    final plain = !kIsWeb && value is List && value.length > 200
+        ? await compute(_encodeJsonUtf8, value)
+        : utf8.encode(jsonEncode(value));
     final encrypted = await _cryptoAdapter.encrypt(
-      plain: utf8.encode(jsonEncode(value)),
+      plain: plain,
       key: vaultKey,
     );
     return Uint8List.fromList(encrypted);
@@ -1695,22 +1763,34 @@ class DefaultVaultService implements VaultService {
   }
 
   Future<Set<String>> _referencedDocumentFiles({
+    required String vaultStoreId,
     required VaultPayload payload,
-    required Map<String, Uint8List> existingSections,
+    required Set<String> existingFileNames,
     required List<int> vaultKey,
   }) async {
     final files = <String>{};
     for (final sectionName in _referencedDocumentManifests(payload)) {
       files.add(sectionName);
-      final manifestCipher = existingSections[sectionName];
-      if (manifestCipher == null) continue;
+      if (!existingFileNames.contains(sectionName)) continue;
+      final cachedChunks = _manifestChunksCache[sectionName];
+      if (cachedChunks != null) {
+        files.addAll(cachedChunks);
+        continue;
+      }
       try {
+        final manifestCipher = await _privateVaultStore.readSection(
+          vaultStoreId,
+          sectionName,
+        );
         final manifestPlain = await _cryptoAdapter.decrypt(
           cipher: manifestCipher,
           key: vaultKey,
         );
         final chunks = _documentChunkNamesFromManifest(manifestPlain);
-        if (chunks != null) files.addAll(chunks);
+        if (chunks != null) {
+          _manifestChunksCache[sectionName] = chunks;
+          files.addAll(chunks);
+        }
       } catch (_) {
         // Keep the manifest reference; unreadable chunks are not safe to infer.
       }
@@ -1818,8 +1898,9 @@ class DefaultVaultService implements VaultService {
     if (allowSessionLookup && filePath.isNotEmpty) {
       final cached = _unlockedSessions[filePath];
       if (cached != null &&
-          cached.password == password &&
-          cached.kdfFingerprint == fingerprint) {
+          cached.kdfFingerprint == fingerprint &&
+          cached.passwordVerifier ==
+              await _passwordVerifier(password, file.kdf.salt)) {
         return cached.vaultKey;
       }
     }
@@ -1830,31 +1911,40 @@ class DefaultVaultService implements VaultService {
     );
   }
 
-  VaultPayload? _cachedPayloadFor({
+  Future<VaultPayload?> _cachedPayloadFor({
     required String filePath,
     required String password,
     required VaultFile file,
-  }) {
+  }) async {
     final cached = _unlockedSessions[filePath];
     if (cached == null) return null;
-    if (cached.password != password) return null;
     if (cached.kdfFingerprint != _kdfFingerprint(file.kdf)) return null;
+    if (cached.passwordVerifier !=
+        await _passwordVerifier(password, file.kdf.salt)) {
+      return null;
+    }
     return cached.payload;
   }
 
-  void _rememberUnlockedSession({
+  Future<void> _rememberUnlockedSession({
     required String filePath,
     required String password,
     required VaultFile file,
     required List<int> vaultKey,
     VaultPayload? payload,
-  }) {
+  }) async {
+    final verifier = await _passwordVerifier(password, file.kdf.salt);
     _unlockedSessions[filePath] = _UnlockedVaultSession(
-      password: password,
+      passwordVerifier: verifier,
       kdfFingerprint: _kdfFingerprint(file.kdf),
       vaultKey: vaultKey,
       payload: payload,
     );
+  }
+
+  Future<String> _passwordVerifier(String password, String salt) async {
+    final digest = await Sha256().hash(utf8.encode('$salt\x00$password'));
+    return base64Encode(digest.bytes);
   }
 
   String _kdfFingerprint(KdfMetadata kdf) {
@@ -1864,6 +1954,7 @@ class DefaultVaultService implements VaultService {
   @override
   void clearUnlockedSession({required String filePath}) {
     _unlockedSessions.remove(filePath);
+    _manifestChunksCache.clear();
   }
 
   Future<List<int>> _deriveKey(String secret, KdfMetadata kdf) {
@@ -1889,6 +1980,7 @@ class DefaultVaultService implements VaultService {
       lastModifiedByDeviceId: _deviceId,
       resolvedFromVersionIds: const <String>[],
       encryptedPayload: null,
+      encryptedSections: const <String, String>{},
     );
   }
 
@@ -1987,14 +2079,22 @@ class DefaultVaultService implements VaultService {
 
 class _UnlockedVaultSession {
   const _UnlockedVaultSession({
-    required this.password,
+    required this.passwordVerifier,
     required this.kdfFingerprint,
     required this.vaultKey,
     this.payload,
   });
 
-  final String password;
+  final String passwordVerifier;
   final String kdfFingerprint;
   final List<int> vaultKey;
   final VaultPayload? payload;
+}
+
+dynamic _decodeJsonUtf8(List<int> plain) {
+  return jsonDecode(utf8.decode(plain));
+}
+
+List<int> _encodeJsonUtf8(dynamic value) {
+  return utf8.encode(jsonEncode(value));
 }

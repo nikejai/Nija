@@ -1,15 +1,31 @@
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class PinCredentialStore {
+  PinCredentialStore({DateTime Function()? now})
+    : _now = now ?? DateTime.now;
+
+  final DateTime Function() _now;
   static const _storageKey = 'nija_pin_unlock_v1';
   static const _version = 1;
   static const _iterations = 310000;
   static const _saltLength = 16;
+  static const int maxFailedAttempts = 5;
+  static const int cooldownThreshold = 3;
+  static const Duration cooldownDuration = Duration(seconds: 30);
+
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.unlocked_this_device,
+    ),
+  );
 
   Future<void> saveMasterPassword({
     required String vaultId,
@@ -31,6 +47,8 @@ class PinCredentialStore {
       'cipherText': encrypted.cipherTextBase64,
       'nonce': encrypted.nonceBase64,
       'mac': encrypted.macBase64,
+      'failedAttempts': 0,
+      'lockedUntilEpochMs': 0,
     };
     await _writeAll(records);
   }
@@ -42,6 +60,11 @@ class PinCredentialStore {
     final records = await _readAll();
     final record = records[vaultId];
     if (record == null) return null;
+    final nowMs = _now().millisecondsSinceEpoch;
+    final lockedUntil = (record['lockedUntilEpochMs'] as num?)?.toInt() ?? 0;
+    if (lockedUntil > nowMs) {
+      return null;
+    }
     try {
       final salt = base64Decode(record['salt']?.toString() ?? '');
       final iterationsRaw = record['iterations'];
@@ -53,13 +76,31 @@ class PinCredentialStore {
         salt: salt,
         iterations: iterations,
       );
-      return await _decryptPassword(
+      final password = await _decryptPassword(
         secretKey: key,
         cipherTextBase64: record['cipherText']?.toString() ?? '',
         nonceBase64: record['nonce']?.toString() ?? '',
         macBase64: record['mac']?.toString() ?? '',
       );
+      if (((record['failedAttempts'] as num?)?.toInt() ?? 0) > 0 ||
+          lockedUntil > 0) {
+        record['failedAttempts'] = 0;
+        record['lockedUntilEpochMs'] = 0;
+        await _writeAll(records);
+      }
+      return password;
     } catch (_) {
+      final failed = ((record['failedAttempts'] as num?)?.toInt() ?? 0) + 1;
+      if (failed >= maxFailedAttempts) {
+        records.remove(vaultId);
+      } else {
+        record['failedAttempts'] = failed;
+        if (failed >= cooldownThreshold) {
+          record['lockedUntilEpochMs'] =
+              nowMs + cooldownDuration.inMilliseconds;
+        }
+      }
+      await _writeAll(records);
       return null;
     }
   }
@@ -77,8 +118,26 @@ class PinCredentialStore {
 
   Future<Map<String, Map<String, Object?>>> _readAll() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_storageKey);
+      String? raw;
+      if (!kIsWeb) {
+        try {
+          raw = await _secureStorage.read(key: _storageKey);
+        } on MissingPluginException {
+          raw = null;
+        } catch (_) {
+          raw = null;
+        }
+      }
+      if (raw == null || raw.isEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        raw = prefs.getString(_storageKey);
+        if (raw != null && raw.isNotEmpty && !kIsWeb) {
+          try {
+            await _secureStorage.write(key: _storageKey, value: raw);
+            await prefs.remove(_storageKey);
+          } catch (_) {}
+        }
+      }
       if (raw == null || raw.isEmpty) return <String, Map<String, Object?>>{};
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return <String, Map<String, Object?>>{};
@@ -94,8 +153,17 @@ class PinCredentialStore {
   }
 
   Future<void> _writeAll(Map<String, Map<String, Object?>> records) async {
+    final encoded = jsonEncode(records);
+    if (!kIsWeb) {
+      try {
+        await _secureStorage.write(key: _storageKey, value: encoded);
+        return;
+      } on MissingPluginException {
+        // Fall through to SharedPreferences in unit tests without secure storage.
+      } catch (_) {}
+    }
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_storageKey, jsonEncode(records));
+    await prefs.setString(_storageKey, encoded);
   }
 
   Future<SecretKey> _deriveKey({

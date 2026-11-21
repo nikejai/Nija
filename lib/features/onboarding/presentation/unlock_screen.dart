@@ -173,7 +173,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
                 ),
                 IconButton(
                   key: const ValueKey('unlock-theme-toggle'),
-                  tooltip: 'Change theme',
+                  tooltip: AppStrings.changeTheme,
                   onPressed: widget.onThemeModeChanged == null
                       ? null
                       : () => widget.onThemeModeChanged!(
