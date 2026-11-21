@@ -1,3 +1,5 @@
+import '../../../../core/localization/app_strings.dart';
+import '../../../../core/security/secure_clipboard.dart';
 import 'vault_document_preview_widgets.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -39,13 +41,11 @@ class _EncryptedSecretViewerScreenState
   }
 
   Future<void> _copyField(SecretField field) async {
-    await Clipboard.setData(
-      ClipboardData(text: '${field.key}: ${field.value}'),
-    );
+    await SecureClipboard.shared.copySensitive('${field.key}: ${field.value}');
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+    ).showSnackBar(SnackBar(content: Text(AppStrings.copiedToClipboard)));
   }
 
   Future<void> _copyVisibleSecret() async {
@@ -54,11 +54,11 @@ class _EncryptedSecretViewerScreenState
       final field = widget.fields[i];
       buffer.writeln('${field.key}: ${_displayValue(i)}');
     }
-    await Clipboard.setData(ClipboardData(text: buffer.toString().trim()));
+    await SecureClipboard.shared.copySensitive(buffer.toString().trim());
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Visible secret copied')));
+    ).showSnackBar(SnackBar(content: Text(AppStrings.visibleSecretCopied)));
   }
 
   @override
@@ -75,7 +75,7 @@ class _EncryptedSecretViewerScreenState
               child: OutlinedButton.icon(
                 onPressed: _copyVisibleSecret,
                 icon: const Icon(Icons.copy_all_outlined),
-                label: const Text('Copy full secret (visible)'),
+                label: Text(AppStrings.copyFullSecretVisible),
               ),
             ),
             const SizedBox(height: 8),
@@ -85,13 +85,13 @@ class _EncryptedSecretViewerScreenState
                 key: const ValueKey('import-secret-to-vault'),
                 onPressed: widget.onImport,
                 icon: const Icon(Icons.download_done_outlined),
-                label: const Text('Import to vault'),
+                label: Text(AppStrings.importToVault),
               ),
             ),
             const SizedBox(height: 10),
             Expanded(
               child: widget.fields.isEmpty
-                  ? const Center(child: Text('No content'))
+                  ? Center(child: Text(AppStrings.noContent))
                   : ListView.separated(
                       itemCount: widget.fields.length,
                       separatorBuilder: (context, index) =>
@@ -202,7 +202,7 @@ class _EncryptedImportBundleScreenState
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Encrypted file'),
+        title: Text(AppStrings.encryptedFile),
         actions: [
           TextButton(
             onPressed: _remainingEntries.isEmpty || _importingAll
@@ -213,7 +213,7 @@ class _EncryptedImportBundleScreenState
                     dimension: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Import all'),
+                : Text(AppStrings.importAll),
           ),
         ],
       ),
@@ -357,7 +357,9 @@ class _EncryptedImportEntryPreviewScreenState
                               ? Icons.check_circle_outline
                               : Icons.file_download_outlined,
                         ),
-                  label: Text(_imported ? 'Imported' : 'Import item'),
+                  label: Text(
+                    _imported ? AppStrings.imported : AppStrings.importItem,
+                  ),
                 ),
               ),
             ),
@@ -426,7 +428,7 @@ class _EncryptedImportEntryPreviewScreenState
           icon: Icons.sticky_note_2_outlined,
           color: const Color(0xFF6366F1),
           title: entry.title,
-          subtitle: 'Secure Note',
+          subtitle: AppStrings.secureNote,
         ),
         const SizedBox(height: 16),
         _ImportPreviewRow(label: 'Content', value: body.isEmpty ? '-' : body),
@@ -574,17 +576,17 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
 
   Widget _buildPreview(BuildContext context, Uint8List? bytes) {
     if (bytes == null) {
-      return const DocumentPreviewMessage(
+      return DocumentPreviewMessage(
         icon: Icons.error_outline,
-        title: 'Unable to preview document',
-        subtitle: 'The encrypted file does not contain readable document data.',
+        title: AppStrings.unableToPreviewDocument,
+        subtitle: AppStrings.unableToPreviewDocumentHint,
       );
     }
     if (bytes.isEmpty) {
-      return const DocumentPreviewMessage(
+      return DocumentPreviewMessage(
         icon: Icons.insert_drive_file_outlined,
-        title: 'Empty document',
-        subtitle: 'There is no content to preview.',
+        title: AppStrings.emptyDocument,
+        subtitle: AppStrings.emptyDocumentHint,
       );
     }
     if (_isImageExtension(_extension)) {
@@ -599,8 +601,8 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
               _openExternalPreviewOnce(bytes);
               return DocumentPreviewMessage(
                 icon: Icons.broken_image_outlined,
-                title: 'Image preview failed',
-                subtitle: 'Tap to choose an app that can open this file.',
+                title: AppStrings.imagePreviewFailed,
+                subtitle: AppStrings.imagePreviewFailedHint,
                 onTap: () => _openDocument(bytes),
               );
             },
@@ -636,8 +638,8 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
       icon: _extension == 'PDF'
           ? Icons.picture_as_pdf_outlined
           : Icons.insert_drive_file_outlined,
-      title: 'Opening $_extension document',
-      subtitle: 'Tap to choose an app that can preview this file.',
+      title: AppStrings.openingDocument(_extension),
+      subtitle: AppStrings.openingDocumentHint,
       onTap: () => _openDocument(bytes),
     );
   }
@@ -664,7 +666,9 @@ class _DocumentImportPreviewState extends State<_DocumentImportPreview> {
     } on PlatformException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message ?? 'No app can open this file.')),
+        SnackBar(
+          content: Text(error.message ?? AppStrings.noAppCanOpenFile),
+        ),
       );
       await _shareDocumentFallback(bytes, mimeType);
     }

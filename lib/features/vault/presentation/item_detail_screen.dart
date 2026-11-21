@@ -199,7 +199,7 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
               IconButton(
                 onPressed: () => setState(() => _isFavorite = !_isFavorite),
                 icon: Icon(_isFavorite ? Icons.star : Icons.star_border),
-                tooltip: 'Favorite',
+                tooltip: AppStrings.favorite,
               ),
               IconButton(
                 onPressed: _editItem,
@@ -418,11 +418,11 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
       });
       ScaffoldMessenger.of(
         this.context,
-      ).showSnackBar(const SnackBar(content: Text('Document attached.')));
+      ).showSnackBar(SnackBar(content: Text(AppStrings.documentAttached)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(this.context).showSnackBar(
-        const SnackBar(content: Text('Unable to attach document.')),
+        SnackBar(content: Text(AppStrings.unableToAttachDocument)),
       );
     }
   }
@@ -512,16 +512,16 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
     if (snapshot.hasError || attachment == null) {
       return DocumentPreviewMessage(
         icon: Icons.error_outline,
-        title: 'Unable to preview document',
-        subtitle: snapshot.error?.toString() ?? 'Document unavailable.',
+        title: AppStrings.unableToPreviewDocument,
+        subtitle: snapshot.error?.toString() ?? AppStrings.documentUnavailable,
       );
     }
     final bytes = snapshot.data ?? const <int>[];
     if (bytes.isEmpty) {
-      return const DocumentPreviewMessage(
+      return DocumentPreviewMessage(
         icon: Icons.insert_drive_file_outlined,
-        title: 'Empty document',
-        subtitle: 'There is no content to preview.',
+        title: AppStrings.emptyDocument,
+        subtitle: AppStrings.emptyDocumentHint,
       );
     }
     if (_isImageExtension(extension)) {
@@ -533,10 +533,10 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
             Uint8List.fromList(bytes),
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) =>
-                const DocumentPreviewMessage(
+                DocumentPreviewMessage(
                   icon: Icons.broken_image_outlined,
-                  title: 'Image preview failed',
-                  subtitle: 'Use Open document to view this file.',
+                  title: AppStrings.imagePreviewFailed,
+                  subtitle: AppStrings.useOpenDocumentToView,
                 ),
           ),
         ),
@@ -565,8 +565,8 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
       icon: extension == 'PDF'
           ? Icons.picture_as_pdf_outlined
           : Icons.insert_drive_file_outlined,
-      title: '$extension preview unavailable',
-      subtitle: 'Use Open document to view this file in another app.',
+      title: AppStrings.previewUnavailable(extension),
+      subtitle: AppStrings.useOpenDocumentAnotherApp,
     );
   }
 
@@ -594,27 +594,27 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
         VaultMenuOption(
           value: 'open',
           leading: const Icon(Icons.open_in_new_outlined),
-          title: 'Open document',
+          title: AppStrings.openDocument,
         ),
         VaultMenuOption(
           value: 'share',
           leading: const Icon(Icons.share_outlined),
-          title: 'Share file',
+          title: AppStrings.shareFile,
         ),
         VaultMenuOption(
           value: 'share_encrypted',
           leading: const Icon(Icons.enhanced_encryption_outlined),
-          title: 'Share encrypted file',
+          title: AppStrings.shareEncryptedFile,
         ),
         VaultMenuOption(
           value: 'export_encrypted',
           leading: const Icon(Icons.file_download_outlined),
-          title: 'Export encrypted file',
+          title: AppStrings.exportEncryptedFile,
         ),
         VaultMenuOption(
           value: 'save_copy',
           leading: const Icon(Icons.download_for_offline_outlined),
-          title: 'Save copy',
+          title: AppStrings.saveCopy,
         ),
         VaultMenuOption(
           value: 'delete',
@@ -692,11 +692,11 @@ class _ItemDetailScreenState extends State<_ItemDetailScreen> {
       });
       ScaffoldMessenger.of(
         this.context,
-      ).showSnackBar(const SnackBar(content: Text('Attachment removed.')));
+      ).showSnackBar(SnackBar(content: Text(AppStrings.attachmentRemoved)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(this.context).showSnackBar(
-        const SnackBar(content: Text('Unable to process attachment.')),
+        SnackBar(content: Text(AppStrings.unableToProcessAttachment)),
       );
     }
   }
@@ -1125,12 +1125,12 @@ class _ItemDetailFieldRow extends StatelessWidget {
                     revealed ? Icons.visibility_off : Icons.visibility,
                     size: 18,
                   ),
-                  tooltip: revealed ? 'Hide' : 'Reveal',
+                  tooltip: revealed ? AppStrings.hide : AppStrings.reveal,
                   onPressed: onToggleReveal,
                 ),
               IconButton(
                 icon: const Icon(Icons.copy, size: 18),
-                tooltip: 'Copy',
+                tooltip: AppStrings.copy,
                 onPressed: onCopy,
               ),
             ],
@@ -1223,7 +1223,7 @@ class _ItemDetailSidePanel extends StatelessWidget {
             child: OutlinedButton.icon(
               onPressed: () => unawaited(onShareSecurely()),
               icon: const Icon(Icons.enhanced_encryption_outlined, size: 18),
-              label: const Text('Share securely'),
+              label: Text(AppStrings.shareSecurely),
             ),
           ),
         ],
@@ -1310,7 +1310,7 @@ class _ItemAttachmentsSection extends StatelessWidget {
                 key: const ValueKey('item-add-attachment'),
                 onPressed: onAdd,
                 icon: const Icon(Icons.attach_file),
-                label: const Text('Add document'),
+                label: Text(AppStrings.addDocument),
               ),
             ],
           ),

@@ -247,7 +247,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
                     ? null
                     : () => setState(() => _isFavorite = !_isFavorite),
                 icon: Icon(_isFavorite ? Icons.star : Icons.star_border),
-                tooltip: 'Favorite',
+                tooltip: AppStrings.favorite,
               ),
               IconButton(
                 onPressed: _closing ? null : _editDocumentItem,
@@ -503,14 +503,14 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
       ),
-      child: const FittedBox(
+      child: FittedBox(
         fit: BoxFit.scaleDown,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.open_in_new_outlined, size: 16),
             SizedBox(width: 4),
-            Text('Open'),
+            Text(AppStrings.open),
           ],
         ),
       ),
@@ -519,7 +519,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     final saveMenuButton = PopupMenuButton<String>(
       key: const ValueKey('document-detail-save-copy'),
       enabled: hasBytes,
-      tooltip: 'Save / Download options',
+      tooltip: AppStrings.saveDownloadOptions,
       onSelected: (value) {
         if (value == 'plain') {
           _saveDocumentCopy(bytes!, selectedDocument);
@@ -528,23 +528,23 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         }
       },
       itemBuilder: (context) => [
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'plain',
           child: Row(
             children: [
               Icon(Icons.download_for_offline_outlined, size: 18),
               SizedBox(width: 8),
-              Text('Save copy (decrypted)'),
+              Text(AppStrings.saveCopyDecrypted),
             ],
           ),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'encrypted',
           child: Row(
             children: [
               Icon(Icons.enhanced_encryption_outlined, size: 18),
               SizedBox(width: 8),
-              Text('Export encrypted (.nija)'),
+              Text(AppStrings.exportEncryptedNija),
             ],
           ),
         ),
@@ -556,14 +556,14 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
             visualDensity: VisualDensity.compact,
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           ),
-          child: const FittedBox(
+          child: FittedBox(
             fit: BoxFit.scaleDown,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.download_outlined, size: 16),
                 SizedBox(width: 4),
-                Text('Save copy'),
+                Text(AppStrings.saveCopy),
                 Icon(Icons.arrow_drop_down, size: 16),
               ],
             ),
@@ -575,7 +575,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     final shareMenuButton = PopupMenuButton<String>(
       key: const ValueKey('document-detail-share-actions'),
       enabled: hasBytes,
-      tooltip: 'Share options',
+      tooltip: AppStrings.shareOptions,
       onSelected: (value) {
         if (value == 'plain') {
           _shareDecryptedDocument(bytes!, selectedDocument);
@@ -584,23 +584,23 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         }
       },
       itemBuilder: (context) => [
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'plain',
           child: Row(
             children: [
               Icon(Icons.share_outlined, size: 18),
               SizedBox(width: 8),
-              Text('Share decrypted file'),
+              Text(AppStrings.shareDecryptedFile),
             ],
           ),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'encrypted',
           child: Row(
             children: [
               Icon(Icons.lock_outline, size: 18),
               SizedBox(width: 8),
-              Text('Share encrypted (.nija)'),
+              Text(AppStrings.shareEncryptedNija),
             ],
           ),
         ),
@@ -612,14 +612,14 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
             visualDensity: VisualDensity.compact,
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           ),
-          child: const FittedBox(
+          child: FittedBox(
             fit: BoxFit.scaleDown,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.share_outlined, size: 16),
                 SizedBox(width: 4),
-                Text('Share'),
+                Text(AppStrings.share),
                 Icon(Icons.arrow_drop_down, size: 16),
               ],
             ),
@@ -663,23 +663,23 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     if (_documentLoadError != null) {
       return DocumentPreviewMessage(
         icon: Icons.error_outline,
-        title: 'Unable to preview document',
+        title: AppStrings.unableToPreviewDocument,
         subtitle: _documentLoadError.toString(),
       );
     }
     final bytes = _documentBytes ?? const <int>[];
     if (bytes.isEmpty) {
       if (widget.readOnly) {
-        return const DocumentPreviewMessage(
+        return DocumentPreviewMessage(
           icon: Icons.description_outlined,
-          title: 'Sample document metadata',
-          subtitle: 'Create a vault to store and preview real files.',
+          title: AppStrings.sampleDocumentMetadata,
+          subtitle: AppStrings.sampleDocumentMetadataHint,
         );
       }
-      return const DocumentPreviewMessage(
+      return DocumentPreviewMessage(
         icon: Icons.insert_drive_file_outlined,
-        title: 'Empty document',
-        subtitle: 'There is no content to preview.',
+        title: AppStrings.emptyDocument,
+        subtitle: AppStrings.emptyDocumentHint,
       );
     }
     if (_isImageExtension(extension)) {
@@ -691,10 +691,10 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
             Uint8List.fromList(bytes),
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) =>
-                const DocumentPreviewMessage(
+                DocumentPreviewMessage(
                   icon: Icons.broken_image_outlined,
-                  title: 'Image preview failed',
-                  subtitle: 'Use Open with... to view this document.',
+                  title: AppStrings.imagePreviewFailed,
+                  subtitle: AppStrings.useOpenWithToView,
                 ),
           ),
         ),
@@ -721,8 +721,8 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
       icon: extension == 'PDF'
           ? Icons.picture_as_pdf_outlined
           : Icons.insert_drive_file_outlined,
-      title: '$extension preview unavailable',
-      subtitle: 'Use Open with... to view this document in another app.',
+      title: AppStrings.previewUnavailable(extension),
+      subtitle: AppStrings.useOpenWithAnotherApp,
     );
   }
 
@@ -753,7 +753,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(error.message ?? 'No app can open this file.'),
+            content: Text(error.message ?? AppStrings.noAppCanOpenFile),
           ),
         );
         await _shareDocumentFallback(bytes, fileName, mimeType);
@@ -795,7 +795,7 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to save document copy.')),
+        SnackBar(content: Text(AppStrings.unableToSaveDocumentCopy)),
       );
     }
   }
@@ -847,11 +847,11 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
       setState(() {});
       ScaffoldMessenger.of(
         this.context,
-      ).showSnackBar(const SnackBar(content: Text('Document attached.')));
+      ).showSnackBar(SnackBar(content: Text(AppStrings.documentAttached)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(this.context).showSnackBar(
-        const SnackBar(content: Text('Unable to attach document.')),
+        SnackBar(content: Text(AppStrings.unableToAttachDocument)),
       );
     }
   }
@@ -874,27 +874,27 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
         VaultMenuOption(
           value: 'open',
           leading: const Icon(Icons.open_in_new_outlined),
-          title: 'Open document',
+          title: AppStrings.openDocument,
         ),
         VaultMenuOption(
           value: 'share',
           leading: const Icon(Icons.share_outlined),
-          title: 'Share file',
+          title: AppStrings.shareFile,
         ),
         VaultMenuOption(
           value: 'share_encrypted',
           leading: const Icon(Icons.enhanced_encryption_outlined),
-          title: 'Share encrypted file',
+          title: AppStrings.shareEncryptedFile,
         ),
         VaultMenuOption(
           value: 'export_encrypted',
           leading: const Icon(Icons.file_download_outlined),
-          title: 'Export encrypted file',
+          title: AppStrings.exportEncryptedFile,
         ),
         VaultMenuOption(
           value: 'save_copy',
           leading: const Icon(Icons.download_for_offline_outlined),
-          title: 'Save copy',
+          title: AppStrings.saveCopy,
         ),
         VaultMenuOption(
           value: 'delete',
@@ -991,11 +991,11 @@ class _DocumentDetailScreenState extends State<_DocumentDetailScreen> {
       unawaited(_loadSelectedDocument());
       ScaffoldMessenger.of(
         this.context,
-      ).showSnackBar(const SnackBar(content: Text('Attachment removed.')));
+      ).showSnackBar(SnackBar(content: Text(AppStrings.attachmentRemoved)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(this.context).showSnackBar(
-        const SnackBar(content: Text('Unable to process attachment.')),
+        SnackBar(content: Text(AppStrings.unableToProcessAttachment)),
       );
     }
   }
@@ -1119,7 +1119,7 @@ class _DocumentPreviewFullscreenButton extends StatelessWidget {
       ),
       child: IconButton(
         visualDensity: VisualDensity.compact,
-        tooltip: 'Enlarge preview',
+        tooltip: AppStrings.enlargePreview,
         onPressed: onPressed,
         icon: const Icon(Icons.fullscreen_outlined),
       ),
@@ -1193,20 +1193,20 @@ class _FullscreenDocumentPreviewScreenState
           if (widget.onSaveCopy != null)
             IconButton(
               key: const ValueKey('document-fullscreen-save-copy'),
-              tooltip: 'Save copy',
+              tooltip: AppStrings.saveCopy,
               onPressed: _busy ? null : _saveCopy,
               icon: const Icon(Icons.download_for_offline_outlined),
             ),
           if (widget.onExportEncrypted != null)
             IconButton(
               key: const ValueKey('document-fullscreen-export-encrypted'),
-              tooltip: 'Export encrypted',
+              tooltip: AppStrings.exportEncrypted,
               onPressed: _busy ? null : _exportEncrypted,
               icon: const Icon(Icons.file_download_outlined),
             ),
           IconButton(
             key: const ValueKey('document-fullscreen-close'),
-            tooltip: 'Close preview',
+            tooltip: AppStrings.closePreview,
             onPressed: _busy ? null : () => Navigator.of(context).pop(),
             icon: const Icon(Icons.fullscreen_exit_outlined),
           ),
@@ -1260,7 +1260,7 @@ class _FullscreenDocumentPreviewScreenState
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to complete document action.')),
+          SnackBar(content: Text(AppStrings.unableToCompleteDocumentAction)),
         );
       }
     } finally {
@@ -1271,10 +1271,10 @@ class _FullscreenDocumentPreviewScreenState
   Widget _buildFullscreenPreview(BuildContext context) {
     final bytes = widget.bytes;
     if (bytes.isEmpty) {
-      return const DocumentPreviewMessage(
+      return DocumentPreviewMessage(
         icon: Icons.insert_drive_file_outlined,
-        title: 'Empty document',
-        subtitle: 'There is no content to preview.',
+        title: AppStrings.emptyDocument,
+        subtitle: AppStrings.emptyDocumentHint,
       );
     }
     final extension = _documentExtension(widget.document);
@@ -1289,7 +1289,7 @@ class _FullscreenDocumentPreviewScreenState
             errorBuilder: (context, error, stackTrace) =>
                 DocumentPreviewMessage(
                   icon: Icons.broken_image_outlined,
-                  title: 'Image preview failed',
+                  title: AppStrings.imagePreviewFailed,
                   subtitle:
                       'Use ${widget.emptyOpenLabel} to view this document.',
                 ),
@@ -1317,8 +1317,8 @@ class _FullscreenDocumentPreviewScreenState
     }
     return DocumentPreviewMessage(
       icon: Icons.insert_drive_file_outlined,
-      title: '$extension preview unavailable',
-      subtitle: 'Use ${widget.emptyOpenLabel} to view this document.',
+      title: AppStrings.previewUnavailable(extension),
+      subtitle: AppStrings.useLabelToViewDocument(widget.emptyOpenLabel),
     );
   }
 }
@@ -1499,7 +1499,7 @@ class _DocumentFilesSection extends StatelessWidget {
               IconButton(
                 key: const ValueKey('document-detail-add-document'),
                 onPressed: onAdd,
-                tooltip: 'Add document',
+                tooltip: AppStrings.addDocument,
                 icon: const Icon(Icons.attach_file, size: 18),
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
@@ -1703,7 +1703,7 @@ Widget _buildPdfLoadingBanner(
       : bytesDownloaded / totalBytes;
   return PdfStatusBanner(
     icon: Icons.picture_as_pdf_outlined,
-    title: 'Loading PDF...',
+    title: AppStrings.loadingPdf,
     subtitle: totalBytes == null
         ? 'Preparing preview'
         : '${_formatDocumentSizeBytes(bytesDownloaded)} of ${_formatDocumentSizeBytes(totalBytes)}',
@@ -1717,10 +1717,10 @@ Widget _buildPdfErrorBanner(
   StackTrace? stackTrace,
   PdfDocumentRef documentRef,
 ) {
-  return const PdfStatusBanner(
+  return PdfStatusBanner(
     icon: Icons.error_outline,
-    title: 'PDF preview failed',
-    subtitle: 'Use Open with app to view this document.',
+    title: AppStrings.pdfPreviewFailed,
+    subtitle: AppStrings.pdfPreviewFailedHint,
   );
 }
 

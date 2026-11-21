@@ -25,6 +25,7 @@ abstract class PrivateVaultStore {
     required String vaultStoreId,
     required VaultFile header,
     required Map<String, Uint8List> sections,
+    Set<String>? keepExistingFiles,
   });
   Future<String> stageVault({
     required String vaultStoreId,
@@ -125,8 +126,18 @@ class InMemoryPrivateVaultStore implements PrivateVaultStore {
     required String vaultStoreId,
     required VaultFile header,
     required Map<String, Uint8List> sections,
+    Set<String>? keepExistingFiles,
   }) async {
+    final existing = _vaults[vaultStoreId] ?? const <String, Uint8List>{};
     final next = <String, Uint8List>{};
+    if (keepExistingFiles != null) {
+      for (final fileName in keepExistingFiles) {
+        final bytes = existing[fileName];
+        if (bytes != null) {
+          next[fileName] = Uint8List.fromList(bytes);
+        }
+      }
+    }
     for (final entry in sections.entries) {
       next[entry.key] = Uint8List.fromList(entry.value);
     }
@@ -187,13 +198,52 @@ class FilePrivateVaultStore implements PrivateVaultStore {
 
   final Directory baseDirectory;
 
-  Directory _dir(String vaultStoreId) => Directory(
-    '${baseDirectory.path}${Platform.pathSeparator}vaults'
-    '${Platform.pathSeparator}$vaultStoreId',
-  );
+  Directory _dir(String vaultStoreId) {
+    _validateStoreSegment(vaultStoreId, label: 'vaultStoreId');
+    return Directory(
+      '${baseDirectory.path}${Platform.pathSeparator}vaults'
+      '${Platform.pathSeparator}$vaultStoreId',
+    );
+  }
+
+  File _sectionFile(String vaultStoreId, String fileName) {
+    _validateSectionName(fileName);
+    return File('${_dir(vaultStoreId).path}${Platform.pathSeparator}$fileName');
+  }
+
+  static bool _isValidStoreSegment(String value) {
+    return !(value.isEmpty ||
+        value == '.' ||
+        value == '..' ||
+        value.contains('/') ||
+        value.contains('\\') ||
+        value.contains('\x00') ||
+        value.contains('..'));
+  }
+
+  static void _validateStoreSegment(String value, {required String label}) {
+    if (!_isValidStoreSegment(value)) {
+      throw ArgumentError.value(value, label, 'Invalid storage identifier.');
+    }
+  }
+
+  static void _validateSectionName(String fileName) {
+    if (fileName.isEmpty ||
+        fileName == '.' ||
+        fileName == '..' ||
+        fileName.contains('/') ||
+        fileName.contains('\\') ||
+        fileName.contains('\x00') ||
+        fileName.contains('..') ||
+        fileName.endsWith('.tmp') ||
+        !RegExp(r'^[A-Za-z0-9._-]+$').hasMatch(fileName)) {
+      throw ArgumentError.value(fileName, 'fileName', 'Invalid section name.');
+    }
+  }
 
   @override
   Future<bool> vaultExists(String vaultStoreId) async {
+    if (!_isValidStoreSegment(vaultStoreId)) return false;
     return File(
       '${_dir(vaultStoreId).path}${Platform.pathSeparator}header.json',
     ).exists();
@@ -214,9 +264,7 @@ class FilePrivateVaultStore implements PrivateVaultStore {
 
   @override
   Future<Uint8List> readSection(String vaultStoreId, String fileName) async {
-    final file = File(
-      '${_dir(vaultStoreId).path}${Platform.pathSeparator}$fileName',
-    );
+    final file = _sectionFile(vaultStoreId, fileName);
     if (!await file.exists()) {
       throw StateError('Working vault section not found: $fileName');
     }
@@ -225,9 +273,7 @@ class FilePrivateVaultStore implements PrivateVaultStore {
 
   @override
   Stream<List<int>> openSectionRead(String vaultStoreId, String fileName) {
-    final file = File(
-      '${_dir(vaultStoreId).path}${Platform.pathSeparator}$fileName',
-    );
+    final file = _sectionFile(vaultStoreId, fileName);
     if (!file.existsSync()) {
       throw StateError('Working vault section not found: $fileName');
     }
@@ -238,9 +284,13 @@ class FilePrivateVaultStore implements PrivateVaultStore {
   Future<void> writeHeader(String vaultStoreId, VaultFile header) async {
     final dir = _dir(vaultStoreId);
     await dir.create(recursive: true);
+    final cleanHeader = header.copyWith(
+      encryptedSections: const <String, String>{},
+      encryptedPayload: null,
+    );
     await _atomicWriteBytes(
       File('${dir.path}${Platform.pathSeparator}header.json'),
-      Uint8List.fromList(utf8.encode(jsonEncode(header.toJson()))),
+      Uint8List.fromList(utf8.encode(jsonEncode(cleanHeader.toJson()))),
     );
   }
 
@@ -253,7 +303,7 @@ class FilePrivateVaultStore implements PrivateVaultStore {
     final dir = _dir(vaultStoreId);
     await dir.create(recursive: true);
     await _atomicWriteBytes(
-      File('${dir.path}${Platform.pathSeparator}$fileName'),
+      _sectionFile(vaultStoreId, fileName),
       bytes,
     );
   }
@@ -266,7 +316,7 @@ class FilePrivateVaultStore implements PrivateVaultStore {
   ) async {
     final dir = _dir(vaultStoreId);
     await dir.create(recursive: true);
-    final target = File('${dir.path}${Platform.pathSeparator}$fileName');
+    final target = _sectionFile(vaultStoreId, fileName);
     final temp = File(
       '${dir.path}${Platform.pathSeparator}$fileName.stream.tmp',
     );
@@ -295,21 +345,30 @@ class FilePrivateVaultStore implements PrivateVaultStore {
     required String vaultStoreId,
     required VaultFile header,
     required Map<String, Uint8List> sections,
+    Set<String>? keepExistingFiles,
   }) async {
     final dir = _dir(vaultStoreId);
     await dir.create(recursive: true);
 
     for (final entry in sections.entries) {
       await _atomicWriteBytes(
-        File('${dir.path}${Platform.pathSeparator}${entry.key}'),
+        _sectionFile(vaultStoreId, entry.key),
         entry.value,
       );
     }
+    final cleanHeader = header.copyWith(
+      encryptedSections: const <String, String>{},
+      encryptedPayload: null,
+    );
     await _atomicWriteBytes(
       File('${dir.path}${Platform.pathSeparator}header.json'),
-      Uint8List.fromList(utf8.encode(jsonEncode(header.toJson()))),
+      Uint8List.fromList(utf8.encode(jsonEncode(cleanHeader.toJson()))),
     );
-    final retained = <String>{...sections.keys, 'header.json'};
+    final retained = <String>{
+      ...sections.keys,
+      'header.json',
+      ...?keepExistingFiles,
+    };
     await for (final entity in dir.list(followLinks: false)) {
       if (entity is! File) continue;
       final name = entity.uri.pathSegments.last;

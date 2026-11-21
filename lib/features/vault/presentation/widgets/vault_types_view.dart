@@ -89,7 +89,7 @@ extension _VaultTypesTab on _VaultAppShellState {
                     ),
                   )
                 else if (!isWide)
-                  Text('All Items', style: vaultPageHeadingStyle(context)),
+                  Text(AppStrings.allItems, style: vaultPageHeadingStyle(context)),
                 const Spacer(),
                 if (_allItemsSelectionMode)
                   Text(
@@ -106,7 +106,7 @@ extension _VaultTypesTab on _VaultAppShellState {
                   FilledButton.icon(
                     onPressed: () => _openAddItemScreen(context),
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add item'),
+                    label: Text(AppStrings.addItem),
                   ),
               ],
             ),
@@ -124,7 +124,7 @@ extension _VaultTypesTab on _VaultAppShellState {
                     focusNode: _searchFocusNode,
                     style: TextStyle(color: colorScheme.onSurface),
                     decoration: InputDecoration(
-                      hintText: 'Search all items...',
+                      hintText: AppStrings.searchAllItemsHint,
                       hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                       prefixIcon: Icon(
                         Icons.search,

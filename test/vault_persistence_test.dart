@@ -419,5 +419,58 @@ void main() {
         expect(await privateStore.vaultExists('hydrated-vault-id'), isTrue);
       },
     );
+
+    test(
+      'cold reload unlocks rotated password even when snapshot sync is disabled',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'nija-mobile-cold-rotate-',
+        );
+        addTearDown(() async {
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
+
+        final nijaPath = '${tempDir.path}/cold_rotate.nija';
+        final service = DefaultVaultService(
+          storageAdapter: FileVaultStorageAdapter(),
+          cryptoAdapter: SecureCryptoAdapter(),
+          privateVaultStore: FilePrivateVaultStore(baseDirectory: tempDir),
+          syncSnapshotOnPersist: false,
+        );
+
+        await service.createVault(
+          filePath: nijaPath,
+          vaultId: 'cold-rotate-vault-id',
+          vaultName: 'Cold Rotate Vault',
+          guardianProfileId: GuardianProfiles.lion.id,
+          password: 'InitialPass123',
+          recoveryPhrase: _basePhrase,
+        );
+        await service.rotateMasterPassword(
+          filePath: nijaPath,
+          currentPassword: 'InitialPass123',
+          newPassword: 'RotatedPass456',
+        );
+        await service.migrateToBalancedProfile(
+          filePath: nijaPath,
+          currentPassword: 'RotatedPass456',
+          currentRecoveryPhrase: _basePhrase,
+        );
+
+        final coldReloaded = DefaultVaultService(
+          storageAdapter: FileVaultStorageAdapter(),
+          cryptoAdapter: SecureCryptoAdapter(),
+          privateVaultStore: FilePrivateVaultStore(baseDirectory: tempDir),
+          syncSnapshotOnPersist: false,
+        );
+        final unlocked = await coldReloaded.unlockVault(
+          filePath: nijaPath,
+          password: 'RotatedPass456',
+        );
+        expect(unlocked.guardianProfileId, GuardianProfiles.owl.id);
+      },
+    );
   });
 }

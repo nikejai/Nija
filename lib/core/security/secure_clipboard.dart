@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 class SecureClipboard {
   SecureClipboard({this.clearAfter = const Duration(seconds: 20)});
 
+  static final SecureClipboard shared = SecureClipboard();
+
   final Duration clearAfter;
   Timer? _timer;
 

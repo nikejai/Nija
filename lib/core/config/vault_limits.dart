@@ -1,10 +1,10 @@
 class VaultLimits {
   VaultLimits._();
 
-  static const int freeVaultBytes = 1024 * 1024 * 1024;
+  static const int freeVaultBytes = 151 * 1024 * 1024;
   static const int legacyWebVaultBytes = 1024 * 1024 * 1024;
   static const int paidVaultBytes = 1024 * 1024 * 1024;
-  static const int maxDocumentBytes = 5 * 1024 * 1024;
+  static const int maxDocumentBytes = 25 * 1024 * 1024;
   static const int freeVaultCount = 99;
   static const int paidAndroidVaultCount = 99;
 
@@ -12,12 +12,13 @@ class VaultLimits {
 
   static int maxVaultBytesFor({
     required int currentVaultSizeBytes,
-    bool expandedStorageEntitled = true,
+    bool expandedStorageEntitled = false,
   }) {
-    if (currentVaultSizeBytes > paidVaultBytes) {
+    final limit = expandedStorageEntitled ? paidVaultBytes : freeVaultBytes;
+    if (currentVaultSizeBytes > limit) {
       return currentVaultSizeBytes;
     }
-    return paidVaultBytes;
+    return limit;
   }
 
   static int maxVaultCountFor({

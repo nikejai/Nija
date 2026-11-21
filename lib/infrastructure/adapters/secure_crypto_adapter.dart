@@ -1,9 +1,11 @@
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:flutter/foundation.dart';
 
 import 'crypto_adapter.dart';
 import 'vault_crypto_isolate.dart';
+import 'vault_document_isolate.dart';
 
 class SecureCryptoAdapter implements CryptoAdapter {
   SecureCryptoAdapter({AesGcm? aesGcm})
@@ -38,6 +40,13 @@ class SecureCryptoAdapter implements CryptoAdapter {
     required List<int> key,
   }) async {
     final nonce = _randomBytes(_nonceLength);
+    if (!kIsWeb && plain.length > 512) {
+      return encryptVaultCipherInBackground(
+        plain: plain,
+        key: key,
+        nonce: nonce,
+      );
+    }
     final secretBox = await _aesGcm.encrypt(
       plain,
       secretKey: SecretKey(key),
@@ -58,6 +67,12 @@ class SecureCryptoAdapter implements CryptoAdapter {
   }) async {
     if (cipher.length < _nonceLength + _macLength) {
       throw StateError('Ciphertext is too short.');
+    }
+    if (!kIsWeb && cipher.length > 512) {
+      return decryptVaultCipherInBackground(
+        cipher: cipher,
+        key: key,
+      );
     }
     final nonce = cipher.sublist(0, _nonceLength);
     final macStart = cipher.length - _macLength;

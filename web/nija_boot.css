@@ -1,0 +1,11 @@
+/* Match app scaffold; Flutter replaces the body once the first frame renders. */
+html, body {
+  background: #f4f4f5;
+  height: 100%;
+  margin: 0;
+}
+@media (prefers-color-scheme: dark) {
+  html, body {
+    background: #27272a;
+  }
+}

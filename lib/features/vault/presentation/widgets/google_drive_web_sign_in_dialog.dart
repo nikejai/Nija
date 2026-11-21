@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../../../core/localization/app_strings.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../../../app/theme/entry_typography.dart';
@@ -188,7 +189,7 @@ class _GoogleDriveWebSignInDialogState
                         ),
                       ),
                       IconButton(
-                        tooltip: 'Close',
+                        tooltip: AppStrings.close,
                         onPressed: _authorizing
                             ? null
                             : () => Navigator.of(context).pop(false),

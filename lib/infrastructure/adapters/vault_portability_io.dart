@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'google_drive_vault_portability.dart';
+import 'streaming_vault_container.dart';
 import 'vault_portability_base.dart';
 import 'vault_portability_model.dart';
 
@@ -27,7 +28,21 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
           : null;
       final path = file?.path;
       if (path == null || path.isEmpty) return null;
-      final content = await File(path).readAsString();
+      final bytes = await File(path).readAsBytes();
+      if (StreamingVaultContainer.isContainerBytes(bytes)) {
+        final header = StreamingVaultContainer.peekHeaderFromBytes(bytes);
+        final rawLabel = header?.vaultName?.trim() ?? '';
+        final label = rawLabel.isNotEmpty
+            ? rawLabel
+            : _importLabel(file!.name, '');
+        return ImportedVaultFile(
+          storageId: path,
+          label: label,
+          content: '',
+          sourceDescription: file!.name,
+        );
+      }
+      final content = utf8.decode(bytes);
       return ImportedVaultFile(
         storageId: path,
         label: _importLabel(file!.name, content),
@@ -68,9 +83,31 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
   Future<String?> exportVaultToLocal({
     required String suggestedName,
     required String content,
+    Future<bool> Function(String destinationPath)? streamWriter,
   }) async {
-    final bytes = Uint8List.fromList(utf8.encode(content));
     if (Platform.isAndroid || Platform.isIOS) {
+      Uint8List bytes;
+      if (streamWriter != null) {
+        final tempDir = await getTemporaryDirectory();
+        final tempFile = File(
+          _joinPath(
+            tempDir.path,
+            'export_${DateTime.now().millisecondsSinceEpoch}.nija',
+          ),
+        );
+        try {
+          final ok = await streamWriter(tempFile.path);
+          bytes = ok && await tempFile.exists()
+              ? await tempFile.readAsBytes()
+              : Uint8List.fromList(utf8.encode(content));
+        } finally {
+          if (await tempFile.exists()) {
+            await tempFile.delete();
+          }
+        }
+      } else {
+        bytes = Uint8List.fromList(utf8.encode(content));
+      }
       return FilePicker.platform.saveFile(
         dialogTitle: 'Export vault file',
         fileName: suggestedName,
@@ -87,6 +124,10 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       allowedExtensions: const <String>['nija'],
     );
     if (outputPath == null || outputPath.isEmpty) return null;
+    if (streamWriter != null) {
+      final ok = await streamWriter(outputPath);
+      if (ok) return outputPath;
+    }
     await File(outputPath).writeAsString(content, flush: true);
     return outputPath;
   }
@@ -105,6 +146,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     required String suggestedName,
     required String content,
     bool forceAccountChooser = true,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) {
     if (Platform.isAndroid || Platform.isIOS) {
       return _googleDrive.backupVaultToCloud(
@@ -112,6 +154,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
         suggestedName: suggestedName,
         content: content,
         forceAccountChooser: forceAccountChooser,
+        onProgress: onProgress,
       );
     }
     return Future<bool>.value(false);
@@ -126,6 +169,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     String mimeType = 'application/octet-stream',
     Map<String, String>? extraProperties,
     bool forceAccountChooser = false,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) {
     if (Platform.isAndroid || Platform.isIOS) {
       return _googleDrive.backupVaultStreamToCloud(
@@ -136,6 +180,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
         mimeType: mimeType,
         extraProperties: extraProperties,
         forceAccountChooser: forceAccountChooser,
+        onProgress: onProgress,
       );
     }
     return Future<bool>.value(false);

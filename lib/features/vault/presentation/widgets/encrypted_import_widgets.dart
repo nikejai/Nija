@@ -87,15 +87,15 @@ class _EncryptedShareInputDialogState
           TextField(
             controller: _fileNameController,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(labelText: 'File name'),
+            decoration: InputDecoration(labelText: AppStrings.fileName),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _passwordController,
             obscureText: true,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: 'Password for this file',
+            decoration: InputDecoration(
+              labelText: AppStrings.passwordForThisFile,
             ),
           ),
         ],
@@ -103,7 +103,7 @@ class _EncryptedShareInputDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(AppStrings.cancel),
         ),
         ElevatedButton(
           onPressed: canShare
@@ -163,7 +163,7 @@ class _EncryptedImportBundleScreenState
     final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Encrypted file'),
+        title: Text(AppStrings.encryptedFile),
         actions: [
           TextButton(
             onPressed: _remainingEntries.isEmpty || _importingAll
@@ -174,7 +174,7 @@ class _EncryptedImportBundleScreenState
                     dimension: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Import all'),
+                : Text(AppStrings.importAll),
           ),
         ],
       ),
@@ -324,7 +324,9 @@ class _EncryptedImportEntryPreviewScreenState
                               ? Icons.check_circle_outline
                               : Icons.file_download_outlined,
                         ),
-                  label: Text(_imported ? 'Imported' : 'Import item'),
+                  label: Text(
+                    _imported ? AppStrings.imported : AppStrings.importItem,
+                  ),
                 ),
               ),
             ),
@@ -393,7 +395,7 @@ class _EncryptedImportEntryPreviewScreenState
           icon: Icons.sticky_note_2_outlined,
           color: const Color(0xFF6366F1),
           title: entry.title,
-          subtitle: 'Secure Note',
+          subtitle: AppStrings.secureNote,
         ),
         const SizedBox(height: 16),
         _ImportPreviewRow(label: 'Content', value: body.isEmpty ? '-' : body),
@@ -416,7 +418,7 @@ class _EncryptedImportEntryPreviewScreenState
           icon: Icons.description_outlined,
           color: const Color(0xFFFB923C),
           title: entry.title,
-          subtitle: 'Document',
+          subtitle: AppStrings.documentLabel,
         ),
         const SizedBox(height: 16),
         _ImportPreviewRow(label: 'File name', value: fileName),

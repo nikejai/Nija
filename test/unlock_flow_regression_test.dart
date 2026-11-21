@@ -76,15 +76,43 @@ void main() {
       ),
     );
 
-    await _goToUnlockScreen(tester);
+    await tester.tap(find.byKey(const ValueKey('entry-create-vault')));
+    await tester.pumpAndSettle();
     await tester.enterText(
-      find.byKey(const ValueKey('unlock-password-field')),
+      find.widgetWithText(TextField, 'Master password'),
       'StrongPass123',
     );
-    await tester.tap(find.byKey(const ValueKey('unlock-submit-button')));
+    await tester.scrollUntilVisible(
+      find.widgetWithText(TextField, 'Confirm password'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Confirm password'),
+      'StrongPass123',
+    );
+    await tester.pumpAndSettle();
+    final createEncryptedVaultButton = find.byKey(
+      const ValueKey('create-encrypted-vault-button'),
+    );
+    await tester.scrollUntilVisible(
+      createEncryptedVaultButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(createEncryptedVaultButton);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('I saved my phrase'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('I saved my phrase'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open vault'));
     await tester.pumpAndSettle();
 
-    await tester.binding.handlePopRoute();
+    await tester.tap(find.byTooltip('Lock vault'));
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('known-vault-selection-screen')),
@@ -179,46 +207,4 @@ void main() {
     expect(find.byKey(const ValueKey('unlock-screen')), findsOneWidget);
     expect(find.byKey(const ValueKey('unlock-pin-button')), findsOneWidget);
   });
-}
-
-Future<void> _goToUnlockScreen(WidgetTester tester) async {
-  await tester.pumpAndSettle();
-  final createVault = find.byKey(const ValueKey('entry-create-vault'));
-  await tester.ensureVisible(createVault);
-  await tester.tap(createVault);
-  await tester.pumpAndSettle();
-  await tester.enterText(
-    find.widgetWithText(TextField, 'Master password'),
-    'StrongPass123',
-  );
-  await tester.scrollUntilVisible(
-    find.widgetWithText(TextField, 'Confirm password'),
-    200,
-    scrollable: find.byType(Scrollable).first,
-  );
-  await tester.enterText(
-    find.widgetWithText(TextField, 'Confirm password'),
-    'StrongPass123',
-  );
-  await tester.pumpAndSettle();
-  final createEncryptedVaultButton = find.byKey(
-    const ValueKey('create-encrypted-vault-button'),
-  );
-  await tester.scrollUntilVisible(
-    createEncryptedVaultButton,
-    200,
-    scrollable: find.byType(Scrollable).first,
-  );
-  await tester.tap(createEncryptedVaultButton);
-  await tester.pumpAndSettle();
-  await tester.scrollUntilVisible(
-    find.text('I saved my phrase'),
-    200,
-    scrollable: find.byType(Scrollable).first,
-  );
-  await tester.tap(find.text('I saved my phrase'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Open vault'));
-  await tester.pumpAndSettle();
-  expect(find.text('Unlock vault'), findsOneWidget);
 }

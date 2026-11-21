@@ -3,6 +3,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/entitlements/entitlement_service.dart';
+import '../core/entitlements/entitlement_state.dart';
 import '../core/localization/app_strings.dart';
 import '../features/onboarding/presentation/onboarding_flow.dart';
 import 'theme/app_theme.dart';
@@ -16,12 +18,16 @@ class NijaApp extends StatefulWidget {
 
 class _NijaAppState extends State<NijaApp> {
   static const _themeModePrefsKey = 'nija_theme_mode_v1';
+  static const _languageModePrefsKey = 'nija_language_mode_v1';
   static const _autoLockSecondsPrefsKey = 'nija_auto_lock_seconds_v1';
   static const _defaultAutoLockSeconds = 300;
 
   String _languageMode = 'system';
   ThemeMode _themeMode = ThemeMode.dark;
   int _autoLockSeconds = _defaultAutoLockSeconds;
+  late final NijaEntitlementService _entitlementService;
+  EntitlementState _entitlementState = const EntitlementState.free();
+  bool _entitlementRefreshInProgress = true;
 
   Locale? get _forcedLocale => switch (_languageMode) {
     'en' => const Locale('en'),
@@ -32,8 +38,50 @@ class _NijaAppState extends State<NijaApp> {
   @override
   void initState() {
     super.initState();
+    _entitlementService = NijaEntitlementService()
+      ..addListener(_onEntitlementChanged);
+    _restoreLanguageMode();
     _restoreThemeMode();
     _restoreAutoLockSeconds();
+    _restoreEntitlements();
+  }
+
+  @override
+  void dispose() {
+    _entitlementService
+      ..removeListener(_onEntitlementChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _onEntitlementChanged() {
+    if (!mounted) return;
+    setState(() => _entitlementState = _entitlementService.state);
+  }
+
+  Future<void> _restoreEntitlements() async {
+    try {
+      await _entitlementService.initialize();
+      if (!mounted) return;
+      setState(() => _entitlementState = _entitlementService.state);
+    } finally {
+      if (mounted) {
+        setState(() => _entitlementRefreshInProgress = false);
+      }
+    }
+  }
+
+  Future<void> _restoreLanguageMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_languageModePrefsKey);
+    if (stored == null || !mounted || stored == _languageMode) return;
+    setState(() => _languageMode = stored);
+  }
+
+  Future<void> _setLanguageMode(String mode) async {
+    setState(() => _languageMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_languageModePrefsKey, mode);
   }
 
   Future<void> _restoreThemeMode() async {
@@ -103,12 +151,23 @@ class _NijaAppState extends State<NijaApp> {
       },
       home: OnboardingFlow(
         languageMode: _languageMode,
-        onLanguageModeChanged: (mode) => setState(() => _languageMode = mode),
+        onLanguageModeChanged: _setLanguageMode,
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,
         autoLockDelay: Duration(seconds: _autoLockSeconds),
         autoLockSeconds: _autoLockSeconds,
         onAutoLockSecondsChanged: _setAutoLockSeconds,
+        entitlementState: _entitlementState,
+        canPurchaseExpandedVaultStorage:
+            _entitlementService.canPurchaseExpandedVaultStorage,
+        purchaseInProgress: _entitlementService.isPurchaseInProgress,
+        restoreInProgress: _entitlementService.isRestoreInProgress,
+        entitlementRefreshInProgress: _entitlementRefreshInProgress,
+        entitlementErrorMessage: _entitlementService.lastErrorMessage,
+        onRefreshEntitlements: _entitlementService.refresh,
+        onRestorePurchases: _entitlementService.restorePurchases,
+        onPurchaseExpandedVaultStorage:
+            _entitlementService.buyExpandedVaultStorage,
       ),
     );
   }

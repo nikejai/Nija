@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/localization/app_strings.dart';
 import '../../../../domain/models/folder_tree_builder.dart';
 import '../../../../domain/models/folder_tree_node.dart';
 import '../../../../domain/models/vault_folder.dart';
@@ -146,7 +147,7 @@ class _FolderHierarchySheetContentState
             const Divider(),
             ListTile(
               leading: Icon(Icons.create_new_folder_outlined, color: colorScheme.primary),
-              title: Text('Create subfolder inside "${folder.name}"'),
+              title: Text(AppStrings.createSubfolderInside(folder.name)),
               onTap: () async {
                 Navigator.of(sheetContext).pop();
                 final subfolder = await showCreateVaultFolderDialog(
@@ -169,7 +170,7 @@ class _FolderHierarchySheetContentState
             if (folder.id != 'default')
               ListTile(
                 leading: Icon(Icons.edit_outlined, color: colorScheme.onSurfaceVariant),
-                title: const Text('Rename'),
+                title: Text(AppStrings.rename),
                 onTap: () async {
                   Navigator.of(sheetContext).pop();
                   final renamed = await showCreateVaultFolderDialog(
@@ -191,7 +192,7 @@ class _FolderHierarchySheetContentState
               ),
             ListTile(
               leading: Icon(Icons.check_circle_outline, color: colorScheme.primary),
-              title: const Text('Select this folder'),
+              title: Text(AppStrings.selectThisFolder),
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 Navigator.of(context).pop(folder);
@@ -280,12 +281,12 @@ class _FolderHierarchySheetContentState
                     ),
                     IconButton(
                       key: const ValueKey('hierarchy-create-folder-button'),
-                      tooltip: 'Create folder',
+                      tooltip: AppStrings.createFolder,
                       icon: const Icon(Icons.add, size: 22),
                       onPressed: _createTopLevelFolder,
                     ),
                     IconButton(
-                      tooltip: 'Close',
+                      tooltip: AppStrings.close,
                       icon: const Icon(Icons.close, size: 20),
                       onPressed: () => Navigator.of(context).pop(null),
                     ),

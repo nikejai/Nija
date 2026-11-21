@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
+import '../../../../core/localization/app_strings.dart';
 import '../../../../core/security/password_generator.dart';
+import '../../../../core/security/secure_clipboard.dart';
 
 class PasswordGeneratorSheet extends StatefulWidget {
   const PasswordGeneratorSheet({
@@ -129,16 +129,16 @@ class _PasswordGeneratorSheetState extends State<PasswordGeneratorSheet> {
               const SizedBox(height: 12),
               // Segmented mode switcher
               SegmentedButton<bool>(
-                segments: const [
+                segments: [
                   ButtonSegment<bool>(
                     value: false,
-                    label: Text('Random Password'),
-                    icon: Icon(Icons.password),
+                    label: Text(AppStrings.randomPassword),
+                    icon: const Icon(Icons.password),
                   ),
                   ButtonSegment<bool>(
                     value: true,
-                    label: Text('Passphrase'),
-                    icon: Icon(Icons.abc),
+                    label: Text(AppStrings.passphrase),
+                    icon: const Icon(Icons.abc),
                   ),
                 ],
                 selected: {_isPassphrase},
@@ -177,7 +177,7 @@ class _PasswordGeneratorSheetState extends State<PasswordGeneratorSheet> {
                         ),
                         IconButton(
                           key: const ValueKey('password-generator-regenerate'),
-                          tooltip: 'Regenerate',
+                          tooltip: AppStrings.regenerate,
                           icon: const Icon(Icons.refresh),
                           onPressed: _regenerate,
                         ),
@@ -312,7 +312,7 @@ class _PasswordGeneratorSheetState extends State<PasswordGeneratorSheet> {
                   spacing: 8,
                   children: [
                     FilterChip(
-                      label: const Text('Capitalize'),
+                      label: Text(AppStrings.capitalize),
                       selected: _capitalize,
                       onSelected: (val) {
                         setState(() {
@@ -322,7 +322,7 @@ class _PasswordGeneratorSheetState extends State<PasswordGeneratorSheet> {
                       },
                     ),
                     FilterChip(
-                      label: const Text('Include Number'),
+                      label: Text(AppStrings.includeNumber),
                       selected: _includeNumber,
                       onSelected: (val) {
                         setState(() {
@@ -339,14 +339,14 @@ class _PasswordGeneratorSheetState extends State<PasswordGeneratorSheet> {
                 children: [
                   OutlinedButton.icon(
                     icon: const Icon(Icons.copy, size: 18),
-                    label: const Text('Copy'),
+                    label: Text(AppStrings.copy),
                     onPressed: () async {
-                      await Clipboard.setData(ClipboardData(text: _generated));
+                      await SecureClipboard.shared.copySensitive(_generated);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Password copied to clipboard'),
-                            duration: Duration(seconds: 2),
+                          SnackBar(
+                            content: Text(AppStrings.passwordCopied),
+                            duration: const Duration(seconds: 2),
                           ),
                         );
                       }

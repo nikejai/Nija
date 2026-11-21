@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/app_strings.dart';
 import 'widgets/vault_page_heading.dart';
 import 'widgets/vault_surface_menu.dart';
 
@@ -235,15 +236,15 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                   key: const ValueKey('custom-template-add-icon'),
                   onPressed: _pickIcon,
                   icon: const Icon(Icons.apps_outlined, size: 18),
-                  label: const Text('Add Icon'),
+                  label: Text(AppStrings.addIcon),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Template Name',
-                  hintText: 'e.g. Car Details',
+                decoration: InputDecoration(
+                  labelText: AppStrings.templateName,
+                  hintText: AppStrings.templateNameHint,
                 ),
                 onChanged: (_) => setState(() {}),
               ),
@@ -251,9 +252,9 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
               TextField(
                 controller: _descriptionController,
                 maxLength: 120,
-                decoration: const InputDecoration(
-                  labelText: 'Description (optional)',
-                  hintText: 'Add a short description',
+                decoration: InputDecoration(
+                  labelText: AppStrings.descriptionOptional,
+                  hintText: AppStrings.descriptionOptionalHint,
                 ),
                 onChanged: (_) => setState(() {}),
               ),
@@ -313,7 +314,7 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
         const SizedBox(height: 14),
         FilledButton(
           onPressed: _canContinue ? () => setState(() => _step = 1) : null,
-          child: Text(_isEditing ? 'Continue' : 'Next'),
+          child: Text(_isEditing ? AppStrings.continueLabel : AppStrings.next),
         ),
       ],
     );
@@ -354,7 +355,7 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
             TextButton.icon(
               onPressed: () => setState(() => _step = 0),
               icon: const Icon(Icons.arrow_back, size: 18),
-              label: const Text('Details'),
+              label: Text(AppStrings.details),
             ),
           ],
         ),
@@ -372,8 +373,8 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                   TextField(
                     controller: row.keyController,
                     onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(
-                      labelText: 'Field key (example: Expiry date)',
+                    decoration: InputDecoration(
+                      labelText: AppStrings.fieldKeyHint,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -383,23 +384,23 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                       fontSize: 14,
                       color: Theme.of(context).colorScheme.onSurface,
                     ),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                         value: 'text',
-                        child: Text('String text'),
+                        child: Text(AppStrings.stringText),
                       ),
-                      DropdownMenuItem(value: 'number', child: Text('Number')),
-                      DropdownMenuItem(value: 'date', child: Text('Date')),
+                      DropdownMenuItem(value: 'number', child: Text(AppStrings.numberType)),
+                      DropdownMenuItem(value: 'date', child: Text(AppStrings.dateType)),
                       DropdownMenuItem(
                         value: 'password',
-                        child: Text('Password / secret'),
+                        child: Text(AppStrings.passwordSecretType),
                       ),
                     ],
                     onChanged: (value) {
                       if (value == null) return;
                       setState(() => row.valueType = value);
                     },
-                    decoration: const InputDecoration(labelText: 'Value type'),
+                    decoration: InputDecoration(labelText: AppStrings.valueType),
                   ),
                   if (_rows.length > 1)
                     Align(
@@ -411,7 +412,7 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
                           });
                         },
                         icon: const Icon(Icons.delete_outline),
-                        label: const Text('Remove field'),
+                        label: Text(AppStrings.removeField),
                       ),
                     ),
                 ],
@@ -424,7 +425,7 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
           child: OutlinedButton.icon(
             onPressed: () => setState(() => _rows.add(_FieldRow())),
             icon: const Icon(Icons.add),
-            label: const Text('Add field'),
+            label: Text(AppStrings.addField),
           ),
         ),
         const SizedBox(height: 14),
@@ -434,7 +435,7 @@ class _CreateCustomTypeScreenState extends State<CreateCustomTypeScreen> {
             key: const ValueKey('custom-template-fields-save'),
             onPressed: _canSave ? _save : null,
             icon: const Icon(Icons.save_outlined),
-            label: Text(_isEditing ? 'Save changes' : 'Save template'),
+            label: Text(_isEditing ? AppStrings.saveChanges : AppStrings.saveTemplate),
           ),
         ),
       ],

@@ -181,7 +181,7 @@ class _VaultHomeView extends StatelessWidget {
                     key: const ValueKey('dashboard-add-item'),
                     onPressed: onAddItem,
                     icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add Item'),
+                    label: Text(AppStrings.addItem),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size(0, 42),
                       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -197,7 +197,7 @@ class _VaultHomeView extends StatelessWidget {
                       Icons.lock_outline,
                       color: colorScheme.onSurfaceVariant,
                     ),
-                    tooltip: 'Lock vault',
+                    tooltip: AppStrings.lockVault,
                   ),
               ],
             ),
@@ -221,7 +221,7 @@ class _VaultHomeView extends StatelessWidget {
                       child: TextField(
                         style: TextStyle(color: colorScheme.onSurface),
                         decoration: InputDecoration(
-                          hintText: 'Search your data...',
+                          hintText: AppStrings.searchYourDataHint,
                           hintStyle: TextStyle(
                             color: colorScheme.onSurfaceVariant,
                           ),
@@ -390,7 +390,10 @@ class _MobileDashboardList extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
               ],
-              _DashboardSectionTitle(title: 'Recent', onViewAll: onViewAll),
+              _DashboardSectionTitle(
+                title: AppStrings.recent,
+                onViewAll: onViewAll,
+              ),
               const SizedBox(height: 6),
               _DashboardRecentList(
                 recentItems: recentItems,
@@ -508,7 +511,7 @@ class _WideDashboardLayout extends StatelessWidget {
           builder: (context, constraints) {
             final showSidePanel = constraints.maxWidth >= 880;
             final recent = _DesktopPanel(
-              title: 'Recent Items',
+              title: AppStrings.recentItems,
               trailing: TextButton(
                 onPressed: onViewAll,
                 child: Text(
@@ -527,7 +530,7 @@ class _WideDashboardLayout extends StatelessWidget {
               ),
             );
             final actions = _DesktopPanel(
-              title: 'Quick Actions',
+              title: AppStrings.quickActions,
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: _QuickActionGrid(
@@ -641,7 +644,7 @@ class _DemoDashboardNotice extends StatelessWidget {
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               onPressed: isActive ? onHidePreview : onShowPreview,
-              child: Text(isActive ? exitLabel : 'View demo preview'),
+              child: Text(isActive ? exitLabel : AppStrings.viewDemoPreview),
             ),
           ),
         ],
@@ -819,9 +822,12 @@ class _DashboardSectionTitle extends StatelessWidget {
         InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: onViewAll,
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            child: Text('View all', style: TextStyle(color: Color(0xFF4F46E5))),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Text(
+              AppStrings.viewAll,
+              style: const TextStyle(color: Color(0xFF4F46E5)),
+            ),
           ),
         ),
       ],

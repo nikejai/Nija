@@ -29,6 +29,30 @@ void main() {
       expect(diff2, const Duration(hours: 24));
     });
 
+    test('durationUntilNextScheduledTime calculates exact time until custom hour and minute', () {
+      final from = DateTime(2026, 11, 15, 14, 0, 0); // 2:00 PM
+      // Scheduled for 2:30 PM today (30 min)
+      final diff1 = AutomatedBackupService.durationUntilNextScheduledTime(14, 30, from);
+      expect(diff1, const Duration(minutes: 30));
+
+      // Scheduled for 1:00 PM (passed today -> tomorrow)
+      final diff2 = AutomatedBackupService.durationUntilNextScheduledTime(13, 0, from);
+      expect(diff2, const Duration(hours: 23));
+    });
+
+    test('isBackupDueAtTime detects when scheduled time has passed', () {
+      // Scheduled for 2:00 AM (02:00)
+      final todayMorning = DateTime(2026, 11, 15, 8, 0, 0); // 8:00 AM
+      final backedUpBefore2Am = DateTime(2026, 11, 15, 1, 30, 0);
+      final backedUpAfter2Am = DateTime(2026, 11, 15, 3, 0, 0);
+
+      // Backed up at 1:30 AM, current time 8:00 AM, scheduled 2:00 AM -> Due!
+      expect(AutomatedBackupService.isBackupDueAtTime(backedUpBefore2Am, 2, 0, todayMorning), isTrue);
+
+      // Backed up at 3:00 AM, current time 8:00 AM, scheduled 2:00 AM -> Not due
+      expect(AutomatedBackupService.isBackupDueAtTime(backedUpAfter2Am, 2, 0, todayMorning), isFalse);
+    });
+
     test('isBackupDue detects when midnight has passed', () {
       // Never backed up
       expect(AutomatedBackupService.isBackupDue(null), isTrue);
@@ -91,6 +115,38 @@ void main() {
       // Reading content from snapshot 3
       final readContent = await service.readSnapshotContent(list[0].filePath);
       expect(readContent, content3);
+    });
+
+    test('createLocalSnapshotFromFileWriter streams and prunes to 2 snapshots', () async {
+      const vaultId = 'vault-stream-123';
+      for (var i = 1; i <= 3; i++) {
+        final snap = await service.createLocalSnapshotFromFileWriter(
+          vaultId: vaultId,
+          writeToFile: (destPath) async {
+            await File(destPath).writeAsString('streamed-$i', flush: true);
+            return true;
+          },
+          timestamp: DateTime(2026, 11, 12 + i),
+        );
+        expect(snap, isNotNull);
+      }
+
+      final list = await service.listLocalSnapshots(vaultId);
+      expect(list.length, 2);
+      expect(await service.readSnapshotContent(list[0].filePath), 'streamed-3');
+      expect(await service.readSnapshotContent(list[1].filePath), 'streamed-2');
+    });
+
+    test('scheduleDailyBackup handle cancels active scheduled timer cleanly', () {
+      final handle = service.scheduleDailyBackup(
+        hour: 3,
+        minute: 15,
+        onBackup: () async {},
+        now: DateTime(2026, 11, 19, 1, 0, 0),
+      );
+      expect(handle.isActive, isTrue);
+      handle.cancel();
+      expect(handle.isActive, isFalse);
     });
   });
 }

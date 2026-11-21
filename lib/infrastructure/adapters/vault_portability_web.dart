@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import '../../../core/platform/nija_browser_bridge.dart';
 import 'google_drive_vault_portability.dart';
+import 'streaming_vault_container.dart';
 import 'vault_portability_base.dart';
 import 'vault_portability_model.dart';
 
@@ -10,16 +12,24 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
   const VaultPortabilityAdapterImpl();
 
   static const _googleDrive = GoogleDriveVaultPortability();
+  static const _v2Prefix = '__nija_v2_b64__:';
 
   @override
   Future<ImportedVaultFile?> importVaultFromLocal() async {
     final file = await nijaPickTextFile('.nija,.json,.txt');
     if (file == null) return null;
+    var content = file.content;
+    if (content.startsWith(_v2Prefix)) {
+      final bytes = Uint8List.fromList(
+        base64Decode(content.substring(_v2Prefix.length)),
+      );
+      content = StreamingVaultContainer.containerBytesToJsonSnapshot(bytes);
+    }
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     return ImportedVaultFile(
       storageId: 'web_imported_${timestamp}_${file.name}',
-      label: _importLabel(file.name, file.content),
-      content: file.content,
+      label: _importLabel(file.name, content),
+      content: content,
       sourceDescription: file.name,
     );
   }
@@ -48,6 +58,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
   Future<String?> exportVaultToLocal({
     required String suggestedName,
     required String content,
+    Future<bool> Function(String destinationPath)? streamWriter,
   }) async {
     try {
       final downloaded = nijaDownloadTextFile(
@@ -67,12 +78,14 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     required String suggestedName,
     required String content,
     bool forceAccountChooser = true,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) {
     return _googleDrive.backupVaultToCloud(
       vaultId: vaultId,
       suggestedName: suggestedName,
       content: content,
       forceAccountChooser: forceAccountChooser,
+      onProgress: onProgress,
     );
   }
 
@@ -85,6 +98,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
     String mimeType = 'application/octet-stream',
     Map<String, String>? extraProperties,
     bool forceAccountChooser = false,
+    void Function(int bytesSent, int totalBytes)? onProgress,
   }) {
     return _googleDrive.backupVaultStreamToCloud(
       vaultId: vaultId,
@@ -94,6 +108,7 @@ class VaultPortabilityAdapterImpl implements VaultPortabilityAdapter {
       mimeType: mimeType,
       extraProperties: extraProperties,
       forceAccountChooser: forceAccountChooser,
+      onProgress: onProgress,
     );
   }
 

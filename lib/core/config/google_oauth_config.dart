@@ -20,4 +20,9 @@ class GoogleOAuthConfig {
     'NIJA_GOOGLE_NATIVE_SERVER_CLIENT_ID',
     defaultValue: '',
   );
+
+  static bool get hasWebClientId => webClientId.trim().isNotEmpty;
+
+  static bool get hasNativeServerClientId =>
+      nativeServerClientId.trim().isNotEmpty;
 }

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../../app/theme/entry_typography.dart';
+import '../../../../core/localization/app_strings.dart';
 import '../../../../core/config/vault_limits.dart';
 import '../../../../domain/models/folder_tree_builder.dart';
 import '../../../../domain/models/folder_tree_node.dart';
@@ -375,14 +376,14 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
   }
 
   Future<void> _moveSelectedItems() async {
-    final selected = _selectedItems;
+    final selected = List<Map<String, dynamic>>.from(_selectedItems);
     if (selected.isEmpty) return;
     final targetFolder = await showVaultFolderHierarchySheet(
       context,
       folders: widget.folders,
       selectedFolderId: _currentFolderId ?? VaultFoldersView.defaultFolderId,
       onCreateFolder: _createFolderCallback,
-      title: 'Move ${selected.length} items to...',
+      title: AppStrings.moveItemsTo(selected.length),
     );
     if (targetFolder == null || !mounted) return;
 
@@ -391,16 +392,123 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
         ? null
         : targetFolder.id;
 
+    await _showMoveProgressDialog(
+      items: selected,
+      targetFolder: targetFolder,
+      targetId: targetId,
+    );
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppStrings.movedItemsToFolder(selected.length, targetFolder.name),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _showMoveProgressDialog({
+    required List<Map<String, dynamic>> items,
+    required VaultFolder targetFolder,
+    required String? targetId,
+  }) async {
+    final total = items.length;
+    var current = 0;
+    StateSetter? updateDialog;
+
+    final isTest = WidgetsBinding.instance.runtimeType.toString().contains('Test');
+    final delay = isTest ? Duration.zero : const Duration(milliseconds: 15);
+
+    final dialogFuture = showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        final colorScheme = Theme.of(ctx).colorScheme;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            updateDialog = setState;
+            final progress = total > 0 ? (current / total).clamp(0.0, 1.0) : 0.0;
+            return AlertDialog(
+              key: const ValueKey('folder-move-progress-dialog'),
+              title: Row(
+                children: [
+                  Icon(Icons.drive_file_move_outlined, color: colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Moving to ${targetFolder.name}',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      key: const ValueKey('folder-move-progress-bar'),
+                      value: progress,
+                      minHeight: 8,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Moved $current of $total items',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        '${(progress * 100).toInt()}%',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    await Future<void>.delayed(Duration.zero);
+
+    for (var i = 0; i < total; i++) {
+      current = i + 1;
+      updateDialog?.call(() {});
+      if (delay > Duration.zero) {
+        await Future<void>.delayed(delay);
+      }
+    }
+
     if (widget.onMoveItems != null) {
-      widget.onMoveItems!(selected, targetId);
+      widget.onMoveItems!(items, targetId);
     } else {
-      for (final item in selected) {
+      for (final item in items) {
         widget.onMoveItem(item, targetId);
       }
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Moved ${selected.length} items to "${targetFolder.name}".')),
-    );
+
+    if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+    await dialogFuture;
   }
 
   Future<void> _copySelectedItems() async {
@@ -411,7 +519,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       folders: widget.folders,
       selectedFolderId: _currentFolderId ?? VaultFoldersView.defaultFolderId,
       onCreateFolder: _createFolderCallback,
-      title: 'Copy ${selected.length} items to...',
+      title: AppStrings.copyItemsTo(selected.length),
     );
     if (targetFolder == null || !mounted) return;
 
@@ -428,7 +536,11 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       }
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Copied ${selected.length} items to "${targetFolder.name}".')),
+        SnackBar(
+          content: Text(
+            AppStrings.copiedItemsToFolder(selected.length, targetFolder.name),
+          ),
+        ),
     );
   }
 
@@ -438,14 +550,14 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete ${selected.length} items?'),
+        title: Text(AppStrings.deleteItemsQuestion(selected.length)),
         content: Text(
           selected.length == 1
               ? 'Are you sure you want to delete this encrypted item?'
               : 'Are you sure you want to delete these ${selected.length} encrypted items? This action cannot be undone.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(AppStrings.cancel)),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: Colors.red,
@@ -462,10 +574,12 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 }
               }
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Deleted ${selected.length} items.')),
+                SnackBar(
+                  content: Text(AppStrings.deletedItemsCount(selected.length)),
+                ),
               );
             },
-            child: const Text('Delete'),
+            child: Text(AppStrings.delete),
           ),
         ],
       ),
@@ -672,7 +786,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                 ),
                 icon: const Icon(Icons.drive_file_move_outlined, size: 18),
-                label: Text('Move ($count)'),
+                label: Text(AppStrings.moveCount(count)),
                 onPressed: _moveSelectedItems,
               ),
             ),
@@ -685,7 +799,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                 ),
                 icon: const Icon(Icons.content_copy_outlined, size: 18),
-                label: Text('Copy ($count)'),
+                label: Text(AppStrings.copyCount(count)),
                 onPressed: _copySelectedItems,
               ),
             ),
@@ -700,7 +814,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                 ),
                 icon: const Icon(Icons.delete_outline, size: 18),
-                label: Text('Delete ($count)'),
+                label: Text(AppStrings.deleteCount(count)),
                 onPressed: _deleteSelectedItems,
               ),
             ),
@@ -742,7 +856,13 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 minimumSize: const Size(0, 28),
               ),
               onPressed: widget.onExitDemoPreview,
-              child: const Text('Exit Demo', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              child: Text(
+                AppStrings.exitDemo,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
         ],
       ),
@@ -768,7 +888,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             IconButton(
               key: const ValueKey('explorer-selection-cancel'),
               icon: const Icon(Icons.close, size: 20),
-              tooltip: 'Cancel selection',
+              tooltip: AppStrings.cancelSelection,
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -790,7 +910,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             IconButton(
               key: const ValueKey('explorer-selection-select-all'),
               icon: Icon(allSelected ? Icons.deselect : Icons.select_all, size: 20),
-              tooltip: allSelected ? 'Deselect All' : 'Select All',
+              tooltip: allSelected
+                  ? AppStrings.deselectAll
+                  : AppStrings.selectAll,
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -800,7 +922,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             IconButton(
               key: const ValueKey('explorer-selection-move'),
               icon: const Icon(Icons.drive_file_move_outlined, size: 20),
-              tooltip: 'Move selected',
+              tooltip: AppStrings.moveSelected,
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -810,7 +932,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
             IconButton(
               key: const ValueKey('explorer-selection-copy'),
               icon: const Icon(Icons.content_copy_outlined, size: 20),
-              tooltip: 'Copy selected',
+              tooltip: AppStrings.copySelected,
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -824,7 +946,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                 size: 20,
                 color: count == 0 ? colorScheme.onSurfaceVariant.withValues(alpha: 0.38) : Colors.red,
               ),
-              tooltip: 'Delete selected',
+              tooltip: AppStrings.deleteSelected,
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -838,38 +960,56 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final sortButton = PopupMenuButton<FolderSortOption>(
       key: const ValueKey('explorer-sort-button'),
       initialValue: _sortOption,
-      tooltip: 'Sort by',
+      tooltip: AppStrings.sortBy,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(),
       icon: const Icon(Icons.sort, size: 20),
       onSelected: (option) => setState(() => _sortOption = option),
-      itemBuilder: (context) => const [
-        PopupMenuItem(value: FolderSortOption.nameAsc, child: Text('Name (A to Z)')),
-        PopupMenuItem(value: FolderSortOption.nameDesc, child: Text('Name (Z to A)')),
-        PopupMenuItem(value: FolderSortOption.dateDesc, child: Text('Date (Newest first)')),
-        PopupMenuItem(value: FolderSortOption.dateAsc, child: Text('Date (Oldest first)')),
-        PopupMenuItem(value: FolderSortOption.sizeDesc, child: Text('Size (Largest first)')),
-        PopupMenuItem(value: FolderSortOption.type, child: Text('Type')),
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: FolderSortOption.nameAsc,
+          child: Text(AppStrings.sortNameAsc),
+        ),
+        PopupMenuItem(
+          value: FolderSortOption.nameDesc,
+          child: Text(AppStrings.sortNameDesc),
+        ),
+        PopupMenuItem(
+          value: FolderSortOption.dateDesc,
+          child: Text(AppStrings.sortDateDesc),
+        ),
+        PopupMenuItem(
+          value: FolderSortOption.dateAsc,
+          child: Text(AppStrings.sortDateAsc),
+        ),
+        PopupMenuItem(
+          value: FolderSortOption.sizeDesc,
+          child: Text(AppStrings.sortSizeDesc),
+        ),
+        PopupMenuItem(
+          value: FolderSortOption.type,
+          child: Text(AppStrings.sortType),
+        ),
       ],
     );
 
     final viewSegmented = SegmentedButton<ExplorerViewMode>(
       showSelectedIcon: false,
-      segments: const [
+      segments: [
         ButtonSegment(
           value: ExplorerViewMode.list,
           icon: Icon(Icons.view_list, size: 16),
-          tooltip: 'List view',
+          tooltip: AppStrings.listView,
         ),
         ButtonSegment(
           value: ExplorerViewMode.grid,
           icon: Icon(Icons.grid_view, size: 16),
-          tooltip: 'Grid view',
+          tooltip: AppStrings.gridView,
         ),
         ButtonSegment(
           value: ExplorerViewMode.tree,
           icon: Icon(Icons.account_tree_outlined, size: 16),
-          tooltip: 'Tree view',
+          tooltip: AppStrings.treeView,
         ),
       ],
       selected: {_viewMode},
@@ -884,7 +1024,9 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
 
     final searchToggleButton = IconButton(
       key: const ValueKey('explorer-search-toggle'),
-      tooltip: _isSearchExpanded ? 'Close search' : 'Search folders and items',
+      tooltip: _isSearchExpanded
+          ? AppStrings.closeSearch
+          : AppStrings.searchFoldersAndItems,
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -974,7 +1116,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                         size: 16,
                         color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                       ),
-                      tooltip: 'Clear search',
+                      tooltip: AppStrings.clearSearch,
                       onPressed: () {
                         _searchController.clear();
                         setState(() => _searchFilter = '');
@@ -990,7 +1132,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       size: 18,
                       color: colorScheme.onSurfaceVariant,
                     ),
-                    tooltip: 'Collapse search',
+                    tooltip: AppStrings.collapseSearch,
                     onPressed: () {
                       setState(() {
                         _isSearchExpanded = false;
@@ -1017,7 +1159,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           IconButton(
             icon: const Icon(Icons.arrow_back, size: 18),
             onPressed: _navigateBack,
-            tooltip: 'Back',
+            tooltip: AppStrings.back,
             visualDensity: VisualDensity.compact,
             padding: const EdgeInsets.all(4),
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1028,7 +1170,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           IconButton(
             icon: const Icon(Icons.arrow_upward, size: 18),
             onPressed: _navigateUp,
-            tooltip: 'Up to parent folder',
+            tooltip: AppStrings.upToParentFolder,
             visualDensity: VisualDensity.compact,
             padding: const EdgeInsets.all(4),
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1119,7 +1261,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
 
     final multiSelectToggle = IconButton(
       key: const ValueKey('explorer-multi-select-toggle'),
-      tooltip: 'Select multiple items',
+      tooltip: AppStrings.selectMultipleItems,
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -1208,15 +1350,15 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               children: [
                 Expanded(
                   flex: 4,
-                  child: Text('Name', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                  child: Text(AppStrings.nameColumn, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
                 ),
                 Expanded(
                   flex: 2,
-                  child: Text('Type', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                  child: Text(AppStrings.sortType, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
                 ),
                 Expanded(
                   flex: 2,
-                  child: Text('Size', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
+                  child: Text(AppStrings.sizeColumn, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorScheme.onSurfaceVariant)),
                 ),
                 const SizedBox(width: 40),
               ],
@@ -1293,11 +1435,11 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       icon: const Icon(Icons.more_vert, size: 18),
                       onSelected: (val) => _handleFolderAction(folder, val),
                       itemBuilder: (ctx) => [
-                        const PopupMenuItem(value: 'open', child: Text('Open')),
-                        if (!isDefault) ...const [
-                          PopupMenuItem(value: 'rename', child: Text('Rename')),
-                          PopupMenuItem(value: 'move', child: Text('Move to...')),
-                          PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                        PopupMenuItem(value: 'open', child: Text(AppStrings.open)),
+                        if (!isDefault) ...[
+                          PopupMenuItem(value: 'rename', child: Text(AppStrings.rename)),
+                          PopupMenuItem(value: 'move', child: Text(AppStrings.moveTo)),
+                          PopupMenuItem(value: 'delete', child: Text(AppStrings.delete, style: const TextStyle(color: Colors.red))),
                         ],
                       ],
                     ),
@@ -1333,11 +1475,11 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       icon: const Icon(Icons.more_vert, size: 18),
                       onSelected: (val) => _handleFolderAction(folder, val),
                       itemBuilder: (ctx) => [
-                        const PopupMenuItem(value: 'open', child: Text('Open')),
-                        if (!isDefault) ...const [
-                          PopupMenuItem(value: 'rename', child: Text('Rename')),
-                          PopupMenuItem(value: 'move', child: Text('Move to...')),
-                          PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                        PopupMenuItem(value: 'open', child: Text(AppStrings.open)),
+                        if (!isDefault) ...[
+                          PopupMenuItem(value: 'rename', child: Text(AppStrings.rename)),
+                          PopupMenuItem(value: 'move', child: Text(AppStrings.moveTo)),
+                          PopupMenuItem(value: 'delete', child: Text(AppStrings.delete, style: const TextStyle(color: Colors.red))),
                         ],
                       ],
                     ),
@@ -1477,18 +1619,18 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                     if (!_isSelectionMode) ...[
                       IconButton(
                         icon: Icon(Icons.info_outline, size: 18, color: colorScheme.onSurfaceVariant),
-                        tooltip: 'Item details',
+                        tooltip: AppStrings.itemDetails,
                         onPressed: () => _showItemInfoBottomSheet(item),
                       ),
                       PopupMenuButton<String>(
                         icon: const Icon(Icons.more_vert, size: 18),
                         onSelected: (val) => _handleItemAction(item, val),
                         itemBuilder: (ctx) => [
-                          const PopupMenuItem(value: 'open', child: Text('Open Details')),
-                          const PopupMenuItem(value: 'info', child: Text('Item Info')),
-                          const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
-                          const PopupMenuItem(value: 'move', child: Text('Move to...')),
-                          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                          PopupMenuItem(value: 'open', child: Text(AppStrings.openDetails)),
+                          PopupMenuItem(value: 'info', child: Text(AppStrings.itemInfo)),
+                          PopupMenuItem(value: 'copy', child: Text(AppStrings.copyTo)),
+                          PopupMenuItem(value: 'move', child: Text(AppStrings.moveTo)),
+                          PopupMenuItem(value: 'delete', child: Text(AppStrings.delete, style: const TextStyle(color: Colors.red))),
                         ],
                       ),
                     ],
@@ -1563,18 +1705,18 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       IconButton(
                         key: ValueKey('item-info-btn-${item['id'] ?? title}'),
                         icon: Icon(Icons.info_outline, size: 18, color: colorScheme.onSurfaceVariant),
-                        tooltip: 'Item details',
+                        tooltip: AppStrings.itemDetails,
                         onPressed: () => _showItemInfoBottomSheet(item),
                       ),
                       PopupMenuButton<String>(
                         icon: const Icon(Icons.more_vert, size: 18),
                         onSelected: (val) => _handleItemAction(item, val),
                         itemBuilder: (ctx) => [
-                          const PopupMenuItem(value: 'open', child: Text('Open Details')),
-                          const PopupMenuItem(value: 'info', child: Text('Item Info')),
-                          const PopupMenuItem(value: 'copy', child: Text('Copy to...')),
-                          const PopupMenuItem(value: 'move', child: Text('Move to...')),
-                          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                          PopupMenuItem(value: 'open', child: Text(AppStrings.openDetails)),
+                          PopupMenuItem(value: 'info', child: Text(AppStrings.itemInfo)),
+                          PopupMenuItem(value: 'copy', child: Text(AppStrings.copyTo)),
+                          PopupMenuItem(value: 'move', child: Text(AppStrings.moveTo)),
+                          PopupMenuItem(value: 'delete', child: Text(AppStrings.delete, style: const TextStyle(color: Colors.red))),
                         ],
                       ),
                     ],
@@ -1645,11 +1787,11 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                     icon: const Icon(Icons.more_horiz, size: 16),
                     onSelected: (val) => _handleFolderAction(folder, val),
                     itemBuilder: (ctx) => [
-                      const PopupMenuItem(value: 'open', child: Text('Open')),
-                      if (!isDefault) ...const [
-                        PopupMenuItem(value: 'rename', child: Text('Rename')),
-                        PopupMenuItem(value: 'move', child: Text('Move to...')),
-                        PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                      PopupMenuItem(value: 'open', child: Text(AppStrings.open)),
+                      if (!isDefault) ...[
+                        PopupMenuItem(value: 'rename', child: Text(AppStrings.rename)),
+                        PopupMenuItem(value: 'move', child: Text(AppStrings.moveTo)),
+                        PopupMenuItem(value: 'delete', child: Text(AppStrings.delete, style: const TextStyle(color: Colors.red))),
                       ],
                     ],
                   ),
@@ -1743,7 +1885,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       icon: Icon(Icons.info_outline, size: 16, color: colorScheme.onSurfaceVariant),
-                      tooltip: 'Item info',
+                      tooltip: AppStrings.itemInfo,
                       onPressed: () => _showItemInfoBottomSheet(item),
                     ),
                     const SizedBox(width: 4),
@@ -1751,12 +1893,12 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       padding: EdgeInsets.zero,
                       icon: const Icon(Icons.more_horiz, size: 16),
                       onSelected: (val) => _handleItemAction(item, val),
-                      itemBuilder: (ctx) => const [
-                        PopupMenuItem(value: 'open', child: Text('Open Details')),
-                        PopupMenuItem(value: 'info', child: Text('Item Info')),
-                        PopupMenuItem(value: 'copy', child: Text('Copy to...')),
-                        PopupMenuItem(value: 'move', child: Text('Move to...')),
-                        PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                      itemBuilder: (ctx) => [
+                        PopupMenuItem(value: 'open', child: Text(AppStrings.openDetails)),
+                        PopupMenuItem(value: 'info', child: Text(AppStrings.itemInfo)),
+                        PopupMenuItem(value: 'copy', child: Text(AppStrings.copyTo)),
+                        PopupMenuItem(value: 'move', child: Text(AppStrings.moveTo)),
+                        PopupMenuItem(value: 'delete', child: Text(AppStrings.delete, style: const TextStyle(color: Colors.red))),
                       ],
                     ),
                   ],
@@ -1860,7 +2002,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                     children: [
                       // Root Tree Entry
                       _buildTreeFolderTile(
-                        title: 'Root',
+                        title: AppStrings.rootFolder,
                         folderId: null,
                         isSelected: _currentFolderId == null,
                         hasChildren: tree.isNotEmpty,
@@ -2036,14 +2178,14 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
         showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Rename Folder'),
+            title: Text(AppStrings.renameFolder),
             content: TextField(
               controller: controller,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Folder Name'),
+              decoration: InputDecoration(labelText: AppStrings.folderName),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(AppStrings.cancel)),
               FilledButton(
                 style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
                 onPressed: () {
@@ -2053,7 +2195,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                     Navigator.pop(ctx);
                   }
                 },
-                child: const Text('Save'),
+                child: Text(AppStrings.save),
               ),
             ],
           ),
@@ -2064,19 +2206,19 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
         showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: Text('Delete "${folder.name}"?'),
+            title: Text(AppStrings.deleteFolderQuestion(folder.name)),
             content: const Text(
               'Choose whether to keep files (moving them to the parent folder) or delete the folder and all nested files.',
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(AppStrings.cancel)),
               OutlinedButton(
                 style: OutlinedButton.styleFrom(minimumSize: const Size(64, 38)),
                 onPressed: () {
                   widget.onDeleteFolder(folder.id, false); // Reparent
                   Navigator.pop(ctx);
                 },
-                child: const Text('Keep Files'),
+                child: Text(AppStrings.keepFiles),
               ),
               FilledButton(
                 style: FilledButton.styleFrom(
@@ -2087,7 +2229,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   widget.onDeleteFolder(folder.id, true); // Cascade
                   Navigator.pop(ctx);
                 },
-                child: const Text('Delete All'),
+                child: Text(AppStrings.deleteAll),
               ),
             ],
           ),
@@ -2178,7 +2320,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.close, size: 20),
-                        tooltip: 'Close',
+                        tooltip: AppStrings.close,
                         onPressed: () => Navigator.pop(bottomSheetContext),
                       ),
                     ],
@@ -2448,7 +2590,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(dialogCtx),
-                  child: const Text('Cancel'),
+                  child: Text(AppStrings.cancel),
                 ),
                 FilledButton(
                   key: const ValueKey('save-folder-color-button'),
@@ -2457,7 +2599,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                     setState(() {});
                     Navigator.pop(dialogCtx);
                   },
-                  child: const Text('Apply'),
+                  child: Text(AppStrings.apply),
                 ),
               ],
             );
@@ -2476,7 +2618,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
       folders: widget.folders,
       selectedFolderId: folder.parentId ?? 'root',
       onCreateFolder: _createFolderCallback,
-      title: 'Move "${folder.name}" to...',
+      title: AppStrings.moveNamedTo(folder.name),
       showRootOption: true,
       hideDefaultFolder: true,
       excludedFolderIds: excludedIds,
@@ -2486,7 +2628,11 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
     final targetParentId = targetFolder.id == 'root' ? null : targetFolder.id;
     widget.onMoveFolder(folder.id, targetParentId);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Moved "${folder.name}" to "${targetFolder.name}".')),
+      SnackBar(
+        content: Text(
+          AppStrings.movedNamedToFolder(folder.name, targetFolder.name),
+        ),
+      ),
     );
   }
 
@@ -2502,16 +2648,29 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           folders: widget.folders,
           selectedFolderId: item['folderId']?.toString() ?? VaultFoldersView.defaultFolderId,
           onCreateFolder: _createFolderCallback,
-          title: 'Move "${item['title'] ?? 'item'}" to...',
+          title: AppStrings.moveNamedTo(((item['title'] ?? 'item').toString()).toString()),
         );
         if (targetFolder != null && mounted) {
           final targetId = targetFolder.id == VaultFoldersView.defaultFolderId || targetFolder.id == 'root'
               ? null
               : targetFolder.id;
-          widget.onMoveItem(item, targetId);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Moved "${item['title'] ?? 'item'}" to "${targetFolder.name}".')),
+          await _showMoveProgressDialog(
+            items: [item],
+            targetFolder: targetFolder,
+            targetId: targetId,
           );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  AppStrings.movedNamedToFolder(
+                    ((item['title'] ?? 'item').toString()).toString(),
+                    targetFolder.name,
+                  ),
+                ),
+              ),
+            );
+          }
         }
       case 'copy':
         final targetFolder = await showVaultFolderHierarchySheet(
@@ -2519,7 +2678,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
           folders: widget.folders,
           selectedFolderId: item['folderId']?.toString() ?? VaultFoldersView.defaultFolderId,
           onCreateFolder: _createFolderCallback,
-          title: 'Copy "${item['title'] ?? 'item'}" to...',
+          title: AppStrings.copyNamedTo(((item['title'] ?? 'item').toString()).toString()),
         );
         if (targetFolder != null && mounted) {
           final targetId = targetFolder.id == VaultFoldersView.defaultFolderId || targetFolder.id == 'root'
@@ -2527,17 +2686,24 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
               : targetFolder.id;
           widget.onCopyItem(item, targetId);
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Copied "${item['title'] ?? 'item'}" to "${targetFolder.name}".')),
+            SnackBar(
+              content: Text(
+                AppStrings.copiedNamedToFolder(
+                  ((item['title'] ?? 'item').toString()).toString(),
+                  targetFolder.name,
+                ),
+              ),
+            ),
           );
         }
       case 'delete':
         await showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: Text('Delete "${item['title'] ?? 'item'}"?'),
-            content: const Text('Are you sure you want to delete this encrypted item?'),
+            title: Text(AppStrings.deleteFolderQuestion(((item['title'] ?? 'item').toString()).toString())),
+            content: Text(AppStrings.deleteItemConfirm),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(AppStrings.cancel)),
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.red,
@@ -2547,7 +2713,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                   widget.onDeleteItem(item);
                   Navigator.pop(ctx);
                 },
-                child: const Text('Delete'),
+                child: Text(AppStrings.delete),
               ),
             ],
           ),
@@ -2640,7 +2806,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.close, size: 20),
-                        tooltip: 'Close',
+                        tooltip: AppStrings.close,
                         onPressed: () => Navigator.pop(ctx),
                       ),
                     ],
@@ -2716,7 +2882,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       Expanded(
                         child: OutlinedButton.icon(
                           icon: const Icon(Icons.drive_file_move_outlined, size: 18),
-                          label: const Text('Move'),
+                          label: Text(AppStrings.move),
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -2731,7 +2897,7 @@ class _VaultFoldersViewState extends State<VaultFoldersView> {
                       Expanded(
                         child: FilledButton.icon(
                           icon: const Icon(Icons.open_in_new, size: 18),
-                          label: const Text('Open'),
+                          label: Text(AppStrings.open),
                           style: FilledButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

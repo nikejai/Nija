@@ -38,6 +38,7 @@ import 'widgets/vault_surface_menu.dart';
 import 'widgets/vault_folders_view.dart';
 import '../../../application/services/automated_backup_service.dart';
 import '../../../domain/models/local_vault_snapshot.dart';
+import '../../../infrastructure/services/network_connectivity_service.dart';
 
 part 'widgets/encrypted_import_widgets.dart';
 part 'custom_template_manager_screen.dart';
@@ -126,6 +127,7 @@ class VaultAppShell extends StatefulWidget {
   const VaultAppShell({
     super.key,
     this.activeVaultName = 'vault.nija',
+    this.activeVaultId = '',
     this.vaultSizeBytes = 0,
     this.activeVaultRevision = 0,
     this.activeVaultVersionId = '',
@@ -147,6 +149,7 @@ class VaultAppShell extends StatefulWidget {
     this.onPinChanged,
     required this.onBiometricChanged,
     required this.onPersistVaultData,
+    this.onSyncFolders,
     this.onPersistFolders,
     this.onPersistVaultDocument,
     this.onPersistVaultDocumentStream,
@@ -159,20 +162,36 @@ class VaultAppShell extends StatefulWidget {
     required this.onExportVault,
     required this.onImportVault,
     required this.onBackupToCloud,
+    this.onBackupToCloudWithProgress,
+    this.onSilentBackupToCloud,
     required this.onRestoreFromCloud,
     required this.onReadCloudBackupAccount,
     required this.onChangeCloudBackupAccount,
     this.onReadCloudBackupSummary,
     this.onRenameVault,
     this.onReadVaultInternals,
+    this.onReadSecurityMetadata,
     this.cloudBackupFeatureAvailableOverride,
     this.debugInternalsFeatureAvailableOverride,
-    this.expandedVaultStorageEntitled = true,
+    this.expandedVaultStorageEntitled = false,
+    this.canPurchaseExpandedVaultStorage = false,
+    this.purchaseInProgress = false,
+    this.restoreInProgress = false,
+    this.entitlementRefreshInProgress = false,
+    this.entitlementSource = 'free',
+    this.entitlementLastVerifiedAt,
+    this.entitlementErrorMessage,
+    this.onRefreshEntitlements,
+    this.onRestorePurchases,
+    this.onPurchaseExpandedVaultStorage,
     this.isExploreDemoSession = false,
+    this.seedRecoveryNoteIfEmpty = true,
     this.onExitExploreDemo,
     this.secretSharePortability,
     this.onReadRawVaultContent,
+    this.onExportVaultToPath,
     this.onRestoreRawVaultContent,
+    this.onRestoreVaultFromFile,
     this.guardianProfile,
     this.onMigrateToBalancedProfile,
     this.onExitRequested,
@@ -180,6 +199,7 @@ class VaultAppShell extends StatefulWidget {
 
   final List<String> recoveryWords;
   final String activeVaultName;
+  final String activeVaultId;
   final int vaultSizeBytes;
   final int activeVaultRevision;
   final String activeVaultVersionId;
@@ -200,6 +220,7 @@ class VaultAppShell extends StatefulWidget {
   final BiometricChanged? onPinChanged;
   final BiometricChanged onBiometricChanged;
   final PersistVaultData onPersistVaultData;
+  final ValueChanged<List<Map<String, dynamic>>>? onSyncFolders;
   final PersistVaultFolders? onPersistFolders;
   final PersistVaultDocument? onPersistVaultDocument;
   final PersistVaultDocumentStream? onPersistVaultDocumentStream;
@@ -212,20 +233,38 @@ class VaultAppShell extends StatefulWidget {
   final VaultFileAction onExportVault;
   final VaultFileAction onImportVault;
   final CloudBackupAction onBackupToCloud;
+  final Future<void> Function(
+    void Function(String message, double progress) onProgress,
+  )? onBackupToCloudWithProgress;
+  final CloudBackupAction? onSilentBackupToCloud;
   final CloudBackupAction onRestoreFromCloud;
   final CloudBackupAccountRead onReadCloudBackupAccount;
   final CloudBackupAccountChange onChangeCloudBackupAccount;
   final CloudBackupSummaryRead? onReadCloudBackupSummary;
   final RenameVault? onRenameVault;
   final ReadVaultInternals? onReadVaultInternals;
+  final ReadVaultInternals? onReadSecurityMetadata;
   final bool? cloudBackupFeatureAvailableOverride;
   final bool? debugInternalsFeatureAvailableOverride;
   final bool expandedVaultStorageEntitled;
+  final bool canPurchaseExpandedVaultStorage;
+  final bool purchaseInProgress;
+  final bool restoreInProgress;
+  final bool entitlementRefreshInProgress;
+  final String entitlementSource;
+  final DateTime? entitlementLastVerifiedAt;
+  final String? entitlementErrorMessage;
+  final Future<void> Function()? onRefreshEntitlements;
+  final Future<bool> Function()? onRestorePurchases;
+  final Future<bool> Function()? onPurchaseExpandedVaultStorage;
   final bool isExploreDemoSession;
+  final bool seedRecoveryNoteIfEmpty;
   final VoidCallback? onExitExploreDemo;
   final SecretSharePortabilityAdapter? secretSharePortability;
   final Future<String> Function()? onReadRawVaultContent;
+  final Future<bool> Function(String destinationPath)? onExportVaultToPath;
   final Future<bool> Function(String content)? onRestoreRawVaultContent;
+  final Future<bool> Function(String snapshotPath)? onRestoreVaultFromFile;
   final GuardianProfile? guardianProfile;
   final Future<void> Function({required String currentPassword})?
       onMigrateToBalancedProfile;
@@ -246,6 +285,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
       'nija_pref_cloud_backup_enabled_v1';
   static const String _prefsKeyAutomatedBackupEnabled =
       'nija_pref_automated_backup_enabled_v1';
+  static const String _prefsKeyAutomatedBackupHour =
+      'nija_pref_automated_backup_hour_v1';
+  static const String _prefsKeyAutomatedBackupMinute =
+      'nija_pref_automated_backup_minute_v1';
   static const String _prefsKeyCloudBackupWifiOnly =
       'nija_pref_cloud_backup_wifi_only_v1';
   static const String _prefsKeyLocalBackupLastAt =
@@ -277,17 +320,22 @@ class _VaultAppShellState extends State<VaultAppShell> {
   bool _allItemsFilterFavoritesOnly = false;
   String _allItemsFilterDateRange = 'any';
   bool _automatedBackupEnabled = true;
+  int _automatedBackupHour = 0;
+  int _automatedBackupMinute = 0;
   bool _cloudBackupWifiOnly = true;
   int _localBackupLastAtEpochMs = 0;
   List<LocalVaultSnapshot> _localSnapshots = <LocalVaultSnapshot>[];
   final AutomatedBackupService _automatedBackupService =
       AutomatedBackupService();
+  final NetworkConnectivityService _connectivityService =
+      NetworkConnectivityService();
   Timer? _midnightBackupTimer;
   bool _cloudBackupEnabled = AppFeatures.isPaidBuild;
   bool _importingEncryptedSecret = false;
   String _importBusyMessage = 'Importing data...';
   int _backgroundBusyCount = 0;
   String _backgroundBusyMessage = 'Working...';
+  double? _backgroundBusyProgress;
   int _storedDocumentBytesThisSession = 0;
   int _cloudBackupLastAtEpochMs = 0;
   int _cloudBackupRevision = 0;
@@ -305,6 +353,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<Map<String, dynamic>>? _debugInternalsFuture;
   _DashboardData? _dashboardDataCache;
   int? _dashboardDataSignature;
+  int _localMutationCounter = 0;
+  final Map<String, ({int signature, String text})> _entrySearchTextCache =
+      <String, ({int signature, String text})>{};
   bool _allowHomeDemoData = false;
   bool _showHomeDemoPreview = false;
   late final List<Map<String, dynamic>> _customTypeDefinitions;
@@ -327,7 +378,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Map<String, bool> _lastPinnedStateItemById = <String, bool>{};
   Map<String, bool> _lastPinnedStateNoteById = <String, bool>{};
 
-  void _updateState(VoidCallback fn) => setState(fn);
+  void _updateState(VoidCallback fn) => setState(() {
+    fn();
+    _localMutationCounter++;
+  });
 
   @override
   void initState() {
@@ -368,7 +422,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
       _dashboardDataCache = null;
       _dashboardDataSignature = null;
     }
-    if (_notes.isEmpty &&
+    if (widget.seedRecoveryNoteIfEmpty &&
+        _notes.isEmpty &&
         !widget.isExploreDemoSession &&
         !widget.initialNotes.any(
           (note) => note['id']?.toString() == 'note-recovery-phrase',
@@ -488,10 +543,38 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (oldWidget.onReadVaultInternals != widget.onReadVaultInternals) {
       _debugInternalsFuture = null;
     }
+    if (widget.guardianProfile != null &&
+        oldWidget.guardianProfile?.id != widget.guardianProfile?.id) {
+      _activeGuardianProfile = widget.guardianProfile!;
+    }
+    if (!listEquals(oldWidget.initialFolders, widget.initialFolders)) {
+      _folders = widget.initialFolders
+          .map((entry) => VaultFolder.fromJson(entry))
+          .toList();
+    }
+    if (oldWidget.activeVaultId != widget.activeVaultId && !kIsWeb) {
+      unawaited(_refreshLocalSnapshots());
+    }
   }
 
   @override
   void dispose() {
+    if (_persistDebounceTimer?.isActive == true) {
+      _persistDebounceTimer?.cancel();
+      _persistDebounceTimer = null;
+      if (!widget.isExploreDemoSession) {
+        widget.onSyncFolders?.call(_folders.map((f) => f.toJson()).toList());
+        unawaited(
+          widget.onPersistVaultData(
+            items: _serializableVaultEntries(_items),
+            notes: _serializableVaultEntries(_notes),
+            customTypeDefinitions: _serializableVaultEntries(
+              _customTypeDefinitions,
+            ),
+          ).catchError((_) {}),
+        );
+      }
+    }
     _persistDebounceTimer?.cancel();
     _midnightBackupTimer?.cancel();
     _allItemsSearchController.dispose();
@@ -547,7 +630,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   void _handleLockShortcut() {
+    unawaited(_lockWithFlush());
+  }
+
+  Future<void> _lockWithFlush() async {
+    await _flushPendingPersist();
     widget.onLockNow();
+  }
+
+  Future<void> _switchVaultWithFlush() async {
+    await _flushPendingPersist();
+    widget.onSwitchVault?.call();
   }
 
   void _handleEscapeShortcut() {
@@ -631,8 +724,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
                     vaultMetaLabel: widget.isExploreDemoSession
                         ? 'Demo · sample data'
                         : '${_items.length + _notes.length} items · local',
-                    onLockNow: widget.onLockNow,
-                    onSwitchVault: widget.onSwitchVault,
+                    onLockNow: () => unawaited(_lockWithFlush()),
+                    onSwitchVault: widget.onSwitchVault == null
+                        ? null
+                        : () => unawaited(_switchVaultWithFlush()),
                     onThemeToggle: widget.onThemeModeChanged == null
                         ? null
                         : _toggleThemeMode,
@@ -847,8 +942,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
               ListTile(
                 key: const ValueKey('explorer-fab-new-folder'),
                 leading: const Icon(Icons.create_new_folder_outlined, color: Color(0xFFEAB308)),
-                title: const Text('New Folder'),
-                subtitle: const Text('Create a folder to organize items'),
+                title: Text(AppStrings.newFolder),
+                subtitle: Text(AppStrings.newFolderSubtitle),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showCreateFolderModal(context, parentFolderId: effectiveFolderId);
@@ -857,8 +952,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
               ListTile(
                 key: const ValueKey('explorer-fab-add-item'),
                 leading: const Icon(Icons.add_circle_outline, color: Color(0xFF3B82F6)),
-                title: const Text('Add Item'),
-                subtitle: const Text('Add password, note, card, or credential'),
+                title: Text(AppStrings.addItem),
+                subtitle: Text(AppStrings.addItemSubtitle),
                 onTap: () {
                   Navigator.pop(ctx);
                   _openAddItemScreen(context, initialFolderId: effectiveFolderId);
@@ -867,8 +962,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
               ListTile(
                 key: const ValueKey('explorer-fab-upload-file'),
                 leading: const Icon(Icons.upload_file_outlined, color: Color(0xFF10B981)),
-                title: const Text('Upload File'),
-                subtitle: const Text('Upload an encrypted document or attachment'),
+                title: Text(AppStrings.uploadFile),
+                subtitle: Text(AppStrings.uploadFileSubtitle),
                 onTap: () {
                   Navigator.pop(ctx);
                   _openUploadDocumentToFolder(effectiveFolderId);
@@ -886,18 +981,18 @@ class _VaultAppShellState extends State<VaultAppShell> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Create New Folder'),
+        title: Text(AppStrings.createNewFolderTitle),
         content: TextField(
           key: const ValueKey('create-folder-name-input'),
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Folder Name',
-            hintText: 'e.g. Work, Taxes, Identity',
+          decoration: InputDecoration(
+            labelText: AppStrings.folderName,
+            hintText: AppStrings.folderNameHint,
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(AppStrings.cancel)),
           FilledButton(
             key: const ValueKey('create-folder-submit-button'),
             style: FilledButton.styleFrom(minimumSize: const Size(64, 38)),
@@ -908,7 +1003,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
                 Navigator.pop(ctx);
               }
             },
-            child: const Text('Create'),
+            child: Text(AppStrings.create),
           ),
         ],
       ),
@@ -1090,8 +1185,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (_blockExploreDemoWrite()) return;
     if (widget.onPersistVaultDocument == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Document storage unavailable in this session.'),
+        SnackBar(
+          content: Text(AppStrings.documentStorageUnavailable),
         ),
       );
       return;
@@ -1129,7 +1224,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       } catch (_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save document.')),
+          SnackBar(content: Text(AppStrings.failedToSaveDocument)),
         );
         return;
       }
@@ -1149,6 +1244,65 @@ class _VaultAppShellState extends State<VaultAppShell> {
   bool get _cloudBackupFeatureAvailable =>
       widget.cloudBackupFeatureAvailableOverride ??
       (widget.expandedVaultStorageEntitled || AppFeatures.supportsCloudBackup);
+
+  bool get _automatedBackupFeatureAvailable =>
+      widget.expandedVaultStorageEntitled || AppFeatures.supportsAutomatedBackup;
+
+  Future<void> _handlePurchasePro() async {
+    if (_blockExploreDemoWrite()) return;
+    final purchase = widget.onPurchaseExpandedVaultStorage;
+    if (purchase == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Google Play purchases are available on Android only.'),
+        ),
+      );
+      return;
+    }
+    final launched = await purchase();
+    if (!mounted) return;
+    if (!launched) {
+      final err = widget.entitlementErrorMessage?.trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            (err != null && err.isNotEmpty)
+                ? err
+                : 'Could not start Google Play purchase.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleRestorePurchases() async {
+    if (_blockExploreDemoWrite()) return;
+    final restore = widget.onRestorePurchases;
+    if (restore == null) {
+      await widget.onRefreshEntitlements?.call();
+      return;
+    }
+    final restored = await restore();
+    if (!mounted) return;
+    if (restored) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pro upgrade restored from Google Play.'),
+        ),
+      );
+    } else {
+      final err = widget.entitlementErrorMessage?.trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            (err != null && err.isNotEmpty)
+                ? err
+                : 'No active Pro purchase found on this Google Play account.',
+          ),
+        ),
+      );
+    }
+  }
 
   bool get _cloudRestoreFeatureAvailable =>
       widget.cloudBackupFeatureAvailableOverride ?? true;
@@ -1240,12 +1394,33 @@ class _VaultAppShellState extends State<VaultAppShell> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Large encrypted files may take a moment.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: colorScheme.onSurfaceVariant),
-                      ),
+                      if (_backgroundBusyProgress != null &&
+                          !_importingEncryptedSecret) ...[
+                        const SizedBox(height: 12),
+                        LinearProgressIndicator(
+                          value: _backgroundBusyProgress!.clamp(0.0, 1.0),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '${(_backgroundBusyProgress! * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Large encrypted files may take a moment.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1282,6 +1457,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           _backgroundBusyCount = (_backgroundBusyCount - 1).clamp(0, 1 << 20);
           if (_backgroundBusyCount == 0) {
             _backgroundBusyMessage = 'Working...';
+            _backgroundBusyProgress = null;
           }
         });
       }
@@ -1293,8 +1469,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
       if (!mounted) return;
       final messenger = ScaffoldMessenger.of(context)..removeCurrentSnackBar();
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Please wait for the operation to finish.'),
+        SnackBar(
+          content: Text(AppStrings.pleaseWaitForOperation),
         ),
       );
       return;
@@ -1309,13 +1485,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
     }
 
     if (widget.onExitRequested != null) {
+      await _flushPendingPersist();
       await widget.onExitRequested!();
       return;
     }
 
     final confirmed = await _confirmQuitApplication();
     if (confirmed && mounted) {
-      widget.onLockNow();
+      await _lockWithFlush();
       await SystemNavigator.pop();
     }
   }
@@ -1325,18 +1502,18 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Quit Application?'),
-        content: const Text('Are you sure you want to quit the app?'),
+        title: Text(AppStrings.quitApplicationQuestion),
+        content: Text(AppStrings.quitApplicationConfirm),
         actions: [
           TextButton(
             key: const ValueKey('quit-dialog-cancel-button'),
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppStrings.cancel),
           ),
           FilledButton(
             key: const ValueKey('quit-dialog-confirm-button'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Quit'),
+            child: Text(AppStrings.quit),
           ),
         ],
       ),
@@ -1350,7 +1527,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        title: const Text('Migrate to Balanced Vault?'),
+        title: Text(AppStrings.migrateToBalancedQuestion),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1363,9 +1540,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
               key: const ValueKey('migrate-balanced-password-input'),
               controller: passwordController,
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Master Password',
-                hintText: 'Enter current master password',
+              decoration: InputDecoration(
+                labelText: AppStrings.settingsMasterPassword,
+                hintText: AppStrings.enterCurrentMasterPassword,
               ),
             ),
           ],
@@ -1374,7 +1551,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           TextButton(
             key: const ValueKey('migrate-balanced-cancel-button'),
             onPressed: () => Navigator.of(dialogCtx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppStrings.cancel),
           ),
           FilledButton(
             key: const ValueKey('migrate-balanced-confirm-button'),
@@ -1382,7 +1559,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
               if (passwordController.text.trim().isEmpty) return;
               Navigator.of(dialogCtx).pop(true);
             },
-            child: const Text('Migrate to Balanced'),
+            child: Text(AppStrings.migrateToBalanced),
           ),
         ],
       ),
@@ -1399,9 +1576,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
       });
       if (!mounted) return;
       messenger.showSnackBar(
-        const SnackBar(
+        SnackBar(
           content:
-              Text('Vault successfully migrated to Balanced profile (Owl).'),
+              Text(AppStrings.vaultMigratedToBalanced),
         ),
       );
     }
@@ -1414,7 +1591,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
       activeVaultName: _activeVaultName,
       greeting: _dashboardGreeting(),
       onAddItem: () => _openAddItemScreen(context),
-      onLockNow: widget.onLockNow,
+      onLockNow: () => unawaited(_lockWithFlush()),
       onApplySearch: _applyDashboardSearchToAllItems,
       onOpenFilters: () => _openAllItemsFiltersOverlay(
         _allTypeFilterOptions(),
@@ -1437,7 +1614,9 @@ class _VaultAppShellState extends State<VaultAppShell> {
         }
         widget.onImportVault();
       },
-      onSwitchVault: widget.onSwitchVault ?? widget.onLockNow,
+      onSwitchVault: widget.onSwitchVault == null
+          ? () => unawaited(_lockWithFlush())
+          : () => unawaited(_switchVaultWithFlush()),
       onShowDemoPreview: _showHomeDemoPreviewOption,
       onHideDemoPreview: _hideHomeDemoPreview,
       onOpenRow: (row) => _openDashboardRow(context, row),
@@ -1470,8 +1649,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
   void _openDashboardRow(BuildContext context, Map<String, dynamic> row) {
     if (row['demo'] == true && !widget.isExploreDemoSession) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This is a demo preview. Add an item to start.'),
+        SnackBar(
+          content: Text(AppStrings.demoPreviewAddItem),
         ),
       );
       return;
@@ -1482,8 +1661,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
   void _selectDashboardType(String type) {
     if (_shouldShowHomeDemoData && !widget.isExploreDemoSession) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('This is a demo preview. Add an item to start.'),
+        SnackBar(
+          content: Text(AppStrings.demoPreviewAddItem),
         ),
       );
       return;
@@ -1601,8 +1780,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to store attachment. Please retry.'),
+        SnackBar(
+          content: Text(AppStrings.failedToStoreAttachment),
         ),
       );
       return;
@@ -1733,40 +1912,22 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   int _dashboardInputSignature() {
-    final values = <Object?>[
+    return Object.hash(
       DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerMinute,
       widget.isExploreDemoSession,
       _showHomeDemoPreview,
       _items.length,
       _notes.length,
-    ];
-    for (final item in _items) {
-      values.addAll([
-        item['id'],
-        item['type'],
-        item['title'],
-        item['subtitle'],
-        item['updated'],
-        item['updatedAt'],
-        item['documentUploadedAt'],
-        item['createdAt'],
-        item['lastAccessedAt'],
-        item['pinned'],
-      ]);
-    }
-    for (final note in _notes) {
-      values.addAll([
-        note['id'],
-        note['title'],
-        note['preview'],
-        note['updated'],
-        note['updatedAt'],
-        note['createdAt'],
-        note['lastAccessedAt'],
-        note['pinned'],
-      ]);
-    }
-    return Object.hashAll(values);
+      widget.activeVaultRevision,
+      widget.activeVaultVersionId,
+      _localMutationCounter,
+      Object.hashAll(
+        _items.map((e) => Object.hash(e['id'], e['type'], e['updatedAt'], e['pinned'])),
+      ),
+      Object.hashAll(
+        _notes.map((e) => Object.hash(e['id'], e['updatedAt'], e['pinned'])),
+      ),
+    );
   }
 
   DateTime? _parseEntryTimestamp(Object? raw) {
@@ -1835,6 +1996,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   String _entrySearchText(String kind, Map<String, dynamic> entry) {
+    final id = entry['id']?.toString() ?? '';
+    final cacheKey = '$kind:$id';
+    final signature = Object.hash(
+      entry['version'],
+      entry['updatedAt'],
+      entry['updated'],
+      entry['title'],
+      entry['folderId'],
+      entry['folder'],
+      (entry['tags'] as List?)?.length,
+      (entry['fields'] as List?)?.length,
+      (entry['delta'] as List?)?.length,
+    );
+    if (id.isNotEmpty) {
+      final cached = _entrySearchTextCache[cacheKey];
+      if (cached != null && cached.signature == signature) {
+        return cached.text;
+      }
+    }
     final values = <String>[
       entry['title']?.toString() ?? '',
       entry['subtitle']?.toString() ?? '',
@@ -1864,7 +2044,11 @@ class _VaultAppShellState extends State<VaultAppShell> {
         }
       }
     }
-    return values.join(' ').toLowerCase();
+    final computed = values.join(' ').toLowerCase();
+    if (id.isNotEmpty) {
+      _entrySearchTextCache[cacheKey] = (signature: signature, text: computed);
+    }
+    return computed;
   }
 
   Map<String, dynamic>? _customTypeDefinitionForType(String type) {
@@ -2047,25 +2231,25 @@ class _VaultAppShellState extends State<VaultAppShell> {
 
     final selected = await showVaultChoiceMenu<ThemeMode>(
       context: context,
-      title: 'Theme',
+      title: AppStrings.theme,
       options: [
         VaultMenuOption(
           value: ThemeMode.system,
-          title: 'System',
+          title: AppStrings.themeSystem,
           trailing: widget.themeMode == ThemeMode.system
               ? const Icon(Icons.check)
               : null,
         ),
         VaultMenuOption(
           value: ThemeMode.light,
-          title: 'Light',
+          title: AppStrings.themeLight,
           trailing: widget.themeMode == ThemeMode.light
               ? const Icon(Icons.check)
               : null,
         ),
         VaultMenuOption(
           value: ThemeMode.dark,
-          title: 'Dark',
+          title: AppStrings.themeDark,
           trailing: widget.themeMode == ThemeMode.dark
               ? const Icon(Icons.check)
               : null,
@@ -2096,7 +2280,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   Future<void> _showSecurityEncryptionSheet(BuildContext context) async {
-    final metadataFuture = widget.onReadVaultInternals?.call();
+    final metadataFuture =
+        (widget.onReadSecurityMetadata ?? widget.onReadVaultInternals)?.call();
     if (!context.mounted) return;
     await showVaultSurfaceSheet<void>(
       context: context,
@@ -2128,24 +2313,24 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Cloud backup is currently unavailable.')),
+      SnackBar(content: Text(AppStrings.cloudBackupUnavailable)),
     );
   }
 
   List<_InfoSectionData> _aboutNijaSections() {
-    return const <_InfoSectionData>[
+    return <_InfoSectionData>[
       _InfoSectionData(
         title: 'Nija · निज',
         body:
-            'Version 1.0.0\nNija is a private vault for passwords, notes, documents, identities, and custom secure records.',
+            'Version ${AppFeatures.appVersion}\nNija is a private vault for passwords, notes, documents, identities, and custom secure records.',
       ),
       _InfoSectionData(
-        title: 'Security model',
+        title: AppStrings.securityModel,
         body:
             'Vault data is encrypted before it is stored. Your master password is used to unlock the vault, and recovery data should be kept offline and private.',
       ),
       _InfoSectionData(
-        title: 'Your responsibility',
+        title: AppStrings.yourResponsibility,
         body:
             'Nija cannot recover a forgotten master password or recovery phrase. Export or back up important vaults before replacing devices or clearing app data.',
       ),
@@ -2153,19 +2338,19 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   List<_InfoSectionData> _privacyPolicySections() {
-    return const <_InfoSectionData>[
+    return <_InfoSectionData>[
       _InfoSectionData(
-        title: 'Local-first storage',
+        title: AppStrings.localFirstStorage,
         body:
             'Nija is designed to keep vault contents on your device unless you explicitly export, share, import, or back up a vault.',
       ),
       _InfoSectionData(
-        title: 'Cloud backup',
+        title: AppStrings.cloudBackup,
         body:
             'If you choose cloud backup, encrypted vault backup files are stored in the cloud account you select. Nija does not upload decrypted vault contents.',
       ),
       _InfoSectionData(
-        title: 'Sensitive data',
+        title: AppStrings.sensitiveData,
         body:
             'Passwords, notes, documents, identity photos, and custom fields are treated as vault data. Do not share exported encrypted files or their passwords with untrusted people.',
       ),
@@ -2178,7 +2363,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   }
 
   List<_InfoSectionData> _termsOfUseSections() {
-    return const <_InfoSectionData>[
+    return <_InfoSectionData>[
       _InfoSectionData(
         title: 'Use at your discretion',
         body:
@@ -2950,6 +3135,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
     });
   }
 
+  Future<void> _flushPendingPersist() async {
+    final timer = _persistDebounceTimer;
+    if (timer == null || !timer.isActive) return;
+    timer.cancel();
+    _persistDebounceTimer = null;
+    await _persistVaultDataUnchecked();
+  }
+
   Future<void> _persistVaultData() async {
     if (widget.isExploreDemoSession) return;
     if (_backgroundBusyCount == 0 && !_importingEncryptedSecret) {
@@ -2962,6 +3155,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
   Future<void> _persistVaultDataUnchecked() async {
     if (_blockExploreDemoWrite()) return;
     try {
+      widget.onSyncFolders?.call(_folders.map((f) => f.toJson()).toList());
       await widget.onPersistVaultData(
         items: _serializableVaultEntries(_items),
         notes: _serializableVaultEntries(_notes),
@@ -2969,7 +3163,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
           _customTypeDefinitions,
         ),
       );
-      if (widget.onPersistFolders != null) {
+      if (widget.onSyncFolders == null && widget.onPersistFolders != null) {
         await widget.onPersistFolders!(
           _folders.map((f) => f.toJson()).toList(),
         );
@@ -3019,6 +3213,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
       final prefs = await SharedPreferences.getInstance();
       final automatedEnabled =
           prefs.getBool(_prefsKeyAutomatedBackupEnabled) ?? true;
+      final backupHour = prefs.getInt(_prefsKeyAutomatedBackupHour) ?? 0;
+      final backupMinute = prefs.getInt(_prefsKeyAutomatedBackupMinute) ?? 0;
       final wifiOnly =
           prefs.getBool(_prefsKeyCloudBackupWifiOnly) ?? true;
       final localLastAt = prefs.getInt(_prefsKeyLocalBackupLastAt) ?? 0;
@@ -3030,7 +3226,10 @@ class _VaultAppShellState extends State<VaultAppShell> {
       final hasVerifiedBackup = revision > 0 || versionId.trim().isNotEmpty;
       if (!mounted) return;
       setState(() {
-        _automatedBackupEnabled = automatedEnabled;
+        _automatedBackupEnabled =
+            _automatedBackupFeatureAvailable && automatedEnabled;
+        _automatedBackupHour = backupHour;
+        _automatedBackupMinute = backupMinute;
         _cloudBackupWifiOnly = wifiOnly;
         _localBackupLastAtEpochMs = localLastAt;
         _cloudBackupEnabled = enabled && _cloudBackupFeatureAvailable;
@@ -3043,8 +3242,8 @@ class _VaultAppShellState extends State<VaultAppShell> {
         unawaited(_refreshCloudBackupSummary());
       }
       unawaited(_refreshLocalSnapshots());
-      if (_automatedBackupEnabled) {
-        _startMidnightBackupSchedule();
+      if (_automatedBackupFeatureAvailable && _automatedBackupEnabled) {
+        _startDailyBackupSchedule();
         unawaited(_checkAndRunDueAutomatedBackup());
       }
     } catch (_) {
@@ -3055,13 +3254,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
   bool get _isTestEnvironment =>
       WidgetsBinding.instance.runtimeType.toString().contains('Test');
 
-  void _startMidnightBackupSchedule() {
+  void _startDailyBackupSchedule() {
     _midnightBackupTimer?.cancel();
     if (_isTestEnvironment) {
       return;
     }
-    _midnightBackupTimer = _automatedBackupService.scheduleMidnightBackup(
-      onMidnightBackup: () async {
+    _midnightBackupTimer = _automatedBackupService.scheduleDailyBackup(
+      hour: _automatedBackupHour,
+      minute: _automatedBackupMinute,
+      onBackup: () async {
         await _runAutomatedBackup();
       },
     );
@@ -3072,35 +3273,75 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return;
     }
     if (!_automatedBackupEnabled) return;
-    if (_localBackupLastAtEpochMs <= 0) return;
+    if (_localBackupLastAtEpochMs <= 0) {
+      // No snapshot taken yet; create initial baseline local snapshot only (skip cloud).
+      await _runAutomatedBackup(force: true, skipCloud: true);
+      return;
+    }
     final lastBackup =
         DateTime.fromMillisecondsSinceEpoch(_localBackupLastAtEpochMs);
-    if (AutomatedBackupService.isBackupDue(lastBackup)) {
-      await _runAutomatedBackup();
+    if (AutomatedBackupService.isBackupDueAtTime(
+      lastBackup,
+      _automatedBackupHour,
+      _automatedBackupMinute,
+    )) {
+      // Only catch up local snapshots on app open; never auto-start Google backup on launch.
+      await _runAutomatedBackup(skipCloud: true);
     }
   }
 
+  String get _snapshotVaultId {
+    final id = widget.activeVaultId.trim();
+    if (id.isNotEmpty) return id;
+    final versionId = widget.activeVaultVersionId.trim();
+    if (versionId.isNotEmpty) return versionId;
+    return 'default_vault';
+  }
+
   Future<void> _refreshLocalSnapshots() async {
-    final vaultId = widget.activeVaultVersionId.isNotEmpty
-        ? widget.activeVaultVersionId
-        : 'default_vault';
-    final snapshots = await _automatedBackupService.listLocalSnapshots(vaultId);
+    if (kIsWeb) return;
+    final snapshots = await _automatedBackupService.listLocalSnapshots(
+      _snapshotVaultId,
+    );
     if (!mounted) return;
     setState(() => _localSnapshots = snapshots);
   }
 
   Future<void> _setAutomatedBackupEnabled(bool enabled) async {
+    if (!_automatedBackupFeatureAvailable) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(AppFeatures.paidUnavailableLabel)),
+        );
+      }
+      return;
+    }
     setState(() => _automatedBackupEnabled = enabled);
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefsKeyAutomatedBackupEnabled, enabled);
     } catch (_) {}
     if (enabled) {
-      _startMidnightBackupSchedule();
+      _startDailyBackupSchedule();
       unawaited(_checkAndRunDueAutomatedBackup());
     } else {
       _midnightBackupTimer?.cancel();
       _midnightBackupTimer = null;
+    }
+  }
+
+  Future<void> _setAutomatedBackupTime(int hour, int minute) async {
+    setState(() {
+      _automatedBackupHour = hour;
+      _automatedBackupMinute = minute;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_prefsKeyAutomatedBackupHour, hour);
+      await prefs.setInt(_prefsKeyAutomatedBackupMinute, minute);
+    } catch (_) {}
+    if (_automatedBackupEnabled) {
+      _startDailyBackupSchedule();
     }
   }
 
@@ -3112,34 +3353,112 @@ class _VaultAppShellState extends State<VaultAppShell> {
     } catch (_) {}
   }
 
-  Future<void> _runAutomatedBackup({bool force = false}) async {
-    if (!force && !_automatedBackupEnabled) return;
-    final vaultId = widget.activeVaultVersionId.isNotEmpty
-        ? widget.activeVaultVersionId
-        : 'default_vault';
-
-    // 1. Local backup: keep 2 rolling snapshots daily at midnight
+  Future<void> _handleLocalBackupNow() async {
+    if (kIsWeb || _isBusyOverlayVisible) return;
+    final vaultId = _snapshotVaultId;
     try {
-      String rawContent;
-      if (widget.onReadRawVaultContent != null) {
-        rawContent = await widget.onReadRawVaultContent!();
+      LocalVaultSnapshot? snapshot;
+      if (widget.onExportVaultToPath != null) {
+        snapshot = await _automatedBackupService
+            .createLocalSnapshotFromFileWriter(
+              vaultId: vaultId,
+              writeToFile: widget.onExportVaultToPath!,
+              timestamp: DateTime.now(),
+            );
       } else {
-        rawContent = jsonEncode({
-          'vaultId': vaultId,
-          'vaultName': _activeVaultName,
-          'revision': widget.activeVaultRevision,
-          'items': _items,
-          'notes': _notes,
-          'folders': _folders.map((VaultFolder f) => f.toJson()).toList(),
-        });
+        String rawContent;
+        if (widget.onReadRawVaultContent != null) {
+          rawContent = await widget.onReadRawVaultContent!();
+        } else {
+          rawContent = jsonEncode({
+            'vaultId': vaultId,
+            'vaultName': _activeVaultName,
+            'revision': widget.activeVaultRevision,
+            'items': _items,
+            'notes': _notes,
+            'folders': _folders.map((VaultFolder f) => f.toJson()).toList(),
+          });
+        }
+        if (rawContent.isNotEmpty) {
+          snapshot = await _automatedBackupService.createLocalSnapshot(
+            vaultId: vaultId,
+            rawVaultContent: rawContent,
+            timestamp: DateTime.now(),
+          );
+        }
       }
-
-      if (rawContent.isNotEmpty) {
-        final snapshot = await _automatedBackupService.createLocalSnapshot(
-          vaultId: vaultId,
-          rawVaultContent: rawContent,
-          timestamp: DateTime.now(),
+      if (snapshot != null) {
+        final nowEpoch = DateTime.now().millisecondsSinceEpoch;
+        if (mounted) {
+          setState(() {
+            _localBackupLastAtEpochMs = nowEpoch;
+          });
+        }
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt(_prefsKeyLocalBackupLastAt, nowEpoch);
+        } catch (_) {}
+        await _refreshLocalSnapshots();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Local backup created (${_localSnapshots.length}/2 snapshots saved).',
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create local backup: $e')),
         );
+      }
+    }
+  }
+
+  Future<void> _runAutomatedBackup({
+    bool force = false,
+    bool skipCloud = false,
+  }) async {
+    if (!_automatedBackupFeatureAvailable) return;
+    if (!force && !_automatedBackupEnabled) return;
+    final vaultId = _snapshotVaultId;
+
+    // 1. Local backup: keep 2 rolling snapshots daily at scheduled time (non-web only)
+    if (!kIsWeb) {
+      try {
+        LocalVaultSnapshot? snapshot;
+        if (widget.onExportVaultToPath != null) {
+          snapshot = await _automatedBackupService
+              .createLocalSnapshotFromFileWriter(
+                vaultId: vaultId,
+                writeToFile: widget.onExportVaultToPath!,
+                timestamp: DateTime.now(),
+              );
+        } else {
+          String rawContent;
+          if (widget.onReadRawVaultContent != null) {
+            rawContent = await widget.onReadRawVaultContent!();
+          } else {
+            rawContent = jsonEncode({
+              'vaultId': vaultId,
+              'vaultName': _activeVaultName,
+              'revision': widget.activeVaultRevision,
+              'items': _items,
+              'notes': _notes,
+              'folders': _folders.map((VaultFolder f) => f.toJson()).toList(),
+            });
+          }
+          if (rawContent.isNotEmpty) {
+            snapshot = await _automatedBackupService.createLocalSnapshot(
+              vaultId: vaultId,
+              rawVaultContent: rawContent,
+              timestamp: DateTime.now(),
+            );
+          }
+        }
         if (snapshot != null) {
           final nowEpoch = DateTime.now().millisecondsSinceEpoch;
           _localBackupLastAtEpochMs = nowEpoch;
@@ -3149,15 +3468,28 @@ class _VaultAppShellState extends State<VaultAppShell> {
           } catch (_) {}
           await _refreshLocalSnapshots();
         }
+      } catch (e) {
+        debugPrint('Local automated snapshot error: $e');
       }
-    } catch (e) {
-      debugPrint('Local automated snapshot error: $e');
     }
 
-    // 2. Cloud / paid backup: single backup file daily at midnight
+    if (skipCloud) return;
+
+    // 2. Cloud / paid backup: single backup file daily at scheduled time
     if (_cloudBackupFeatureAvailable && _cloudBackupEnabled) {
+      if (_cloudBackupWifiOnly) {
+        final onWifi = await _connectivityService.isWifiConnected();
+        if (!onWifi) {
+          debugPrint('Cloud automated backup skipped: not connected to Wi-Fi.');
+          return;
+        }
+      }
       try {
-        await widget.onBackupToCloud();
+        if (widget.onSilentBackupToCloud != null) {
+          await widget.onSilentBackupToCloud!();
+        } else {
+          await widget.onBackupToCloud();
+        }
         final cloudBackup = await _readCloudBackupSummary();
         if (cloudBackup != null) {
           await _applyCloudBackupSummary(
@@ -3184,6 +3516,20 @@ class _VaultAppShellState extends State<VaultAppShell> {
       );
       return;
     }
+    if (_cloudBackupWifiOnly) {
+      final onWifi = await _connectivityService.isWifiConnected();
+      if (!onWifi) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Backup paused: "Back up over Wi-Fi only" is enabled, but Wi-Fi is not connected. Connect to Wi-Fi or turn off "Wi-Fi only" in Settings.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
     if (!await _verifyWebTransferReady()) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3192,7 +3538,17 @@ class _VaultAppShellState extends State<VaultAppShell> {
       return;
     }
     await _runWithBusy('Cloud backup in progress...', () async {
-      await widget.onBackupToCloud();
+      if (widget.onBackupToCloudWithProgress != null) {
+        await widget.onBackupToCloudWithProgress!((message, progress) {
+          if (!mounted) return;
+          setState(() {
+            _backgroundBusyMessage = message;
+            _backgroundBusyProgress = progress;
+          });
+        });
+      } else {
+        await widget.onBackupToCloud();
+      }
       if (!mounted) return;
       await _refreshCloudBackupAccountLabel();
       if (!mounted) return;
@@ -3319,6 +3675,15 @@ class _VaultAppShellState extends State<VaultAppShell> {
             ),
           ),
           actions: [
+            FilledButton.icon(
+              key: const ValueKey('local-snapshots-backup-now-button'),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Back up now'),
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                await _handleLocalBackupNow();
+              },
+            ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text('Close'),
@@ -3341,7 +3706,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text(AppStrings.cancel),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
@@ -3352,12 +3717,20 @@ class _VaultAppShellState extends State<VaultAppShell> {
     );
 
     if (confirmed == true) {
-      final content =
-          await _automatedBackupService.readSnapshotContent(snapshot.filePath);
-      if (content != null && widget.onRestoreRawVaultContent != null) {
-        final success = await widget.onRestoreRawVaultContent!(content);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+      var success = false;
+      if (widget.onRestoreVaultFromFile != null) {
+        success = await widget.onRestoreVaultFromFile!(snapshot.filePath);
+      } else {
+        final content =
+            await _automatedBackupService.readSnapshotContent(snapshot.filePath);
+        if (content != null && widget.onRestoreRawVaultContent != null) {
+          success = await widget.onRestoreRawVaultContent!(content);
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..removeCurrentSnackBar()
+          ..showSnackBar(
             SnackBar(
               content: Text(
                 success
@@ -3366,7 +3739,6 @@ class _VaultAppShellState extends State<VaultAppShell> {
               ),
             ),
           );
-        }
       }
     }
   }
@@ -3660,6 +4032,14 @@ class _VaultAppShellState extends State<VaultAppShell> {
     if (trimmed.isEmpty) return 'unknown';
     if (trimmed.length <= 8) return trimmed;
     return trimmed.substring(0, 8);
+  }
+
+  String _formatAutomatedBackupTimeLabel() {
+    final period = _automatedBackupHour >= 12 ? 'PM' : 'AM';
+    final h12 =
+        _automatedBackupHour % 12 == 0 ? 12 : _automatedBackupHour % 12;
+    final minuteStr = _automatedBackupMinute.toString().padLeft(2, '0');
+    return '$h12:$minuteStr $period';
   }
 
   String _formatCloudBackupLastAt() {
@@ -4706,7 +5086,7 @@ class _VaultAppShellState extends State<VaultAppShell> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
+                  child: Text(AppStrings.cancel),
                 ),
                 ElevatedButton(
                   onPressed: canContinue

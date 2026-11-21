@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.provider.OpenableColumns
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -22,8 +23,19 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         captureSecretFromIntent(intent)
         captureSharedTextFromIntent(intent)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        cleanupOpenedDocumentCache()
+    }
+
+    override fun onDestroy() {
+        cleanupOpenedDocumentCache()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -137,6 +149,15 @@ class MainActivity : FlutterFragmentActivity() {
         startActivity(chooser)
     }
 
+    private fun cleanupOpenedDocumentCache() {
+        val dir = File(cacheDir, "nija_document_open")
+        if (dir.exists()) {
+            dir.listFiles()?.forEach { file ->
+                runCatching { file.delete() }
+            }
+        }
+    }
+
     private fun captureSecretFromIntent(intent: Intent?) {
         if (intent?.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
@@ -146,9 +167,8 @@ class MainActivity : FlutterFragmentActivity() {
         val looksLikeEncryptedSecret =
             normalizedLabel.endsWith(".nijas") ||
             uri.toString().lowercase().contains(".nijas") ||
-            mime.contains("nijas") ||
-            mime == "application/octet-stream" ||
-            mime == "text/plain"
+            mime == "application/x-nija-secret" ||
+            mime.contains("nijas")
         if (!looksLikeEncryptedSecret) return
         pendingSecretLabel = if (normalizedLabel.endsWith(".nijas")) label else "secret.nijas"
         pendingSecretUri = uri

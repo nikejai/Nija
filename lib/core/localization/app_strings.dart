@@ -436,6 +436,351 @@ class AppStrings {
   static String get entrySaved => _t('entrySaved');
   static String get entrySavedMessage => _t('entrySavedMessage');
   static String get done => _t('done');
+  static String get randomPassword => _t('randomPassword');
+  static String get passphrase => _t('passphrase');
+  static String get regenerate => _t('regenerate');
+  static String get capitalize => _t('capitalize');
+  static String get includeNumber => _t('includeNumber');
+  static String get copy => _t('copy');
+  static String get passwordCopied => _t('passwordCopied');
+  static String get copiedToClipboard => _t('copiedToClipboard');
+  static String get visibleSecretCopied => _t('visibleSecretCopied');
+  static String get copyFullSecretVisible => _t('copyFullSecretVisible');
+  static String get importToVault => _t('importToVault');
+  static String get noContent => _t('noContent');
+  static String get encryptedFile => _t('encryptedFile');
+  static String get importAll => _t('importAll');
+  static String get imported => _t('imported');
+  static String get importItem => _t('importItem');
+  static String get secureNote => _t('secureNote');
+  static String get unableToPreviewDocument => _t('unableToPreviewDocument');
+  static String get unableToPreviewDocumentHint =>
+      _t('unableToPreviewDocumentHint');
+  static String get emptyDocument => _t('emptyDocument');
+  static String get emptyDocumentHint => _t('emptyDocumentHint');
+  static String get imagePreviewFailed => _t('imagePreviewFailed');
+  static String get imagePreviewFailedHint => _t('imagePreviewFailedHint');
+  static String openingDocument(String extension) =>
+      _t('openingDocument').replaceAll('{extension}', extension);
+  static String get openingDocumentHint => _t('openingDocumentHint');
+  static String get noAppCanOpenFile => _t('noAppCanOpenFile');
+  static String get favorite => _t('favorite');
+  static String get documentAttached => _t('documentAttached');
+  static String get unableToAttachDocument => _t('unableToAttachDocument');
+  static String get documentUnavailable => _t('documentUnavailable');
+  static String get useOpenDocumentToView => _t('useOpenDocumentToView');
+  static String previewUnavailable(String extension) =>
+      _t('previewUnavailable').replaceAll('{extension}', extension);
+  static String get useOpenDocumentAnotherApp => _t('useOpenDocumentAnotherApp');
+  static String get openDocument => _t('openDocument');
+  static String get shareFile => _t('shareFile');
+  static String get saveCopy => _t('saveCopy');
+  static String get attachmentRemoved => _t('attachmentRemoved');
+  static String get unableToProcessAttachment => _t('unableToProcessAttachment');
+  static String get hide => _t('hide');
+  static String get reveal => _t('reveal');
+  static String get shareSecurely => _t('shareSecurely');
+  static String get addDocument => _t('addDocument');
+  static String get addIcon => _t('addIcon');
+  static String get templateName => _t('templateName');
+  static String get templateNameHint => _t('templateNameHint');
+  static String get descriptionOptional => _t('descriptionOptional');
+  static String get descriptionOptionalHint => _t('descriptionOptionalHint');
+  static String get next => _t('next');
+  static String get details => _t('details');
+  static String get fieldKeyHint => _t('fieldKeyHint');
+  static String get stringText => _t('stringText');
+  static String get numberType => _t('numberType');
+  static String get dateType => _t('dateType');
+  static String get passwordSecretType => _t('passwordSecretType');
+  static String get valueType => _t('valueType');
+  static String get removeField => _t('removeField');
+  static String get addField => _t('addField');
+  static String get saveChanges => _t('saveChanges');
+  static String get saveTemplate => _t('saveTemplate');
+  static String get open => _t('open');
+  static String get saveDownloadOptions => _t('saveDownloadOptions');
+  static String get saveCopyDecrypted => _t('saveCopyDecrypted');
+  static String get exportEncryptedNija => _t('exportEncryptedNija');
+  static String get shareOptions => _t('shareOptions');
+  static String get shareDecryptedFile => _t('shareDecryptedFile');
+  static String get shareEncryptedNija => _t('shareEncryptedNija');
+  static String get sampleDocumentMetadata => _t('sampleDocumentMetadata');
+  static String get sampleDocumentMetadataHint =>
+      _t('sampleDocumentMetadataHint');
+  static String get useOpenWithToView => _t('useOpenWithToView');
+  static String get useOpenWithAnotherApp => _t('useOpenWithAnotherApp');
+  static String get unableToSaveDocumentCopy => _t('unableToSaveDocumentCopy');
+  static String get enlargePreview => _t('enlargePreview');
+  static String get exportEncrypted => _t('exportEncrypted');
+  static String get closePreview => _t('closePreview');
+  static String get unableToCompleteDocumentAction =>
+      _t('unableToCompleteDocumentAction');
+  static String useLabelToViewDocument(String label) =>
+      _t('useLabelToViewDocument').replaceAll('{label}', label);
+  static String get loadingPdf => _t('loadingPdf');
+  static String get pdfPreviewFailed => _t('pdfPreviewFailed');
+  static String get pdfPreviewFailedHint => _t('pdfPreviewFailedHint');
+  static String newItemOfType(String type) =>
+      _t('newItemOfType').replaceAll('{type}', type);
+  static String get editItem => _t('editItem');
+  static String get categoryLabel => _t('categoryLabel');
+  static String get folderLabel => _t('folderLabel');
+  static String get createNewFolder => _t('createNewFolder');
+  static String get tagsLabel => _t('tagsLabel');
+  static String get pressAddAfterEachTag => _t('pressAddAfterEachTag');
+  static String get removeDocument => _t('removeDocument');
+  static String get addPhoto => _t('addPhoto');
+  static String get removePhoto => _t('removePhoto');
+  static String get newItem => _t('newItem');
+  static String get searchCategoryHint => _t('searchCategoryHint');
+  static String get secureNotesAndMemos => _t('secureNotesAndMemos');
+  static String get encryptedFilesUpTo25Mb => _t('encryptedFilesUpTo25Mb');
+  static String get createYourOwnTemplate => _t('createYourOwnTemplate');
+  static String get save => _t('save');
+  static String get share => _t('share');
+  static String get rotateMasterPassword => _t('rotateMasterPassword');
+  static String get currentMasterPassword => _t('currentMasterPassword');
+  static String get newMasterPassword => _t('newMasterPassword');
+  static String get confirmNewMasterPassword => _t('confirmNewMasterPassword');
+  static String get rotate => _t('rotate');
+  static String get rotateRecoveryPhrase => _t('rotateRecoveryPhrase');
+  static String get currentRecoveryPhrase => _t('currentRecoveryPhrase');
+  static String get newRecoveryPhrase => _t('newRecoveryPhrase');
+  static String get confirmRecoveryPhrase => _t('confirmRecoveryPhrase');
+  static String get howVaultUnlockWorks => _t('howVaultUnlockWorks');
+  static String get vaultFormat => _t('vaultFormat');
+  static String get renameVault => _t('renameVault');
+  static String get rename => _t('rename');
+  static String get uploadDocument => _t('uploadDocument');
+  static String get titleLabel => _t('titleLabel');
+  static String get addTags => _t('addTags');
+  static String get addItem => _t('addItem');
+  static String get lockVault => _t('lockVault');
+  static String get searchYourDataHint => _t('searchYourDataHint');
+  static String get recent => _t('recent');
+  static String get recentItems => _t('recentItems');
+  static String get quickActions => _t('quickActions');
+  static String get viewDemoPreview => _t('viewDemoPreview');
+  static String get viewAll => _t('viewAll');
+  static String get allItems => _t('allItems');
+  static String get searchAllItemsHint => _t('searchAllItemsHint');
+  static String get starredSecrets => _t('starredSecrets');
+  static String get searchFavoritesHint => _t('searchFavoritesHint');
+  static String get noFavoritesYet => _t('noFavoritesYet');
+  static String get noFavoritesYetHint => _t('noFavoritesYetHint');
+  static String get reset => _t('reset');
+  static String get settingsAccount => _t('settingsAccount');
+  static String get nijaUser => _t('nijaUser');
+  static String get currentVersion => _t('currentVersion');
+  static String get settingsSecurityTitle => _t('settingsSecurityTitle');
+  static String get changeMasterPasswordSubtitle =>
+      _t('changeMasterPasswordSubtitle');
+  static String get lockNijaAutomatically => _t('lockNijaAutomatically');
+  static String get migrateToBalancedVault => _t('migrateToBalancedVault');
+  static String get securityAndEncryption => _t('securityAndEncryption');
+  static String get securityAndEncryptionSubtitle =>
+      _t('securityAndEncryptionSubtitle');
+  static String get localBackup => _t('localBackup');
+  static String get localBackupRow => _t('localBackupRow');
+  static String get settingsMasterPassword => _t('settingsMasterPassword');
+  static String moveItemsTo(int count) =>
+      _t('moveItemsTo').replaceAll('{count}', '$count');
+  static String movedItemsToFolder(int count, String folder) => _t(
+    'movedItemsToFolder',
+  ).replaceAll('{count}', '$count').replaceAll('{folder}', folder);
+  static String copyItemsTo(int count) =>
+      _t('copyItemsTo').replaceAll('{count}', '$count');
+  static String copiedItemsToFolder(int count, String folder) => _t(
+    'copiedItemsToFolder',
+  ).replaceAll('{count}', '$count').replaceAll('{folder}', folder);
+  static String deleteItemsQuestion(int count) =>
+      _t('deleteItemsQuestion').replaceAll('{count}', '$count');
+  static String deletedItemsCount(int count) =>
+      _t('deletedItemsCount').replaceAll('{count}', '$count');
+  static String moveCount(int count) =>
+      _t('moveCount').replaceAll('{count}', '$count');
+  static String copyCount(int count) =>
+      _t('copyCount').replaceAll('{count}', '$count');
+  static String deleteCount(int count) =>
+      _t('deleteCount').replaceAll('{count}', '$count');
+  static String get exitDemo => _t('exitDemo');
+  static String get cancelSelection => _t('cancelSelection');
+  static String get deselectAll => _t('deselectAll');
+  static String get moveSelected => _t('moveSelected');
+  static String get copySelected => _t('copySelected');
+  static String get sortBy => _t('sortBy');
+  static String get sortNameAsc => _t('sortNameAsc');
+  static String get sortNameDesc => _t('sortNameDesc');
+  static String get sortDateDesc => _t('sortDateDesc');
+  static String get sortDateAsc => _t('sortDateAsc');
+  static String get sortSizeDesc => _t('sortSizeDesc');
+  static String get sortType => _t('sortType');
+  static String get listView => _t('listView');
+  static String get gridView => _t('gridView');
+  static String get treeView => _t('treeView');
+  static String get closeSearch => _t('closeSearch');
+  static String get searchFoldersAndItems => _t('searchFoldersAndItems');
+  static String get clearSearch => _t('clearSearch');
+  static String get collapseSearch => _t('collapseSearch');
+  static String get back => _t('back');
+  static String get upToParentFolder => _t('upToParentFolder');
+  static String get selectMultipleItems => _t('selectMultipleItems');
+  static String get nameColumn => _t('nameColumn');
+  static String get sizeColumn => _t('sizeColumn');
+  static String get moveTo => _t('moveTo');
+  static String get copyTo => _t('copyTo');
+  static String get itemDetails => _t('itemDetails');
+  static String get openDetails => _t('openDetails');
+  static String get itemInfo => _t('itemInfo');
+  static String get rootFolder => _t('rootFolder');
+  static String get renameFolder => _t('renameFolder');
+  static String deleteFolderQuestion(String name) =>
+      _t('deleteFolderQuestion').replaceAll('{name}', name);
+  static String get keepFiles => _t('keepFiles');
+  static String get deleteAll => _t('deleteAll');
+  static String get apply => _t('apply');
+  static String moveNamedTo(String name) =>
+      _t('moveNamedTo').replaceAll('{name}', name);
+  static String movedNamedToFolder(String name, String folder) => _t(
+    'movedNamedToFolder',
+  ).replaceAll('{name}', name).replaceAll('{folder}', folder);
+  static String copyNamedTo(String name) =>
+      _t('copyNamedTo').replaceAll('{name}', name);
+  static String copiedNamedToFolder(String name, String folder) => _t(
+    'copiedNamedToFolder',
+  ).replaceAll('{name}', name).replaceAll('{folder}', folder);
+  static String get deleteItemConfirm => _t('deleteItemConfirm');
+  static String get move => _t('move');
+  static String get pleaseWaitForOperation => _t('pleaseWaitForOperation');
+  static String get quitApplicationQuestion => _t('quitApplicationQuestion');
+  static String get quitApplicationConfirm => _t('quitApplicationConfirm');
+  static String get quit => _t('quit');
+  static String get biometricUnlockEnabled => _t('biometricUnlockEnabled');
+  static String failedToCreateVaultFile(String hint) =>
+      _t('failedToCreateVaultFile').replaceAll('{hint}', hint);
+  static String get unlockTimedOut => _t('unlockTimedOut');
+  static String sharedTextSavedTo(String title) =>
+      _t('sharedTextSavedTo').replaceAll('{title}', title);
+  static String get failedToImportSecret => _t('failedToImportSecret');
+  static String get noSavedVaultsFound => _t('noSavedVaultsFound');
+  static String get recoveryPhraseOrderMismatch =>
+      _t('recoveryPhraseOrderMismatch');
+  static String get recoveryTimedOut => _t('recoveryTimedOut');
+  static String get recoveryPhraseInvalid => _t('recoveryPhraseInvalid');
+  static String get recoverVault => _t('recoverVault');
+  static String get recoveryPhraseHint => _t('recoveryPhraseHint');
+  static String get recover => _t('recover');
+  static String get recoveryPhraseMustBe12Words =>
+      _t('recoveryPhraseMustBe12Words');
+  static String get googleSignInCancelled => _t('googleSignInCancelled');
+  static String get recoverySuccessfulVaultOpened =>
+      _t('recoverySuccessfulVaultOpened');
+  static String get vaultMergeCancelled => _t('vaultMergeCancelled');
+  static String get vaultMergedSuccessfully => _t('vaultMergedSuccessfully');
+  static String failedToMergeVault(String hint) =>
+      _t('failedToMergeVault').replaceAll('{hint}', hint);
+  static String get allowVaultExport => _t('allowVaultExport');
+  static String get cloudBackupCancelled => _t('cloudBackupCancelled');
+  static String get cloudBackupCompleted => _t('cloudBackupCompleted');
+  static String get unlockCloudBackup => _t('unlockCloudBackup');
+  static String get cloudBackupRestored => _t('cloudBackupRestored');
+  static String get backupMergedVaultQuestion =>
+      _t('backupMergedVaultQuestion');
+  static String get newFolder => _t('newFolder');
+  static String get newFolderSubtitle => _t('newFolderSubtitle');
+  static String get addItemSubtitle => _t('addItemSubtitle');
+  static String get uploadFile => _t('uploadFile');
+  static String get uploadFileSubtitle => _t('uploadFileSubtitle');
+  static String get createNewFolderTitle => _t('createNewFolderTitle');
+  static String get documentStorageUnavailable =>
+      _t('documentStorageUnavailable');
+  static String get failedToSaveDocument => _t('failedToSaveDocument');
+  static String get migrateToBalancedQuestion =>
+      _t('migrateToBalancedQuestion');
+  static String get enterCurrentMasterPassword =>
+      _t('enterCurrentMasterPassword');
+  static String get migrateToBalanced => _t('migrateToBalanced');
+  static String get vaultMigratedToBalanced => _t('vaultMigratedToBalanced');
+  static String get demoPreviewAddItem => _t('demoPreviewAddItem');
+  static String get failedToStoreAttachment => _t('failedToStoreAttachment');
+  static String get themeSystem => _t('themeSystem');
+  static String get themeLight => _t('themeLight');
+  static String get themeDark => _t('themeDark');
+  static String get cloudBackupUnavailable => _t('cloudBackupUnavailable');
+  static String get securityModel => _t('securityModel');
+  static String get yourResponsibility => _t('yourResponsibility');
+  static String get localFirstStorage => _t('localFirstStorage');
+  static String get sensitiveData => _t('sensitiveData');
+  static String get changeTheme => _t('changeTheme');
+  static String get skip => _t('skip');
+  static String get debugInternalsUnavailable => _t('debugInternalsUnavailable');
+  static String get unableToReadInternals => _t('unableToReadInternals');
+  static String get refreshInternals => _t('refreshInternals');
+  static String get automatedBackups => _t('automatedBackups');
+  static String get backupTime => _t('backupTime');
+  static String get localBackupSubtitle => _t('localBackupSubtitle');
+  static String get backUpNow => _t('backUpNow');
+  static String get cloudBackup => _t('cloudBackup');
+  static String get browserBackupScope => _t('browserBackupScope');
+  static String get backUpOverWifiOnly => _t('backUpOverWifiOnly');
+  static String get avoidMobileDataUsage => _t('avoidMobileDataUsage');
+  static String get lastBackup => _t('lastBackup');
+  static String get backedUpVersion => _t('backedUpVersion');
+  static String get restore => _t('restore');
+  static String get storage => _t('storage');
+  static String get vaultStorage => _t('vaultStorage');
+  static String get data => _t('data');
+  static String get webStorage => _t('webStorage');
+  static String get importLabel => _t('importLabel');
+  static String get exportLabel => _t('exportLabel');
+  static String get exportDataToFile => _t('exportDataToFile');
+  static String get encryptedExportSize => _t('encryptedExportSize');
+  static String get preferences => _t('preferences');
+  static String get theme => _t('theme');
+  static String get chooseAppAppearance => _t('chooseAppAppearance');
+  static String get categories => _t('categories');
+  static String get about => _t('about');
+  static String get aboutNija => _t('aboutNija');
+  static String versionLabel(String version) =>
+      _t('versionLabel').replaceAll('{version}', version);
+  static String get debugInternals => _t('debugInternals');
+  static String get showVaultInternalsTab => _t('showVaultInternalsTab');
+  static String get privacyPolicy => _t('privacyPolicy');
+  static String get readOurPrivacyPolicy => _t('readOurPrivacyPolicy');
+  static String get termsOfUse => _t('termsOfUse');
+  static String get readOurTermsAndConditions =>
+      _t('readOurTermsAndConditions');
+  static String get removeFromFavorites => _t('removeFromFavorites');
+  static String get addToFavorites => _t('addToFavorites');
+  static String get collapse => _t('collapse');
+  static String get clearTitle => _t('clearTitle');
+  static String get undo => _t('undo');
+  static String get redo => _t('redo');
+  static String get hidePhrase => _t('hidePhrase');
+  static String get revealRecoveryPhrase => _t('revealRecoveryPhrase');
+  static String get add => _t('add');
+  static String get addTemplate => _t('addTemplate');
+  static String get editTemplate => _t('editTemplate');
+  static String get deleteTemplate => _t('deleteTemplate');
+  static String get moveToTrashQuestion => _t('moveToTrashQuestion');
+  static String get subfolderName => _t('subfolderName');
+  static String get folderName => _t('folderName');
+  static String get subfolderNameHint => _t('subfolderNameHint');
+  static String get folderNameHint => _t('folderNameHint');
+  static String get create => _t('create');
+  static String createSubfolderInside(String name) =>
+      _t('createSubfolderInside').replaceAll('{name}', name);
+  static String get selectThisFolder => _t('selectThisFolder');
+  static String get createFolder => _t('createFolder');
+  static String get acceptAllFromCurrent => _t('acceptAllFromCurrent');
+  static String get vaultMerge => _t('vaultMerge');
+  static String get ok => _t('ok');
+  static String get currentVault => _t('currentVault');
+  static String get fileName => _t('fileName');
+  static String get passwordForThisFile => _t('passwordForThisFile');
+  static String get documentLabel => _t('documentLabel');
+  static String get settings => _t('settings');
 
   static const Map<String, Map<String, String>> _localized = {
     'en': {
@@ -877,6 +1222,320 @@ class AppStrings {
       'entrySaved': 'Entry saved',
       'entrySavedMessage': 'Your new entry has been saved successfully.',
       'done': 'Done',
+      'randomPassword': 'Random Password',
+      'passphrase': 'Passphrase',
+      'regenerate': 'Regenerate',
+      'capitalize': 'Capitalize',
+      'includeNumber': 'Include Number',
+      'copy': 'Copy',
+      'passwordCopied': 'Password copied to clipboard',
+      'copiedToClipboard': 'Copied to clipboard',
+      'visibleSecretCopied': 'Visible secret copied',
+      'copyFullSecretVisible': 'Copy full secret (visible)',
+      'importToVault': 'Import to vault',
+      'noContent': 'No content',
+      'encryptedFile': 'Encrypted file',
+      'importAll': 'Import all',
+      'imported': 'Imported',
+      'importItem': 'Import item',
+      'secureNote': 'Secure Note',
+      'unableToPreviewDocument': 'Unable to preview document',
+      'unableToPreviewDocumentHint':
+          'The encrypted file does not contain readable document data.',
+      'emptyDocument': 'Empty document',
+      'emptyDocumentHint': 'There is no content to preview.',
+      'imagePreviewFailed': 'Image preview failed',
+      'imagePreviewFailedHint':
+          'Tap to choose an app that can open this file.',
+      'openingDocument': 'Opening {extension} document',
+      'openingDocumentHint': 'Tap to choose an app that can preview this file.',
+      'noAppCanOpenFile': 'No app can open this file.',
+      'favorite': 'Favorite',
+      'documentAttached': 'Document attached.',
+      'unableToAttachDocument': 'Unable to attach document.',
+      'documentUnavailable': 'Document unavailable.',
+      'useOpenDocumentToView': 'Use Open document to view this file.',
+      'previewUnavailable': '{extension} preview unavailable',
+      'useOpenDocumentAnotherApp':
+          'Use Open document to view this file in another app.',
+      'openDocument': 'Open document',
+      'shareFile': 'Share file',
+      'saveCopy': 'Save copy',
+      'attachmentRemoved': 'Attachment removed.',
+      'unableToProcessAttachment': 'Unable to process attachment.',
+      'hide': 'Hide',
+      'reveal': 'Reveal',
+      'shareSecurely': 'Share securely',
+      'addDocument': 'Add document',
+      'addIcon': 'Add Icon',
+      'templateName': 'Template Name',
+      'templateNameHint': 'e.g. Car Details',
+      'descriptionOptional': 'Description (optional)',
+      'descriptionOptionalHint': 'Add a short description',
+      'next': 'Next',
+      'details': 'Details',
+      'fieldKeyHint': 'Field key (example: Expiry date)',
+      'stringText': 'String text',
+      'numberType': 'Number',
+      'dateType': 'Date',
+      'passwordSecretType': 'Password / secret',
+      'valueType': 'Value type',
+      'removeField': 'Remove field',
+      'addField': 'Add field',
+      'saveChanges': 'Save changes',
+      'saveTemplate': 'Save template',
+      'open': 'Open',
+      'saveDownloadOptions': 'Save / Download options',
+      'saveCopyDecrypted': 'Save copy (decrypted)',
+      'exportEncryptedNija': 'Export encrypted (.nija)',
+      'shareOptions': 'Share options',
+      'shareDecryptedFile': 'Share decrypted file',
+      'shareEncryptedNija': 'Share encrypted (.nija)',
+      'sampleDocumentMetadata': 'Sample document metadata',
+      'sampleDocumentMetadataHint':
+          'Create a vault to store and preview real files.',
+      'useOpenWithToView': 'Use Open with... to view this document.',
+      'useOpenWithAnotherApp':
+          'Use Open with... to view this document in another app.',
+      'unableToSaveDocumentCopy': 'Unable to save document copy.',
+      'enlargePreview': 'Enlarge preview',
+      'exportEncrypted': 'Export encrypted',
+      'closePreview': 'Close preview',
+      'unableToCompleteDocumentAction': 'Unable to complete document action.',
+      'useLabelToViewDocument': 'Use {label} to view this document.',
+      'loadingPdf': 'Loading PDF...',
+      'pdfPreviewFailed': 'PDF preview failed',
+      'pdfPreviewFailedHint': 'Use Open with app to view this document.',
+      'newItemOfType': 'New {type}',
+      'editItem': 'Edit item',
+      'categoryLabel': 'Category',
+      'folderLabel': 'Folder',
+      'createNewFolder': 'Create new folder',
+      'tagsLabel': 'Tags',
+      'pressAddAfterEachTag': 'Press add after each tag',
+      'removeDocument': 'Remove document',
+      'addPhoto': 'Add photo',
+      'removePhoto': 'Remove photo',
+      'newItem': 'New Item',
+      'searchCategoryHint': 'Search category...',
+      'secureNotesAndMemos': 'Secure notes and memos',
+      'encryptedFilesUpTo25Mb': 'Encrypted files up to 25 MB',
+      'createYourOwnTemplate': 'Create your own template',
+      'save': 'Save',
+      'share': 'Share',
+      'rotateMasterPassword': 'Rotate master password',
+      'currentMasterPassword': 'Current master password',
+      'newMasterPassword': 'New master password',
+      'confirmNewMasterPassword': 'Confirm new master password',
+      'rotate': 'Rotate',
+      'rotateRecoveryPhrase': 'Rotate recovery phrase',
+      'currentRecoveryPhrase': 'Current recovery phrase',
+      'newRecoveryPhrase': 'New recovery phrase',
+      'confirmRecoveryPhrase': 'Confirm recovery phrase',
+      'howVaultUnlockWorks': 'How vault unlock works',
+      'vaultFormat': 'Vault format',
+      'renameVault': 'Rename vault',
+      'rename': 'Rename',
+      'uploadDocument': 'Upload Document',
+      'titleLabel': 'Title',
+      'addTags': 'Add tags',
+      'addItem': 'Add Item',
+      'lockVault': 'Lock vault',
+      'searchYourDataHint': 'Search your data...',
+      'recent': 'Recent',
+      'recentItems': 'Recent Items',
+      'quickActions': 'Quick Actions',
+      'viewDemoPreview': 'View demo preview',
+      'viewAll': 'View all',
+      'allItems': 'All Items',
+      'searchAllItemsHint': 'Search all items...',
+      'starredSecrets': 'Starred secrets',
+      'searchFavoritesHint': 'Search favorites...',
+      'noFavoritesYet': 'No favorites yet',
+      'noFavoritesYetHint': 'Star items from quick actions to see them here.',
+      'reset': 'Reset',
+      'settingsAccount': 'Account',
+      'nijaUser': 'Nija User',
+      'currentVersion': 'Current version',
+      'settingsSecurityTitle': 'Security',
+      'changeMasterPasswordSubtitle': 'Change your master password',
+      'lockNijaAutomatically': 'Lock Nija automatically',
+      'migrateToBalancedVault': 'Migrate to Balanced Vault',
+      'securityAndEncryption': 'Security & Encryption',
+      'securityAndEncryptionSubtitle':
+          'View encryption details and key info',
+      'localBackup': 'Local Backup',
+      'localBackupRow': 'Local backup',
+      'settingsMasterPassword': 'Master Password',
+      'moveItemsTo': 'Move {count} items to...',
+      'movedItemsToFolder': 'Moved {count} items to "{folder}".',
+      'copyItemsTo': 'Copy {count} items to...',
+      'copiedItemsToFolder': 'Copied {count} items to "{folder}".',
+      'deleteItemsQuestion': 'Delete {count} items?',
+      'deletedItemsCount': 'Deleted {count} items.',
+      'moveCount': 'Move ({count})',
+      'copyCount': 'Copy ({count})',
+      'deleteCount': 'Delete ({count})',
+      'exitDemo': 'Exit Demo',
+      'cancelSelection': 'Cancel selection',
+      'deselectAll': 'Deselect All',
+      'moveSelected': 'Move selected',
+      'copySelected': 'Copy selected',
+      'sortBy': 'Sort by',
+      'sortNameAsc': 'Name (A to Z)',
+      'sortNameDesc': 'Name (Z to A)',
+      'sortDateDesc': 'Date (Newest first)',
+      'sortDateAsc': 'Date (Oldest first)',
+      'sortSizeDesc': 'Size (Largest first)',
+      'sortType': 'Type',
+      'listView': 'List view',
+      'gridView': 'Grid view',
+      'treeView': 'Tree view',
+      'closeSearch': 'Close search',
+      'searchFoldersAndItems': 'Search folders and items',
+      'clearSearch': 'Clear search',
+      'collapseSearch': 'Collapse search',
+      'back': 'Back',
+      'upToParentFolder': 'Up to parent folder',
+      'selectMultipleItems': 'Select multiple items',
+      'nameColumn': 'Name',
+      'sizeColumn': 'Size',
+      'moveTo': 'Move to...',
+      'copyTo': 'Copy to...',
+      'itemDetails': 'Item details',
+      'openDetails': 'Open Details',
+      'itemInfo': 'Item Info',
+      'rootFolder': 'Root',
+      'renameFolder': 'Rename Folder',
+      'deleteFolderQuestion': 'Delete "{name}"?',
+      'keepFiles': 'Keep Files',
+      'deleteAll': 'Delete All',
+      'apply': 'Apply',
+      'moveNamedTo': 'Move "{name}" to...',
+      'movedNamedToFolder': 'Moved "{name}" to "{folder}".',
+      'copyNamedTo': 'Copy "{name}" to...',
+      'copiedNamedToFolder': 'Copied "{name}" to "{folder}".',
+      'deleteItemConfirm': 'Are you sure you want to delete this encrypted item?',
+      'move': 'Move',
+      'pleaseWaitForOperation': 'Please wait for the operation to finish.',
+      'quitApplicationQuestion': 'Quit Application?',
+      'quitApplicationConfirm': 'Are you sure you want to quit the app?',
+      'quit': 'Quit',
+      'biometricUnlockEnabled': 'Biometric unlock enabled.',
+      'failedToCreateVaultFile': 'Failed to create vault file. {hint}',
+      'unlockTimedOut': 'Unlock timed out. Please try again.',
+      'sharedTextSavedTo': 'Shared text saved to {title}',
+      'failedToImportSecret': 'Failed to import secret into vault.',
+      'noSavedVaultsFound': 'No saved vaults found to unlock.',
+      'recoveryPhraseOrderMismatch': 'Recovery phrase order does not match.',
+      'recoveryTimedOut': 'Recovery timed out. Please try again.',
+      'recoveryPhraseInvalid': 'Recovery phrase is invalid.',
+      'recoverVault': 'Recover vault',
+      'recoveryPhraseHint': '12 words separated by spaces',
+      'recover': 'Recover',
+      'recoveryPhraseMustBe12Words':
+          'Recovery phrase must be exactly 12 words.',
+      'googleSignInCancelled': 'Google account sign-in cancelled.',
+      'recoverySuccessfulVaultOpened': 'Recovery successful. Vault opened.',
+      'vaultMergeCancelled': 'Vault merge cancelled.',
+      'vaultMergedSuccessfully': 'Vault merged successfully.',
+      'failedToMergeVault': 'Failed to merge vault. {hint}',
+      'allowVaultExport': 'Allow vault export',
+      'cloudBackupCancelled': 'Cloud backup cancelled.',
+      'cloudBackupCompleted': 'Cloud backup completed.',
+      'unlockCloudBackup': 'Unlock cloud backup',
+      'cloudBackupRestored': 'Cloud backup restored.',
+      'backupMergedVaultQuestion': 'Backup merged vault?',
+      'newFolder': 'New Folder',
+      'newFolderSubtitle': 'Create a folder to organize items',
+      'addItemSubtitle': 'Add password, note, card, or credential',
+      'uploadFile': 'Upload File',
+      'uploadFileSubtitle': 'Upload an encrypted document or attachment',
+      'createNewFolderTitle': 'Create New Folder',
+      'documentStorageUnavailable':
+          'Document storage unavailable in this session.',
+      'failedToSaveDocument': 'Failed to save document.',
+      'migrateToBalancedQuestion': 'Migrate to Balanced Vault?',
+      'enterCurrentMasterPassword': 'Enter current master password',
+      'migrateToBalanced': 'Migrate to Balanced',
+      'vaultMigratedToBalanced':
+          'Vault successfully migrated to Balanced profile (Owl).',
+      'demoPreviewAddItem': 'This is a demo preview. Add an item to start.',
+      'failedToStoreAttachment': 'Failed to store attachment. Please retry.',
+      'themeSystem': 'System',
+      'themeLight': 'Light',
+      'themeDark': 'Dark',
+      'cloudBackupUnavailable': 'Cloud backup is currently unavailable.',
+      'securityModel': 'Security model',
+      'yourResponsibility': 'Your responsibility',
+      'localFirstStorage': 'Local-first storage',
+      'sensitiveData': 'Sensitive data',
+      'changeTheme': 'Change theme',
+      'skip': 'Skip',
+      'debugInternalsUnavailable': 'Debug internals unavailable',
+      'unableToReadInternals': 'Unable to read internals',
+      'refreshInternals': 'Refresh internals',
+      'automatedBackups': 'Automated backups',
+      'backupTime': 'Backup time',
+      'localBackupSubtitle': '2 rolling snapshots · Free version',
+      'backUpNow': 'Back up now',
+      'cloudBackup': 'Cloud Backup',
+      'browserBackupScope': 'Browser backup scope',
+      'backUpOverWifiOnly': 'Back up over Wi-Fi only',
+      'avoidMobileDataUsage': 'Avoid mobile data usage',
+      'lastBackup': 'Last backup',
+      'backedUpVersion': 'Backed up version',
+      'restore': 'Restore',
+      'storage': 'Storage',
+      'vaultStorage': 'Vault storage',
+      'data': 'Data',
+      'webStorage': 'Web storage',
+      'importLabel': 'Import',
+      'exportLabel': 'Export',
+      'exportDataToFile': 'Export data to a file',
+      'encryptedExportSize': 'Encrypted export size',
+      'preferences': 'Preferences',
+      'theme': 'Theme',
+      'chooseAppAppearance': 'Choose app appearance',
+      'categories': 'Categories',
+      'about': 'About',
+      'aboutNija': 'About Nija',
+      'versionLabel': 'Version {version}',
+      'debugInternals': 'Debug internals',
+      'showVaultInternalsTab': 'Show vault internals tab',
+      'privacyPolicy': 'Privacy Policy',
+      'readOurPrivacyPolicy': 'Read our privacy policy',
+      'termsOfUse': 'Terms of Use',
+      'readOurTermsAndConditions': 'Read our terms and conditions',
+      'removeFromFavorites': 'Remove from favorites',
+      'addToFavorites': 'Add to favorites',
+      'collapse': 'Collapse',
+      'clearTitle': 'Clear title',
+      'undo': 'Undo',
+      'redo': 'Redo',
+      'hidePhrase': 'Hide phrase',
+      'revealRecoveryPhrase': 'Reveal Recovery Phrase',
+      'add': 'Add',
+      'addTemplate': 'Add template',
+      'editTemplate': 'Edit template',
+      'deleteTemplate': 'Delete template',
+      'moveToTrashQuestion': 'Move to Trash?',
+      'subfolderName': 'Subfolder Name',
+      'folderName': 'Folder Name',
+      'subfolderNameHint': 'e.g. Q1, Receipts, Invoices',
+      'folderNameHint': 'e.g. Work, Taxes, Identity',
+      'create': 'Create',
+      'createSubfolderInside': 'Create subfolder inside "{name}"',
+      'selectThisFolder': 'Select this folder',
+      'createFolder': 'Create folder',
+      'acceptAllFromCurrent': 'Accept all from current',
+      'vaultMerge': 'Vault merge',
+      'ok': 'OK',
+      'currentVault': 'Current vault',
+      'fileName': 'File name',
+      'passwordForThisFile': 'Password for this file',
+      'documentLabel': 'Document',
+      'settings': 'Settings',
     },
     'es': {
       'appName': 'Nija',
@@ -1126,6 +1785,332 @@ class AppStrings {
       'entrySaved': 'Entrada guardada',
       'entrySavedMessage': 'Tu nueva entrada se guardó correctamente.',
       'done': 'Listo',
+      'randomPassword': 'Contraseña aleatoria',
+      'passphrase': 'Frase de contraseña',
+      'regenerate': 'Regenerar',
+      'capitalize': 'Mayúsculas',
+      'includeNumber': 'Incluir número',
+      'copy': 'Copiar',
+      'passwordCopied': 'Contraseña copiada al portapapeles',
+      'copiedToClipboard': 'Copiado al portapapeles',
+      'visibleSecretCopied': 'Secreto visible copiado',
+      'copyFullSecretVisible': 'Copiar secreto completo (visible)',
+      'importToVault': 'Importar a la bóveda',
+      'noContent': 'Sin contenido',
+      'encryptedFile': 'Archivo cifrado',
+      'importAll': 'Importar todo',
+      'imported': 'Importado',
+      'importItem': 'Importar elemento',
+      'secureNote': 'Nota segura',
+      'unableToPreviewDocument': 'No se pudo previsualizar el documento',
+      'unableToPreviewDocumentHint':
+          'El archivo cifrado no contiene datos de documento legibles.',
+      'emptyDocument': 'Documento vacío',
+      'emptyDocumentHint': 'No hay contenido para previsualizar.',
+      'imagePreviewFailed': 'Error al previsualizar la imagen',
+      'imagePreviewFailedHint':
+          'Toca para elegir una aplicación que pueda abrir este archivo.',
+      'openingDocument': 'Abriendo documento {extension}',
+      'openingDocumentHint':
+          'Toca para elegir una aplicación que pueda previsualizar este archivo.',
+      'noAppCanOpenFile': 'Ninguna aplicación puede abrir este archivo.',
+      'favorite': 'Favorito',
+      'documentAttached': 'Documento adjuntado.',
+      'unableToAttachDocument': 'No se pudo adjuntar el documento.',
+      'documentUnavailable': 'Documento no disponible.',
+      'useOpenDocumentToView': 'Usa Abrir documento para ver este archivo.',
+      'previewUnavailable': 'Vista previa de {extension} no disponible',
+      'useOpenDocumentAnotherApp':
+          'Usa Abrir documento para ver este archivo en otra aplicación.',
+      'openDocument': 'Abrir documento',
+      'shareFile': 'Compartir archivo',
+      'saveCopy': 'Guardar copia',
+      'attachmentRemoved': 'Adjunto eliminado.',
+      'unableToProcessAttachment': 'No se pudo procesar el adjunto.',
+      'hide': 'Ocultar',
+      'reveal': 'Mostrar',
+      'shareSecurely': 'Compartir de forma segura',
+      'addDocument': 'Agregar documento',
+      'addIcon': 'Agregar icono',
+      'templateName': 'Nombre de la plantilla',
+      'templateNameHint': 'ej. Detalles del auto',
+      'descriptionOptional': 'Descripción (opcional)',
+      'descriptionOptionalHint': 'Agrega una breve descripción',
+      'next': 'Siguiente',
+      'details': 'Detalles',
+      'fieldKeyHint': 'Clave del campo (ejemplo: Fecha de vencimiento)',
+      'stringText': 'Texto',
+      'numberType': 'Número',
+      'dateType': 'Fecha',
+      'passwordSecretType': 'Contraseña / secreto',
+      'valueType': 'Tipo de valor',
+      'removeField': 'Eliminar campo',
+      'addField': 'Agregar campo',
+      'saveChanges': 'Guardar cambios',
+      'saveTemplate': 'Guardar plantilla',
+      'open': 'Abrir',
+      'saveDownloadOptions': 'Opciones de guardado / descarga',
+      'saveCopyDecrypted': 'Guardar copia (descifrada)',
+      'exportEncryptedNija': 'Exportar cifrado (.nija)',
+      'shareOptions': 'Opciones para compartir',
+      'shareDecryptedFile': 'Compartir archivo descifrado',
+      'shareEncryptedNija': 'Compartir cifrado (.nija)',
+      'sampleDocumentMetadata': 'Metadatos de documento de muestra',
+      'sampleDocumentMetadataHint':
+          'Crea una bóveda para almacenar y previsualizar archivos reales.',
+      'useOpenWithToView': 'Usa Abrir con... para ver este documento.',
+      'useOpenWithAnotherApp':
+          'Usa Abrir con... para ver este documento en otra aplicación.',
+      'unableToSaveDocumentCopy':
+          'No se pudo guardar la copia del documento.',
+      'enlargePreview': 'Ampliar vista previa',
+      'exportEncrypted': 'Exportar cifrado',
+      'closePreview': 'Cerrar vista previa',
+      'unableToCompleteDocumentAction':
+          'No se pudo completar la acción del documento.',
+      'useLabelToViewDocument': 'Usa {label} para ver este documento.',
+      'loadingPdf': 'Cargando PDF...',
+      'pdfPreviewFailed': 'Error al previsualizar el PDF',
+      'pdfPreviewFailedHint':
+          'Usa Abrir con aplicación para ver este documento.',
+      'newItemOfType': 'Nuevo {type}',
+      'editItem': 'Editar elemento',
+      'categoryLabel': 'Categoría',
+      'folderLabel': 'Carpeta',
+      'createNewFolder': 'Crear nueva carpeta',
+      'tagsLabel': 'Etiquetas',
+      'pressAddAfterEachTag': 'Presiona agregar después de cada etiqueta',
+      'removeDocument': 'Eliminar documento',
+      'addPhoto': 'Agregar foto',
+      'removePhoto': 'Eliminar foto',
+      'newItem': 'Nuevo elemento',
+      'searchCategoryHint': 'Buscar categoría...',
+      'secureNotesAndMemos': 'Notas seguras y recordatorios',
+      'encryptedFilesUpTo25Mb': 'Archivos cifrados de hasta 25 MB',
+      'createYourOwnTemplate': 'Crea tu propia plantilla',
+      'save': 'Guardar',
+      'share': 'Compartir',
+      'rotateMasterPassword': 'Rotar contraseña maestra',
+      'currentMasterPassword': 'Contraseña maestra actual',
+      'newMasterPassword': 'Nueva contraseña maestra',
+      'confirmNewMasterPassword': 'Confirmar nueva contraseña maestra',
+      'rotate': 'Rotar',
+      'rotateRecoveryPhrase': 'Rotar frase de recuperación',
+      'currentRecoveryPhrase': 'Frase de recuperación actual',
+      'newRecoveryPhrase': 'Nueva frase de recuperación',
+      'confirmRecoveryPhrase': 'Confirmar frase de recuperación',
+      'howVaultUnlockWorks': 'Cómo funciona el desbloqueo de la bóveda',
+      'vaultFormat': 'Formato de la bóveda',
+      'renameVault': 'Renombrar bóveda',
+      'rename': 'Renombrar',
+      'uploadDocument': 'Subir documento',
+      'titleLabel': 'Título',
+      'addTags': 'Agregar etiquetas',
+      'addItem': 'Agregar elemento',
+      'lockVault': 'Bloquear bóveda',
+      'searchYourDataHint': 'Buscar tus datos...',
+      'recent': 'Recientes',
+      'recentItems': 'Elementos recientes',
+      'quickActions': 'Acciones rápidas',
+      'viewDemoPreview': 'Ver vista previa de demostración',
+      'viewAll': 'Ver todo',
+      'allItems': 'Todos los elementos',
+      'searchAllItemsHint': 'Buscar todos los elementos...',
+      'starredSecrets': 'Secretos destacados',
+      'searchFavoritesHint': 'Buscar favoritos...',
+      'noFavoritesYet': 'Aún no hay favoritos',
+      'noFavoritesYetHint':
+          'Marca elementos desde acciones rápidas para verlos aquí.',
+      'reset': 'Restablecer',
+      'settingsAccount': 'Cuenta',
+      'nijaUser': 'Usuario de Nija',
+      'currentVersion': 'Versión actual',
+      'settingsSecurityTitle': 'Seguridad',
+      'changeMasterPasswordSubtitle': 'Cambia tu contraseña maestra',
+      'lockNijaAutomatically': 'Bloquear Nija automáticamente',
+      'migrateToBalancedVault': 'Migrar a bóveda equilibrada',
+      'securityAndEncryption': 'Seguridad y cifrado',
+      'securityAndEncryptionSubtitle':
+          'Ver detalles de cifrado e información de claves',
+      'localBackup': 'Copia de seguridad local',
+      'localBackupRow': 'Copia de seguridad local (dispositivo)',
+      'settingsMasterPassword': 'Contraseña maestra',
+      'moveItemsTo': 'Mover {count} elementos a...',
+      'movedItemsToFolder': 'Se movieron {count} elementos a "{folder}".',
+      'copyItemsTo': 'Copiar {count} elementos a...',
+      'copiedItemsToFolder': 'Se copiaron {count} elementos a "{folder}".',
+      'deleteItemsQuestion': '¿Eliminar {count} elementos?',
+      'deletedItemsCount': 'Se eliminaron {count} elementos.',
+      'moveCount': 'Mover ({count})',
+      'copyCount': 'Copiar ({count})',
+      'deleteCount': 'Eliminar ({count})',
+      'exitDemo': 'Salir de la demo',
+      'cancelSelection': 'Cancelar selección',
+      'deselectAll': 'Deseleccionar todo',
+      'moveSelected': 'Mover seleccionados',
+      'copySelected': 'Copiar seleccionados',
+      'sortBy': 'Ordenar por',
+      'sortNameAsc': 'Nombre (A a Z)',
+      'sortNameDesc': 'Nombre (Z a A)',
+      'sortDateDesc': 'Fecha (Más reciente primero)',
+      'sortDateAsc': 'Fecha (Más antiguo primero)',
+      'sortSizeDesc': 'Tamaño (Mayor primero)',
+      'sortType': 'Tipo',
+      'listView': 'Vista de lista',
+      'gridView': 'Vista de cuadrícula',
+      'treeView': 'Vista de árbol',
+      'closeSearch': 'Cerrar búsqueda',
+      'searchFoldersAndItems': 'Buscar carpetas y elementos',
+      'clearSearch': 'Limpiar búsqueda',
+      'collapseSearch': 'Contraer búsqueda',
+      'back': 'Atrás',
+      'upToParentFolder': 'Subir a la carpeta superior',
+      'selectMultipleItems': 'Seleccionar múltiples elementos',
+      'nameColumn': 'Nombre',
+      'sizeColumn': 'Tamaño',
+      'moveTo': 'Mover a...',
+      'copyTo': 'Copiar a...',
+      'itemDetails': 'Detalles del elemento',
+      'openDetails': 'Abrir detalles',
+      'itemInfo': 'Información del elemento',
+      'rootFolder': 'Raíz',
+      'renameFolder': 'Renombrar carpeta',
+      'deleteFolderQuestion': '¿Eliminar "{name}"?',
+      'keepFiles': 'Conservar archivos',
+      'deleteAll': 'Eliminar todo',
+      'apply': 'Aplicar',
+      'moveNamedTo': 'Mover "{name}" a...',
+      'movedNamedToFolder': 'Se movió "{name}" a "{folder}".',
+      'copyNamedTo': 'Copiar "{name}" a...',
+      'copiedNamedToFolder': 'Se copió "{name}" a "{folder}".',
+      'deleteItemConfirm':
+          '¿Estás seguro de que deseas eliminar este elemento cifrado?',
+      'move': 'Mover',
+      'pleaseWaitForOperation': 'Por favor espera a que termine la operación.',
+      'quitApplicationQuestion': '¿Salir de la aplicación?',
+      'quitApplicationConfirm':
+          '¿Estás seguro de que deseas salir de la aplicación?',
+      'quit': 'Salir',
+      'biometricUnlockEnabled': 'Desbloqueo biométrico habilitado.',
+      'failedToCreateVaultFile': 'No se pudo crear el archivo de bóveda. {hint}',
+      'unlockTimedOut': 'El desbloqueo expiró. Inténtalo de nuevo.',
+      'sharedTextSavedTo': 'Texto compartido guardado en {title}',
+      'failedToImportSecret': 'No se pudo importar el secreto a la bóveda.',
+      'noSavedVaultsFound':
+          'No se encontraron bóvedas guardadas para desbloquear.',
+      'recoveryPhraseOrderMismatch':
+          'El orden de la frase de recuperación no coincide.',
+      'recoveryTimedOut': 'La recuperación expiró. Inténtalo de nuevo.',
+      'recoveryPhraseInvalid': 'La frase de recuperación no es válida.',
+      'recoverVault': 'Recuperar bóveda',
+      'recoveryPhraseHint': '12 palabras separadas por espacios',
+      'recover': 'Recuperar',
+      'recoveryPhraseMustBe12Words':
+          'La frase de recuperación debe tener exactamente 12 palabras.',
+      'googleSignInCancelled': 'Inicio de sesión con Google cancelado.',
+      'recoverySuccessfulVaultOpened': 'Recuperación exitosa. Bóveda abierta.',
+      'vaultMergeCancelled': 'Fusión de bóvedas cancelada.',
+      'vaultMergedSuccessfully': 'Bóveda fusionada correctamente.',
+      'failedToMergeVault': 'No se pudo fusionar la bóveda. {hint}',
+      'allowVaultExport': 'Permitir exportación de bóveda',
+      'cloudBackupCancelled': 'Copia en la nube cancelada.',
+      'cloudBackupCompleted': 'Copia en la nube completada.',
+      'unlockCloudBackup': 'Desbloquear copia en la nube',
+      'cloudBackupRestored': 'Copia en la nube restaurada.',
+      'backupMergedVaultQuestion': '¿Respaldar bóveda fusionada?',
+      'newFolder': 'Nueva carpeta',
+      'newFolderSubtitle': 'Crea una carpeta para organizar elementos',
+      'addItemSubtitle': 'Agrega contraseña, nota, tarjeta o credencial',
+      'uploadFile': 'Subir archivo',
+      'uploadFileSubtitle': 'Sube un documento o adjunto cifrado',
+      'createNewFolderTitle': 'Crear nueva carpeta',
+      'documentStorageUnavailable':
+          'El almacenamiento de documentos no está disponible en esta sesión.',
+      'failedToSaveDocument': 'No se pudo guardar el documento.',
+      'migrateToBalancedQuestion': '¿Migrar a bóveda equilibrada?',
+      'enterCurrentMasterPassword': 'Ingresa la contraseña maestra actual',
+      'migrateToBalanced': 'Migrar a equilibrada',
+      'vaultMigratedToBalanced':
+          'Bóveda migrada correctamente al perfil equilibrado (Búho).',
+      'demoPreviewAddItem':
+          'Esta es una vista previa de demostración. Agrega un elemento para comenzar.',
+      'failedToStoreAttachment':
+          'No se pudo guardar el adjunto. Inténtalo de nuevo.',
+      'themeSystem': 'Sistema',
+      'themeLight': 'Claro',
+      'themeDark': 'Oscuro',
+      'cloudBackupUnavailable':
+          'La copia de seguridad en la nube no está disponible en este momento.',
+      'securityModel': 'Modelo de seguridad',
+      'yourResponsibility': 'Tu responsabilidad',
+      'localFirstStorage': 'Almacenamiento local primero',
+      'sensitiveData': 'Datos sensibles',
+      'changeTheme': 'Cambiar tema',
+      'skip': 'Omitir',
+      'debugInternalsUnavailable': 'Depuración interna no disponible',
+      'unableToReadInternals': 'No se pueden leer los datos internos',
+      'refreshInternals': 'Actualizar datos internos',
+      'automatedBackups': 'Copias de seguridad automáticas',
+      'backupTime': 'Hora de la copia de seguridad',
+      'localBackupSubtitle': '2 instantáneas rotativas · Versión gratuita',
+      'backUpNow': 'Hacer copia ahora',
+      'cloudBackup': 'Copia en la nube',
+      'browserBackupScope': 'Alcance de copia en el navegador',
+      'backUpOverWifiOnly': 'Hacer copia solo por Wi-Fi',
+      'avoidMobileDataUsage': 'Evitar uso de datos móviles',
+      'lastBackup': 'Última copia de seguridad',
+      'backedUpVersion': 'Versión respaldada',
+      'restore': 'Restaurar',
+      'storage': 'Almacenamiento',
+      'vaultStorage': 'Almacenamiento de la bóveda',
+      'data': 'Datos',
+      'webStorage': 'Almacenamiento web',
+      'importLabel': 'Importar',
+      'exportLabel': 'Exportar',
+      'exportDataToFile': 'Exportar datos a un archivo',
+      'encryptedExportSize': 'Tamaño de exportación cifrada',
+      'preferences': 'Preferencias',
+      'theme': 'Tema',
+      'chooseAppAppearance': 'Elegir apariencia de la aplicación',
+      'categories': 'Categorías',
+      'about': 'Acerca de',
+      'aboutNija': 'Acerca de Nija',
+      'versionLabel': 'Versión {version}',
+      'debugInternals': 'Depuración interna',
+      'showVaultInternalsTab': 'Mostrar pestaña interna de la bóveda',
+      'privacyPolicy': 'Política de privacidad',
+      'readOurPrivacyPolicy': 'Lee nuestra política de privacidad',
+      'termsOfUse': 'Términos de uso',
+      'readOurTermsAndConditions': 'Lee nuestros términos y condiciones',
+      'removeFromFavorites': 'Quitar de favoritos',
+      'addToFavorites': 'Agregar a favoritos',
+      'collapse': 'Contraer',
+      'clearTitle': 'Borrar título',
+      'undo': 'Deshacer',
+      'redo': 'Rehacer',
+      'hidePhrase': 'Ocultar frase',
+      'revealRecoveryPhrase': 'Mostrar frase de recuperación',
+      'add': 'Agregar',
+      'addTemplate': 'Agregar plantilla',
+      'editTemplate': 'Editar plantilla',
+      'deleteTemplate': 'Eliminar plantilla',
+      'moveToTrashQuestion': '¿Mover a la papelera?',
+      'subfolderName': 'Nombre de la subcarpeta',
+      'folderName': 'Nombre de la carpeta',
+      'subfolderNameHint': 'ej. T1, Recibos, Facturas',
+      'folderNameHint': 'ej. Trabajo, Impuestos, Identidad',
+      'create': 'Crear',
+      'createSubfolderInside': 'Crear subcarpeta dentro de "{name}"',
+      'selectThisFolder': 'Seleccionar esta carpeta',
+      'createFolder': 'Crear carpeta',
+      'acceptAllFromCurrent': 'Aceptar todo de la actual',
+      'vaultMerge': 'Fusión de bóvedas',
+      'ok': 'OK',
+      'currentVault': 'Bóveda actual',
+      'fileName': 'Nombre del archivo',
+      'passwordForThisFile': 'Contraseña para este archivo',
+      'documentLabel': 'Documento',
+      'settings': 'Configuración',
     },
   };
 }

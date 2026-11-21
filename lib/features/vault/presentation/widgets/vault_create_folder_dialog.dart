@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/localization/app_strings.dart';
 import '../../../../domain/models/vault_folder.dart';
 
 const List<String> kDefaultFolderColors = [
@@ -124,8 +125,12 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
                     autofocus: true,
                     textCapitalization: TextCapitalization.words,
                     decoration: InputDecoration(
-                      labelText: isSubfolder ? 'Subfolder Name' : 'Folder Name',
-                      hintText: isSubfolder ? 'e.g. Q1, Receipts, Invoices' : 'e.g. Work, Taxes, Identity',
+                      labelText: isSubfolder
+                          ? AppStrings.subfolderName
+                          : AppStrings.folderName,
+                      hintText: isSubfolder
+                          ? AppStrings.subfolderNameHint
+                          : AppStrings.folderNameHint,
                       prefixIcon: const Icon(Icons.folder_outlined),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -198,7 +203,7 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(null),
-                child: const Text('Cancel'),
+                child: Text(AppStrings.cancel),
               ),
               FilledButton(
                 key: const ValueKey('create-folder-submit-button'),
@@ -219,7 +224,7 @@ Future<VaultFolder?> showCreateVaultFolderDialog(
                     onCreateFolder: onCreateFolder,
                   );
                 },
-                child: Text(isRename ? 'Save' : 'Create'),
+                child: Text(isRename ? AppStrings.save : AppStrings.create),
               ),
             ],
           );

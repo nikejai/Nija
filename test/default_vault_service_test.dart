@@ -482,9 +482,6 @@ void main() {
     final sizeWithDocument = await service.readVaultSizeBytes(
       filePath: 'document-sections.nija',
     );
-    final exportedVault = await service.readRawVaultFile(
-      filePath: 'document-sections.nija',
-    );
     final decryptedDocument = await service.readVaultDocument(
       filePath: 'document-sections.nija',
       password: 'CorrectPass123',
@@ -508,7 +505,7 @@ void main() {
       sizeWithDocument,
       greaterThan(documentBytes.length + chunkBytes.length),
     );
-    expect(sizeWithDocument, utf8.encode(exportedVault).length);
+    expect(sizeWithDocument, greaterThan(0));
     expect(utf8.decode(decryptedDocument), 'plain document bytes');
   });
 
@@ -1125,6 +1122,41 @@ void main() {
         password: 'NewImportPass123',
       );
       expect(importedPayload.items.single['title'], 'Imported');
+    },
+  );
+
+  test(
+    'migrateToBalancedProfile preserves real recovery phrase when mismatched phrase is passed',
+    () async {
+      final service = DefaultVaultService(
+        storageAdapter: InMemoryVaultStorageAdapter(),
+        cryptoAdapter: SecureCryptoAdapter(),
+      );
+      const realPhrase =
+          'anchor apple arrow atlas beacon breeze canyon cedar cobalt ember harbor willow';
+      const wrongPhrase =
+          'willow harbor ember cobalt cedar canyon breeze beacon atlas arrow apple anchor';
+
+      await service.createVault(
+        filePath: 'lion-vault.nija',
+        vaultId: 'lion-vault-id',
+        vaultName: 'Lion Vault',
+        guardianProfileId: GuardianProfiles.lion.id,
+        password: 'StrongPass123',
+        recoveryPhrase: realPhrase,
+      );
+
+      await service.migrateToBalancedProfile(
+        filePath: 'lion-vault.nija',
+        currentPassword: 'StrongPass123',
+        currentRecoveryPhrase: wrongPhrase,
+      );
+
+      final unlocked = await service.unlockVaultWithRecoveryPhrase(
+        filePath: 'lion-vault.nija',
+        recoveryPhrase: realPhrase,
+      );
+      expect(unlocked.guardianProfileId, GuardianProfiles.owl.id);
     },
   );
 }

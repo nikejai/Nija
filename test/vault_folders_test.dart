@@ -1176,6 +1176,64 @@ void main() {
       expect(find.byKey(const ValueKey('explorer-selection-header')), findsNothing);
     });
 
+    testWidgets('moving items displays the move progress dialog with progress bar and count', (tester) async {
+      final item1 = {
+        'id': 'item-doc-1',
+        'title': 'Passport Scan',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final item2 = {
+        'id': 'item-doc-2',
+        'title': 'Tax Return 2025',
+        'type': 'Document',
+        'folderId': 'f1',
+      };
+      final folder1 = VaultFolder(
+        id: 'f1',
+        name: 'Finance',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+      final folder2 = VaultFolder(
+        id: 'f2',
+        name: 'Archive',
+        createdAt: '2026-11-15T10:00:00Z',
+        updatedAt: '2026-11-15T10:00:00Z',
+      );
+
+      await tester.pumpWidget(buildTestFoldersView(
+        folders: [folder1, folder2],
+        items: [item1, item2],
+        onMoveItems: (items, target) {},
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Finance'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('explorer-multi-select-toggle')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Passport Scan'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Tax Return 2025'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('explorer-selection-move')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Archive'));
+      // Step into dialog presentation
+      await tester.pump();
+      expect(find.byKey(const ValueKey('folder-move-progress-dialog')), findsOneWidget);
+      expect(find.byKey(const ValueKey('folder-move-progress-bar')), findsOneWidget);
+      expect(find.textContaining('Moving to Archive'), findsOneWidget);
+
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('folder-move-progress-dialog')), findsNothing);
+    });
+
     testWidgets('multi-selection joint copy: copies multiple items to selected folder', (tester) async {
       final item1 = {
         'id': 'item-doc-1',
